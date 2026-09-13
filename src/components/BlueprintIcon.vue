@@ -1,9 +1,19 @@
 <template>
-    <svg class="bp-icon" viewBox="-50 -50 100 100" xmlns="http://www.w3.org/2000/svg">
+    <svg class="bp-icon" :class="{ editable: props.editable }" viewBox="-50 -50 100 100" xmlns="http://www.w3.org/2000/svg">
         <template v-if="iconUrls">
             <template v-for="(l, i) of layout" :key="i">
-            <image v-if="iconUrls[i] !== null" :x="l.x" :y="l.y" :width="l.w" :height="l.w"
-                   :href="iconUrls[i]!"/>
+                <g v-if="props.editable" class="icon-slot" @click="emit('edit', i)">
+                    <image v-if="iconUrls[i] !== null" :x="l.x" :y="l.y" :width="l.w" :height="l.w"
+                           :href="iconUrls[i]!"/>
+                    <rect v-else class="icon-slot-empty"
+                          :x="l.x + 1" :y="l.y + 1" :width="l.w - 2" :height="l.w - 2" rx="3"/>
+                    <text v-if="iconUrls[i] === null" class="icon-slot-plus"
+                          :x="l.x + l.w / 2" :y="l.y + l.w / 2 + 1"
+                          text-anchor="middle" dominant-baseline="central">+</text>
+                    <rect class="icon-slot-hit" :x="l.x" :y="l.y" :width="l.w" :height="l.w"/>
+                </g>
+                <image v-else-if="iconUrls[i] !== null" :x="l.x" :y="l.y" :width="l.w" :height="l.w"
+                       :href="iconUrls[i]!"/>
             </template>
         </template>
     </svg>
@@ -44,6 +54,11 @@ import { computed, ref, watchEffect } from 'vue';
 const props = defineProps<{
     layoutId: number,
     icons?: number[],
+    editable?: boolean,
+}>();
+
+const emit = defineEmits<{
+    (event: 'edit', index: number): void,
 }>();
 
 const layout = computed(() =>  allLayouts.get(props.layoutId) ?? []);
@@ -60,5 +75,32 @@ watchEffect(async () => {
 <style>
 .bp-icon {
     background: linear-gradient(to right bottom, #5F9DFA, #547ACF);
+
+    &.editable .icon-slot {
+        cursor: pointer;
+    }
+
+    .icon-slot-empty {
+        fill: rgba(255, 255, 255, 0.18);
+        stroke: rgba(255, 255, 255, 0.75);
+        stroke-width: 1;
+        stroke-dasharray: 3 2;
+    }
+
+    .icon-slot-plus {
+        fill: white;
+        font-size: 22px;
+        font-weight: bold;
+        pointer-events: none;
+    }
+
+    .icon-slot-hit {
+        fill: transparent;
+        pointer-events: all;
+    }
+
+    &.editable .icon-slot:hover .icon-slot-hit {
+        fill: rgba(255, 255, 255, 0.25);
+    }
 }
 </style>
