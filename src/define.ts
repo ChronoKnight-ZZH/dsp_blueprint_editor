@@ -9,6 +9,6 @@ declare const VERSION: string;
 
 export const version = VERSION;
 
-export const rendererKey = Symbol() as InjectionKey<Ref<InstanceType<typeof BlueprintEditor>>>
+export const rendererKey = Symbol() as InjectionKey<Ref<InstanceType<typeof BlueprintEditor> | null>>
 export const buildingInfoKey = Symbol() as InjectionKey<Ref<BuildingInfo | null>>
 export const commandQueueKey = Symbol() as InjectionKey<Ref<CommandQueue | null>>

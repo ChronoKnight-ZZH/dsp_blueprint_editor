@@ -38,7 +38,7 @@ const props = defineProps<{
     building: BlueprintBuilding,
 }>();
 
-const mainRenderer = inject(rendererKey)!.value;
+const mainRenderer = inject(rendererKey)!.value!;
 const buildingInfo = inject(buildingInfoKey)!.value!;
 
 const adjacency = computed(() => {

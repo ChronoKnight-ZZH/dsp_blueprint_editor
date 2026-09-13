@@ -20,6 +20,7 @@ import { IconSubscript } from '@/iconSubscript';
 import { Cargos } from '@/cargos';
 import { BVH } from '@/bvh';
 import { Updater } from '@/command';
+import { RemoveBuildingCommand } from '@/blueprint/removeBuilding';
 import { commandQueueKey } from '@/define';
 
 function buildPlanetGrid(radius = 1, segment = 200) {
@@ -444,6 +445,8 @@ attachCamera(root, camera);
 const commandQueue = inject(commandQueueKey)!;
 
 const b = computed(() => {
+	// 任意命令（剔除建筑 / 撤销 / 重做）后整体重建场景
+	commandQueue.value?.execVersion.value;
 	if (!commandQueue.value)
 		return null;
     const d = commandQueue.value.data;
@@ -500,30 +503,55 @@ onMounted(() => {
 	const ray = new Ray();
 	const planetSphere = new Sphere(new Vector3(), R);
 	const v = new Vector3();
+	const pickBuilding = (e: MouseEvent) => {
+		if (b.value === null)
+			return null;
+		ray.origin.setFromMatrixPosition(camera.matrixWorld);
+		const rect = renderer.domElement.getBoundingClientRect();
+		ray.direction.x = ((e.clientX - rect.left) / rect.width ) * 2 - 1;
+		ray.direction.y = -((e.clientY - rect.top) / rect.height ) * 2 + 1;
+		ray.direction.z = .5;
+		ray.direction.unproject(camera).sub(ray.origin).normalize();
+		const intersects = b.value.bvh.raycast(ray)
+		if (intersects.length === 0)
+			return null;
+
+		const intersectPlanet = ray.intersectSphere(planetSphere, v);
+		if (intersectPlanet !== null && intersectPlanet.distanceToSquared(ray.origin) < intersects[0].distanceSquared)
+			intersects.length = 0;
+
+		return intersects.length === 0 ? null : intersects[0].index
+	}
 	const onClick = (e: MouseEvent) => {
-		const pick = () => {
-			if (b.value === null)
-				return null;
-			ray.origin.setFromMatrixPosition(camera.matrixWorld);
-			const rect = renderer.domElement.getBoundingClientRect();
-			ray.direction.x = ((e.clientX - rect.left) / rect.width ) * 2 - 1;
-			ray.direction.y = -((e.clientY - rect.top) / rect.height ) * 2 + 1;
-			ray.direction.z = .5;
-			ray.direction.unproject(camera).sub(ray.origin).normalize();
-			const intersects = b.value.bvh.raycast(ray)
-			if (intersects.length === 0)
-				return null;
-
-			const intersectPlanet = ray.intersectSphere(planetSphere, v);
-			if (intersectPlanet !== null && intersectPlanet.distanceToSquared(ray.origin) < intersects[0].distanceSquared)
-				intersects.length = 0;
-
-			return intersects.length === 0 ? null : intersects[0].index
-		}
-		emit('update:selectedBuildingIndex', pick());
+		emit('update:selectedBuildingIndex', pickBuilding(e));
 	}
 	renderer.domElement.addEventListener('click', onClick);
 	onUnmounted(() => renderer.domElement.removeEventListener('click', onClick));
+
+	// 右键点击剔除建筑：记录右键按下位置，避免把右键拖拽误判为点击
+	let rightDownPos: {x: number, y: number} | null = null;
+	const onMouseDown = (e: MouseEvent) => {
+		if (e.button === 2)
+			rightDownPos = { x: e.clientX, y: e.clientY };
+	}
+	const onContextMenu = (e: MouseEvent) => {
+		e.preventDefault();
+		if (rightDownPos !== null
+			&& Math.hypot(e.clientX - rightDownPos.x, e.clientY - rightDownPos.y) > 6)
+			return;
+		const index = pickBuilding(e);
+		if (index === null)
+			return;
+		const queue = commandQueue.value;
+		if (!queue)
+			return;
+		queue.push(new RemoveBuildingCommand(index, queue.data));
+		emit('update:selectedBuildingIndex', null);
+	}
+	renderer.domElement.addEventListener('mousedown', onMouseDown);
+	renderer.domElement.addEventListener('contextmenu', onContextMenu);
+	onUnmounted(() => renderer.domElement.removeEventListener('mousedown', onMouseDown));
+	onUnmounted(() => renderer.domElement.removeEventListener('contextmenu', onContextMenu));
 
 	let mounted = true;
 	onUnmounted(() => { mounted = false; });
