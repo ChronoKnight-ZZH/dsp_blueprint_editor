@@ -25,9 +25,11 @@
                             :value="data?.header.shortDesc"
                             @input="e => data!.header.shortDesc = (e.target as HTMLInputElement).value">
                     </div>
-                    <BlueprintIcon style="height: 90px; flex: none;" :layout-id="iconLayout" :icons="data?.header.icons"/>
+                    <BlueprintIcon style="height: 90px; flex: none;" :layout-id="iconLayout" :icons="data?.header.icons"
+                        editable @edit="editHeaderIcon"/>
+                    <IconPickerModal ref="iconPickerModal" @select="setHeaderIcon"/>
                 </section>
-                <section v-if="data?.version === 2">
+                <section v-if="data">
                     <div class="row" style="column-gap: 5px;">
                         <div style="flex: 1;">
                             <label for="author">{{t('作者')}}</label>
@@ -42,11 +44,21 @@
                                 @input="e => data!.header.blueprintVersion = (e.target as HTMLInputElement).value">
                         </div>
                     </div>
-                    <label for="properties">{{t('蓝图属性')}}</label>
-                    <textarea rows="2" id="properties"
-                            :value="data.header.properties"
-                            @input="e => data!.header.properties = (e.target as HTMLInputElement).value"
-                    ></textarea>
+                    <label>{{t('蓝图属性')}}</label>
+                    <div class="properties-list">
+                        <div v-if="propertyPairs.length === 0" class="properties-empty">{{ t('暂无属性') }}</div>
+                        <div v-for="(p, i) in propertyPairs" :key="i" class="property-row">
+                            <input type="text" class="prop-name"
+                                :value="p.name" :placeholder="t('属性名称')"
+                                @input="e => updateProperty(i, 'name', (e.target as HTMLInputElement).value)">
+                            <span class="prop-sep">:</span>
+                            <input type="text" class="prop-value"
+                                :value="p.value" :placeholder="t('属性内容')"
+                                @input="e => updateProperty(i, 'value', (e.target as HTMLInputElement).value)">
+                            <button type="button" class="prop-del" :title="t('删除属性')" @click="removeProperty(i)">×</button>
+                        </div>
+                        <button type="button" class="prop-add" @click="addProperty">+ {{ t('添加属性') }}</button>
+                    </div>
                 </section>
                 <section>
                     <label for="desc">{{t('蓝图介绍')}}</label>
@@ -151,17 +163,21 @@ import { BuildingInfo } from './blueprint/buildingInfo';
 import BuildingInfoPanel from './components/BuildingInfoPanel.vue';
 import SWStatus from '@/swStatus.vue';
 import BlueprintIcon from './components/BlueprintIcon.vue';
+import IconPickerModal from './components/IconPickerModal.vue';
 import ReplaceModal from './components/ReplaceModal.vue';
 import { CommandQueue } from './command';
 import BuildingOverview from './components/BuildingOverview.vue';
 import { useLang } from './i18n';
+// 仅用于类型标注，编译时擦除，不影响 defineAsyncComponent 的异步分包
+import type BlueprintEditorImpl from './components/BlueprintEditor.vue';
 const BlueprintEditor = defineAsyncComponent(() => import(/* webpackChunkName: "renderer" */'./components/BlueprintEditor.vue'));
 
 const { t } = useI18n();
 const lang = useLang();
 
-const renderer = ref<null | InstanceType<typeof BlueprintEditor>>(null);
+const renderer = ref<null | InstanceType<typeof BlueprintEditorImpl>>(null);
 const replaceModal = ref<null | InstanceType<typeof ReplaceModal>>(null);
+const iconPickerModal = ref<null | InstanceType<typeof IconPickerModal>>(null);
 provide(rendererKey, renderer);
 
 const bpStr = ref('');
@@ -217,6 +233,53 @@ const iconLayout = computed<number>({
     get() { return data.value?.header.layout ?? 0; },
     set(v) { data.value!.header.layout = v; },
 })
+
+const editingIconSlot = ref<number | null>(null);
+const editHeaderIcon = (index: number) => {
+    if (!data.value)
+        return;
+    editingIconSlot.value = index;
+    iconPickerModal.value?.open();
+}
+const setHeaderIcon = (iconId: number) => {
+    if (data.value && editingIconSlot.value !== null)
+        data.value.header.icons[editingIconSlot.value] = iconId;
+    editingIconSlot.value = null;
+}
+
+/** 将 properties 原始字符串解析为 [{ name, value }] 列表 */
+const propertyPairs = computed<{ name: string; value: string }[]>(() => {
+    const raw = data.value?.header.properties ?? '';
+    if (!raw) return [];
+    return raw.split(';')
+        .map(s => s.trim())
+        .filter(s => s.length > 0)
+        .map(s => {
+            const idx = s.indexOf(':');
+            if (idx < 0) return { name: s, value: '' };
+            return { name: s.substring(0, idx), value: s.substring(idx + 1) };
+        });
+});
+
+const rebuildProperties = (pairs: { name: string; value: string }[]) => {
+    data.value!.header.properties = pairs.map(p => `${p.name}:${p.value};`).join('');
+};
+
+const updateProperty = (index: number, field: 'name' | 'value', val: string) => {
+    const pairs = propertyPairs.value.map(p => ({ ...p }));
+    pairs[index][field] = val;
+    rebuildProperties(pairs);
+};
+
+const addProperty = () => {
+    const pairs = [...propertyPairs.value, { name: '', value: '' }];
+    rebuildProperties(pairs);
+};
+
+const removeProperty = (index: number) => {
+    const pairs = propertyPairs.value.filter((_, i) => i !== index);
+    rebuildProperties(pairs);
+};
 
 const encodeBp = () => {
     if (!codeExpired.value || !data.value)
@@ -481,6 +544,93 @@ body {
         }
     }
 
+    .properties-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-top: 4px;
+    }
+
+    .properties-empty {
+        border: 1px dashed rgba(255, 255, 255, 0.22);
+        border-radius: 4px;
+        padding: 8px 6px;
+        text-align: center;
+        font-size: 0.82rem;
+        color: rgba(255, 255, 255, 0.42);
+        user-select: none;
+    }
+
+    .property-row {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 4px;
+        padding: 3px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 4px;
+        transition: border-color 0.15s, background 0.15s;
+
+        &:hover {
+            border-color: rgba(100, 160, 220, 0.55);
+        }
+
+        &:focus-within {
+            border-color: #64a0dc;
+            background: rgba(100, 160, 220, 0.10);
+        }
+    }
+
+    .property-row .prop-name,
+    .property-row .prop-value {
+        flex: 1 1 40%;
+        min-width: 0;
+        padding: 2px 5px;
+        border-radius: 3px;
+        background: rgba(0, 0, 0, 0.28);
+    }
+
+    .property-row .prop-sep {
+        flex: none;
+        opacity: 0.55;
+        font-weight: bold;
+    }
+
+    .property-row .prop-del {
+        flex: none;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        line-height: 1;
+        font-size: 14px;
+        border-radius: 50%;
+        background: rgba(192, 57, 43, 0.28);
+        color: #ff8d7d;
+        transition: background 0.15s, color 0.15s;
+
+        &:hover {
+            background: #c0392b;
+            color: #fff;
+        }
+    }
+
+    .prop-add {
+        margin-top: 1px;
+        padding: 4px;
+        border: 1px dashed rgba(255, 255, 255, 0.38);
+        border-radius: 4px;
+        background: rgba(39, 174, 96, 0.14);
+        color: #77dd9f;
+        transition: background 0.15s, color 0.15s, border-color 0.15s;
+
+        &:hover {
+            background: #27ae60;
+            border-color: #27ae60;
+            color: #fff;
+        }
+    }
+
     .bp-code {
         word-break: break-all;
     }
@@ -538,7 +688,12 @@ ul.operations {
         "批量替换": "批量替换",
         "撤销": "撤销",
         "重做": "重做",
-        "自动选择语言": "自动选择"
+        "自动选择语言": "自动选择",
+        "添加属性": "添加属性",
+        "属性名称": "属性名称",
+        "属性内容": "属性内容",
+        "暂无属性": "暂无属性，点击下方按钮添加",
+        "删除属性": "删除属性"
     },
     en: {
         "复制": "Copy",
@@ -551,7 +706,12 @@ ul.operations {
         "批量替换": "Batch Replace",
         "撤销": "Undo",
         "重做": "Redo",
-        "自动选择语言": "Auto Select"
+        "自动选择语言": "Auto Select",
+        "添加属性": "Add Property",
+        "属性名称": "Property Name",
+        "属性内容": "Property Value",
+        "暂无属性": "No properties yet, click below to add",
+        "删除属性": "Delete Property"
     },
 }
 </i18n>
