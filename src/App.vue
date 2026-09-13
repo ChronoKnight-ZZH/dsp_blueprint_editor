@@ -27,6 +27,27 @@
                     </div>
                     <BlueprintIcon style="height: 90px; flex: none;" :layout-id="iconLayout" :icons="data?.header.icons"/>
                 </section>
+                <section v-if="data?.version === 2">
+                    <div class="row" style="column-gap: 5px;">
+                        <div style="flex: 1;">
+                            <label for="author">{{t('作者')}}</label>
+                            <input type="text" id="author"
+                                :value="data.header.author"
+                                @input="e => data!.header.author = (e.target as HTMLInputElement).value">
+                        </div>
+                        <div style="flex: 1;">
+                            <label for="bpVersion">{{t('蓝图版本')}}</label>
+                            <input type="text" id="bpVersion"
+                                :value="data.header.blueprintVersion"
+                                @input="e => data!.header.blueprintVersion = (e.target as HTMLInputElement).value">
+                        </div>
+                    </div>
+                    <label for="properties">{{t('蓝图属性')}}</label>
+                    <textarea rows="2" id="properties"
+                            :value="data.header.properties"
+                            @input="e => data!.header.properties = (e.target as HTMLInputElement).value"
+                    ></textarea>
+                </section>
                 <section>
                     <label for="desc">{{t('蓝图介绍')}}</label>
                     <textarea rows="2" id="desc" :disabled="!data"
@@ -247,9 +268,11 @@ const parseBp = (s: string) => {
             data.value.header = reactive(data.value.header);
             parseErrorMessage.value = '';
             watch(data.value, () => codeExpired.value = true);
-            gtag('event', 'bp_parse', {
-                'bp_length': s.length,
-            })
+            if (typeof gtag !== 'undefined') {
+                gtag('event', 'bp_parse', {
+                    'bp_length': s.length,
+                })
+            }
         } catch (e) {
             parseErrorMessage.value = String(e);
             console.error(e);

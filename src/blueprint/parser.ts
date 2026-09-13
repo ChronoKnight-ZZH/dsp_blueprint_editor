@@ -39,6 +39,10 @@ export interface BlueprintBuilding {
     recipeId: number,
     filterId: number,
     parameters: null | AllParameters,
+    /** v2 body：分拣器(2011-2014)在 yaw/tilt 之后附带的 7 个 float，语义未完全明确，字节级原样保留 */
+    v2ExtraPose?: number[],
+    /** v2 body：参数段之后的不透明扩展字节（通常为 4 字节 0，少数传送带/四向为 9 字节） */
+    extraBytes?: Uint8Array,
 }
 
 export interface BlueprintData {
@@ -48,6 +52,12 @@ export interface BlueprintData {
         time: Date;
         gameVersion: string;
         shortDesc: string;
+        /** v2 头部新增：作者（旧蓝图为空字符串） */
+        author: string;
+        /** v2 头部新增：蓝图版本 */
+        blueprintVersion: string;
+        /** v2 头部新增：属性，原始字符串，形如 "名称:内容;名称:内容;" */
+        properties: string;
         desc: string;
     };
     version: number;
@@ -77,6 +87,14 @@ class BufferReader extends BufferIO {
     getInt32() { const v = this.view.getInt32(this.pos, true); this.pos += 4; return v }
 
     getFloat32() { const v = this.view.getFloat32(this.pos, true); this.pos += 4; return v }
+
+    get position() { return this.pos; }
+
+    getBytes(length: number) {
+        const start = this.view.byteOffset + this.pos;
+        this.pos += length;
+        return new Uint8Array(this.view.buffer.slice(start, start + length));
+    }
 }
 
 class BufferWriter extends BufferIO {
@@ -86,6 +104,12 @@ class BufferWriter extends BufferIO {
     setInt32(value: number) { this.view.setInt32(this.pos, value, true); this.pos += 4; }
 
     setFloat32(value: number) { this.view.setFloat32(this.pos, value, true); this.pos += 4; }
+
+    setBytes(bytes: Uint8Array) {
+        const start = this.view.byteOffset + this.pos;
+        new Uint8Array(this.view.buffer).set(bytes, start);
+        this.pos += bytes.length;
+    }
 }
 
 function btoUint8Array(b: string) {
@@ -146,7 +170,7 @@ function exportArea(w: BufferWriter, area: BlueprintArea) {
 }
 
 interface ParamParser<TParam extends AllParameters> {
-    encodedSize(p: TParam): number;
+    encodedSize(p: TParam, version?: number): number;
     encode(p: TParam, a: DataView): void;
     decode(a: DataView): TParam;
 }
@@ -315,18 +339,25 @@ function advancedMiningMachineParamParser(): ParamParser<AdvancedMiningMachinePa
 
 export interface SplitterParameters {
     priority: boolean[];
+    /** v2 body 在 4 个优先级布尔值之后新增的 2 个整型参数，语义未明确，字节级原样保留 */
+    extra: number[];
 }
 
 const splitterParamParser: ParamParser<SplitterParameters> = {
-    encodedSize() { return 4; },
+    encodedSize(_p, version = 1) { return version >= 2 ? 6 : 4; },
     encode(p, a) {
         for (let i = 0; i < 4; i++) {
             setParam(a, i, p.priority[i] ? 1 : 0);
+        }
+        if (a.byteLength >= 6 * Int32Array.BYTES_PER_ELEMENT) {
+            setParam(a, 4, p.extra?.[0] ?? 0);
+            setParam(a, 5, p.extra?.[1] ?? 0);
         }
     },
     decode(a) {
         const result: SplitterParameters = {
             priority: [],
+            extra: [getParam(a, 4, 0), getParam(a, 5, 0)],
         };
         for (let i = 0; i < 4; i++) {
             result.priority[i] = getParam(a, i) > 0;
@@ -836,6 +867,97 @@ function importBuilding(r: BufferReader): BlueprintBuilding {
     return b;
 }
 
+// ===== body version 2（游戏 0.10.34+）=====
+
+const V2_RECORD_MARKER = -102;
+const V2_BELT_ITEM_IDS = new Set([2001, 2002, 2003]);
+const V2_INSERTER_ITEM_IDS = new Set([2011, 2012, 2013, 2014]);
+const V2_DEFAULT_EXTRA = new Uint8Array([0, 0, 0, 0]);
+
+function isV2RecordMarkerAt(bytes: Uint8Array, off: number): boolean {
+    return off + 8 <= bytes.length
+        && bytes[off] === 0x9A
+        && bytes[off + 1] === 0xFF
+        && bytes[off + 2] === 0xFF
+        && bytes[off + 3] === 0xFF
+        // 随后的 index 为非负 int32（小端最高字节 < 0x80）
+        && bytes[off + 7] < 0x80;
+}
+
+function importBuildingV2(r: BufferReader, bytes: Uint8Array, bodyEnd: number): BlueprintBuilding {
+    function readXYZ(): XYZ {
+        return {
+            x: r.getFloat32(),
+            y: r.getFloat32(),
+            z: r.getFloat32(),
+        }
+    }
+    const marker = r.getInt32();
+    if (marker !== V2_RECORD_MARKER)
+        throw new Error('v2 建筑记录起始标记错误');
+    const index = r.getInt32();
+    const itemId = r.getInt16();
+    const modelIndex = r.getInt16();
+    const areaIndex = r.getInt8();
+    const p0 = readXYZ();
+    const yaw0 = r.getFloat32();
+    let tilt = 0.0;
+    let p1: XYZ = { ...p0 };
+    let yaw1 = yaw0;
+    let v2ExtraPose: number[] | undefined;
+    if (V2_BELT_ITEM_IDS.has(itemId) || V2_INSERTER_ITEM_IDS.has(itemId))
+        tilt = r.getFloat32();
+    if (V2_INSERTER_ITEM_IDS.has(itemId)) {
+        const pose: number[] = [];
+        for (let i = 0; i < 7; i++)
+            pose.push(r.getFloat32());
+        v2ExtraPose = pose;
+        p1 = { x: pose[0], y: pose[1], z: pose[2] };
+        yaw1 = pose[6];
+    }
+    const b: BlueprintBuilding = {
+        index,
+        areaIndex,
+        localOffset: [p0, p1],
+        yaw: [yaw0, yaw1],
+        tilt,
+        itemId,
+        modelIndex,
+        outputObjIdx: r.getInt32(),
+        inputObjIdx: r.getInt32(),
+        outputToSlot: r.getInt8(),
+        inputFromSlot: r.getInt8(),
+        outputFromSlot: r.getInt8(),
+        inputToSlot: r.getInt8(),
+        outputOffset: r.getInt8(),
+        inputOffset: r.getInt8(),
+        recipeId: r.getInt16(),
+        filterId: r.getInt16(),
+        parameters: null,
+    };
+    if (v2ExtraPose !== undefined)
+        b.v2ExtraPose = v2ExtraPose;
+    const length = r.getInt16();
+    if (length > 0) {
+        const p = r.getView(length * Int32Array.BYTES_PER_ELEMENT);
+        b.parameters = parserFor(itemId).decode(p);
+    }
+    // 参数段之后为不透明扩展字节：已知 4 字节（i32=0）或 9 字节
+    const pos = r.position;
+    let extLen: number;
+    if (pos === bodyEnd)
+        extLen = 0;
+    else if (pos + 4 === bodyEnd || isV2RecordMarkerAt(bytes, pos + 4))
+        extLen = 4;
+    else if (pos + 9 === bodyEnd || isV2RecordMarkerAt(bytes, pos + 9))
+        extLen = 9;
+    else
+        throw new Error('v2 建筑记录存在未知的尾部扩展');
+    if (extLen > 0)
+        b.extraBytes = r.getBytes(extLen);
+    return b;
+}
+
 function exportBuilding(w: BufferWriter, b: BlueprintBuilding) {
     function writeXYZ(v: {x: number, y: number, z: number}) {
         w.setFloat32(v.x);
@@ -869,6 +991,71 @@ function exportBuilding(w: BufferWriter, b: BlueprintBuilding) {
     }
 }
 
+function v2BuildingSize(b: BlueprintBuilding): number {
+    // marker4 + index4 + itemId2 + modelIndex2 + areaIndex1 + xyz/yaw 16
+    let result = 29;
+    if (V2_BELT_ITEM_IDS.has(b.itemId) || V2_INSERTER_ITEM_IDS.has(b.itemId))
+        result += 4; // tilt
+    if (V2_INSERTER_ITEM_IDS.has(b.itemId))
+        result += 7 * 4; // 不透明的第二姿态浮点
+    result += 20; // out/in 8 + slots 6 + recipe 2 + filter 2 + plen 2
+    if (b.parameters !== null)
+        result += parserFor(b.itemId).encodedSize(b.parameters, 2) * Int32Array.BYTES_PER_ELEMENT;
+    result += b.extraBytes !== undefined ? b.extraBytes.length : V2_DEFAULT_EXTRA.length;
+    return result;
+}
+
+function exportBuildingV2(w: BufferWriter, b: BlueprintBuilding) {
+    function writeXYZ(v: {x: number, y: number, z: number}) {
+        w.setFloat32(v.x);
+        w.setFloat32(v.y);
+        w.setFloat32(v.z);
+    }
+    w.setInt32(V2_RECORD_MARKER);
+    w.setInt32(b.index);
+    w.setInt16(b.itemId);
+    w.setInt16(b.modelIndex);
+    w.setInt8(b.areaIndex);
+    writeXYZ(b.localOffset[0]);
+    w.setFloat32(b.yaw[0]);
+    if (V2_BELT_ITEM_IDS.has(b.itemId) || V2_INSERTER_ITEM_IDS.has(b.itemId))
+        w.setFloat32(b.tilt);
+    if (V2_INSERTER_ITEM_IDS.has(b.itemId)) {
+        let pose = b.v2ExtraPose;
+        if (!pose || pose.length !== 7)
+            pose = [b.localOffset[1].x, b.localOffset[1].y, b.localOffset[1].z, 0, 0, 0, b.yaw[1]];
+        else {
+            pose = pose.slice();
+            pose[0] = b.localOffset[1].x;
+            pose[1] = b.localOffset[1].y;
+            pose[2] = b.localOffset[1].z;
+            pose[6] = b.yaw[1];
+        }
+        for (const f of pose)
+            w.setFloat32(f);
+    }
+    w.setInt32(b.outputObjIdx);
+    w.setInt32(b.inputObjIdx);
+    w.setInt8(b.outputToSlot);
+    w.setInt8(b.inputFromSlot);
+    w.setInt8(b.outputFromSlot);
+    w.setInt8(b.inputToSlot);
+    w.setInt8(b.outputOffset);
+    w.setInt8(b.inputOffset);
+    w.setInt16(b.recipeId);
+    w.setInt16(b.filterId);
+
+    if (b.parameters !== null) {
+        const parser = parserFor(b.itemId);
+        const length = parser.encodedSize(b.parameters, 2);
+        w.setInt16(length);
+        parser.encode(b.parameters, w.getView(length * Int32Array.BYTES_PER_ELEMENT));
+    } else {
+        w.setInt16(0);
+    }
+    w.setBytes(b.extraBytes !== undefined ? b.extraBytes : V2_DEFAULT_EXTRA);
+}
+
 const START = 'BLUEPRINT:';
 const TIME_BASE = new Date(0).setUTCFullYear(1);
 
@@ -878,7 +1065,9 @@ export function fromStr(strData: string): BlueprintData {
 
     const p1 = strData.indexOf('"', START.length);
     const cells = strData.substring(START.length, p1).split(',');
-    if (cells.length < 12)
+    // cells[0] 为头部格式标记：0=旧版 12 字段；1=新版 15 字段（短描述后增加作者/蓝图版本/属性）
+    const headerFormatV2 = cells[0] === '1';
+    if (headerFormatV2 ? cells.length < 15 : cells.length < 12)
         throw Error('Header too short');
     const header = {
         layout: parseInt(cells[1]),
@@ -886,7 +1075,10 @@ export function fromStr(strData: string): BlueprintData {
         time: new Date(TIME_BASE + parseInt(cells[8]) / 10000),
         gameVersion: cells[9],
         shortDesc: decodeURIComponent(cells[10]),
-        desc: decodeURIComponent(cells[11]),
+        author: headerFormatV2 ? decodeURIComponent(cells[11]) : '',
+        blueprintVersion: headerFormatV2 ? decodeURIComponent(cells[12]) : '',
+        properties: headerFormatV2 ? decodeURIComponent(cells[13]) : '',
+        desc: decodeURIComponent(headerFormatV2 ? cells[14] : cells[11]),
     }
 
     const p2 = strData.length - 33;
@@ -922,8 +1114,13 @@ export function fromStr(strData: string): BlueprintData {
 
     const numBuildings = reader.getInt32();
     const buildings: Array<BlueprintBuilding> = [];
-    for (let i = 0; i < numBuildings; i++)
-        buildings.push(importBuilding(reader));
+    if (meta.version >= 2) {
+        for (let i = 0; i < numBuildings; i++)
+            buildings.push(importBuildingV2(reader, decoded, decoded.length));
+    } else {
+        for (let i = 0; i < numBuildings; i++)
+            buildings.push(importBuilding(reader));
+    }
 
     return {
         header,
@@ -937,8 +1134,13 @@ function encodedSize(bp: BlueprintData): number {
     let result = 28 // meta
         + 1 // numAreas
         + 14 * bp.areas.length
-        + 4 // numBuildings
-        + 61 * bp.buildings.length;
+        + 4; // numBuildings
+    if (bp.version >= 2) {
+        for (const b of bp.buildings)
+            result += v2BuildingSize(b);
+        return result;
+    }
+    result += 61 * bp.buildings.length;
     for (const b of bp.buildings) {
         if (b.parameters === null)
             continue;
@@ -949,8 +1151,9 @@ function encodedSize(bp: BlueprintData): number {
 }
 
 export function toStr(bp: BlueprintData): string {
+    const headerFormatV2 = bp.version >= 2;
     let result = START;
-    result += '0,';
+    result += headerFormatV2 ? '1,' : '0,';
     result += bp.header.layout;
     result += ',';
     for (const i of bp.header.icons) {
@@ -963,6 +1166,14 @@ export function toStr(bp: BlueprintData): string {
     result += bp.header.gameVersion;
     result += ',';
     result += encodeURIComponent(bp.header.shortDesc);
+    if (headerFormatV2) {
+        result += ',';
+        result += encodeURIComponent(bp.header.author);
+        result += ',';
+        result += encodeURIComponent(bp.header.blueprintVersion);
+        result += ',';
+        result += encodeURIComponent(bp.header.properties);
+    }
     result += ',';
     result += encodeURIComponent(bp.header.desc);
     result += '"';
@@ -982,8 +1193,12 @@ export function toStr(bp: BlueprintData): string {
         exportArea(writer, a);
 
     writer.setInt32(bp.buildings.length);
-    for (const b of bp.buildings)
-        exportBuilding(writer, b);
+    for (const b of bp.buildings) {
+        if (bp.version >= 2)
+            exportBuildingV2(writer, b);
+        else
+            exportBuilding(writer, b);
+    }
 
     result += btoa(Uint8ArrayTob(pako.gzip(decoded)));
     const d = hex(digest(btoUint8Array(result).buffer));
