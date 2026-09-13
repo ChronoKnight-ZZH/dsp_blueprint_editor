@@ -74,6 +74,10 @@ abstract class BufferIO {
     constructor(protected view: DataView) { }
 
     getView(length: number) {
+        if (length < 0 || this.pos + length > this.view.byteLength)
+            throw new Error(
+                `蓝图数据读取越界：位置 ${this.pos}，请求 ${length} 字节，`
+                + `剩余 ${this.view.byteLength - this.pos} 字节`);
         const r = new DataView(this.view.buffer, this.view.byteOffset + this.pos, length);
         this.pos += length;
         return r;
@@ -81,16 +85,23 @@ abstract class BufferIO {
 }
 
 class BufferReader extends BufferIO {
-    getUint8() { const v = this.view.getUint8(this.pos);       this.pos += 1; return v }
-    getInt8()  { const v = this.view.getInt8(this.pos);        this.pos += 1; return v }
-    getInt16() { const v = this.view.getInt16(this.pos, true); this.pos += 2; return v }
-    getInt32() { const v = this.view.getInt32(this.pos, true); this.pos += 4; return v }
+    private check(n: number) {
+        if (this.pos + n > this.view.byteLength)
+            throw new Error(
+                `蓝图数据读取越界：位置 ${this.pos}，请求 ${n} 字节，`
+                + `剩余 ${this.view.byteLength - this.pos} 字节`);
+    }
+    getUint8() { this.check(1); const v = this.view.getUint8(this.pos);       this.pos += 1; return v }
+    getInt8()  { this.check(1); const v = this.view.getInt8(this.pos);        this.pos += 1; return v }
+    getInt16() { this.check(2); const v = this.view.getInt16(this.pos, true); this.pos += 2; return v }
+    getInt32() { this.check(4); const v = this.view.getInt32(this.pos, true); this.pos += 4; return v }
 
-    getFloat32() { const v = this.view.getFloat32(this.pos, true); this.pos += 4; return v }
+    getFloat32() { this.check(4); const v = this.view.getFloat32(this.pos, true); this.pos += 4; return v }
 
     get position() { return this.pos; }
 
     getBytes(length: number) {
+        this.check(length);
         const start = this.view.byteOffset + this.pos;
         this.pos += length;
         return new Uint8Array(this.view.buffer.slice(start, start + length));
@@ -869,19 +880,21 @@ function importBuilding(r: BufferReader): BlueprintBuilding {
 
 // ===== body version 2（游戏 0.10.34+）=====
 
-const V2_RECORD_MARKER = -102;
+const V2_RECORD_MARKER = -102;          // 导出时使用的记录起始标记（0.10.34 格式）
+const V2_RECORD_MARKER_MIN = -100;      // 导入时接受的标记下限（0.10.33 用 -101，0.10.34 用 -102）
 const V2_BELT_ITEM_IDS = new Set([2001, 2002, 2003]);
 const V2_INSERTER_ITEM_IDS = new Set([2011, 2012, 2013, 2014]);
 const V2_DEFAULT_EXTRA = new Uint8Array([0, 0, 0, 0]);
 
 function isV2RecordMarkerAt(bytes: Uint8Array, off: number): boolean {
-    return off + 8 <= bytes.length
-        && bytes[off] === 0x9A
-        && bytes[off + 1] === 0xFF
-        && bytes[off + 2] === 0xFF
-        && bytes[off + 3] === 0xFF
-        // 随后的 index 为非负 int32（小端最高字节 < 0x80）
-        && bytes[off + 7] < 0x80;
+    if (off + 8 > bytes.length)
+        return false;
+    // 小端 int32：值 <= -100 即视为记录起始标记
+    const marker = bytes[off] | (bytes[off + 1] << 8) | (bytes[off + 2] << 16) | (bytes[off + 3] << 24);
+    if (marker > V2_RECORD_MARKER_MIN)
+        return false;
+    // 随后的 index 为非负 int32（小端最高字节 < 0x80）
+    return bytes[off + 7] < 0x80;
 }
 
 function importBuildingV2(r: BufferReader, bytes: Uint8Array, bodyEnd: number): BlueprintBuilding {
@@ -893,7 +906,7 @@ function importBuildingV2(r: BufferReader, bytes: Uint8Array, bodyEnd: number): 
         }
     }
     const marker = r.getInt32();
-    if (marker !== V2_RECORD_MARKER)
+    if (marker > V2_RECORD_MARKER_MIN)
         throw new Error('v2 建筑记录起始标记错误');
     const index = r.getInt32();
     const itemId = r.getInt16();
@@ -912,7 +925,9 @@ function importBuildingV2(r: BufferReader, bytes: Uint8Array, bodyEnd: number): 
         for (let i = 0; i < 7; i++)
             pose.push(r.getFloat32());
         v2ExtraPose = pose;
-        p1 = { x: pose[0], y: pose[1], z: pose[2] };
+        // 7 个浮点结构：[reserved, tip.x, tip.y, tip.z, rot.x, rot.y, tip.yaw]
+        // 分拣器第二端（尖端）位置位于索引 1..3
+        p1 = { x: pose[1], y: pose[2], z: pose[3] };
         yaw1 = pose[6];
     }
     const b: BlueprintBuilding = {
@@ -942,15 +957,21 @@ function importBuildingV2(r: BufferReader, bytes: Uint8Array, bodyEnd: number): 
         const p = r.getView(length * Int32Array.BYTES_PER_ELEMENT);
         b.parameters = parserFor(itemId).decode(p);
     }
-    // 参数段之后为不透明扩展字节：已知 4 字节（i32=0）或 9 字节
+    // 参数段之后为不透明扩展字节：已知 0 字节（0.10.33）、4 字节（i32=0）或 9 字节
     const pos = r.position;
     let extLen: number;
     if (pos === bodyEnd)
         extLen = 0;
+    else if (isV2RecordMarkerAt(bytes, pos))
+        extLen = 0; // 0.10.33 等早期 v2 版本无扩展字段，下一记录标记紧跟参数段
     else if (pos + 4 === bodyEnd || isV2RecordMarkerAt(bytes, pos + 4))
         extLen = 4;
     else if (pos + 9 === bodyEnd || isV2RecordMarkerAt(bytes, pos + 9))
         extLen = 9;
+    else if (bodyEnd - pos < 13)
+        // 剩余字节不足一条最小记录（marker4+index4+itemId2+modelIndex2+areaIndex1=13），
+        // 视为文件尾部的不透明数据（0.10.33 等版本可能存在尾部字段），全部消耗
+        extLen = bodyEnd - pos;
     else
         throw new Error('v2 建筑记录存在未知的尾部扩展');
     if (extLen > 0)
@@ -1023,12 +1044,12 @@ function exportBuildingV2(w: BufferWriter, b: BlueprintBuilding) {
     if (V2_INSERTER_ITEM_IDS.has(b.itemId)) {
         let pose = b.v2ExtraPose;
         if (!pose || pose.length !== 7)
-            pose = [b.localOffset[1].x, b.localOffset[1].y, b.localOffset[1].z, 0, 0, 0, b.yaw[1]];
+            pose = [0, b.localOffset[1].x, b.localOffset[1].y, b.localOffset[1].z, 0, 0, b.yaw[1]];
         else {
             pose = pose.slice();
-            pose[0] = b.localOffset[1].x;
-            pose[1] = b.localOffset[1].y;
-            pose[2] = b.localOffset[1].z;
+            pose[1] = b.localOffset[1].x;
+            pose[2] = b.localOffset[1].y;
+            pose[3] = b.localOffset[1].z;
             pose[6] = b.yaw[1];
         }
         for (const f of pose)
