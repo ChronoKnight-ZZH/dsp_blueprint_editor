@@ -3,7 +3,7 @@
         <BlueprintEditor ref="renderer"
             v-model:selectedBuildingIndex="selectedBuildingIndex"
             @update:selectedBuildingIndex="i => buildingFocused(i !== null)" />
-        <div class="sidebar" :class="{ expanded: expandSidebar }">
+        <div class="sidebar" :class="{ expanded: sidebarExpanded }">
             <div>
                 <div class="info-tab tab"
                     :class="{ active: activeTab === 'info'}"
@@ -25,7 +25,43 @@
                             :value="data?.header.shortDesc"
                             @input="e => data!.header.shortDesc = (e.target as HTMLInputElement).value">
                     </div>
-                    <BlueprintIcon style="height: 90px; flex: none;" :layout-id="iconLayout" :icons="data?.header.icons"/>
+                    <BlueprintIcon style="height: 90px; flex: none;" :layout-id="iconLayout" :icons="data?.header.icons"
+                        editable @edit="editHeaderIcon"/>
+                    <IconPickerModal ref="iconPickerModal" @select="setHeaderIcon"/>
+                </section>
+                <section v-if="data">
+                    <div class="row props-header">
+                        <div style="flex: 1;">
+                            <label for="author">{{t('作者')}}</label>
+                            <input type="text" id="author"
+                                :value="data.header.author"
+                                @input="e => data!.header.author = (e.target as HTMLInputElement).value">
+                        </div>
+                        <div style="flex: 1;">
+                            <label for="bpVersion">{{t('蓝图版本')}}</label>
+                            <input type="text" id="bpVersion"
+                                :value="data.header.blueprintVersion"
+                                @input="e => data!.header.blueprintVersion = (e.target as HTMLInputElement).value">
+                        </div>
+                        <button type="button" class="prop-add" :title="t('新建属性')" @click="addProperty">
+                            {{ t('新建属性') }}
+                        </button>
+                    </div>
+                    <div class="properties-list">
+                        <div v-for="(p, i) in propertyPairs" :key="i" class="property-item">
+                            <div class="property-name-row">
+                                <div class="prop-tag">
+                                    <input type="text" class="prop-name"
+                                        :value="p.name" :placeholder="t('新属性')"
+                                        @input="e => updateProperty(i, 'name', (e.target as HTMLInputElement).value)">
+                                </div>
+                                <button type="button" class="prop-del" :title="t('删除属性')" @click="removeProperty(i)">×</button>
+                            </div>
+                            <input type="text" class="prop-value"
+                                :value="p.value" :placeholder="t('属性内容')"
+                                @input="e => updateProperty(i, 'value', (e.target as HTMLInputElement).value)">
+                        </div>
+                    </div>
                 </section>
                 <section>
                     <label for="desc">{{t('蓝图介绍')}}</label>
@@ -72,7 +108,7 @@
                 </section>
                 <section>
                     <BuildingInfoPanel v-if="selectedBuilding !== null" :building="selectedBuilding" />
-                    <BuildingOverview v-else-if="data" />
+                    <BuildingOverview v-else-if="data" @remove-by-item="removeBuildingsByItem" />
                 </section>
             </div>
             <ul class="operations" v-else-if="activeTab === 'operations'">
@@ -115,8 +151,10 @@
                 {{ version }}<SWStatus />
             </footer>
         </div>
-        <button class="expand-btn" :class="{ expanded: expandSidebar }"
-                @click="expandSidebar = !expandSidebar" ></button>
+        <button class="expand-btn" :class="{ expanded: sidebarExpanded, pinned: pinned }"
+                @click="toggleSidebar" ></button>
+        <button class="pin-btn" :class="{ active: pinned }"
+                :title="t('固定面板')" @click="togglePin" ></button>
     </div>
 </template>
 
@@ -126,26 +164,44 @@ import { useI18n } from 'vue-i18n';
 import { BlueprintData, fromStr, toStr } from '@/blueprint/parser';
 import { version, rendererKey, buildingInfoKey, commandQueueKey } from '@/define';
 import { BuildingInfo } from './blueprint/buildingInfo';
+import { RemoveBuildingsByItemCommand } from './blueprint/removeBuilding';
 
 import BuildingInfoPanel from './components/BuildingInfoPanel.vue';
 import SWStatus from '@/swStatus.vue';
 import BlueprintIcon from './components/BlueprintIcon.vue';
+import IconPickerModal from './components/IconPickerModal.vue';
 import ReplaceModal from './components/ReplaceModal.vue';
 import { CommandQueue } from './command';
 import BuildingOverview from './components/BuildingOverview.vue';
 import { useLang } from './i18n';
+// 仅用于类型标注，编译时擦除，不影响 defineAsyncComponent 的异步分包
+import type BlueprintEditorImpl from './components/BlueprintEditor.vue';
 const BlueprintEditor = defineAsyncComponent(() => import(/* webpackChunkName: "renderer" */'./components/BlueprintEditor.vue'));
 
 const { t } = useI18n();
 const lang = useLang();
 
-const renderer = ref<null | InstanceType<typeof BlueprintEditor>>(null);
+const renderer = ref<null | InstanceType<typeof BlueprintEditorImpl>>(null);
 const replaceModal = ref<null | InstanceType<typeof ReplaceModal>>(null);
+const iconPickerModal = ref<null | InstanceType<typeof IconPickerModal>>(null);
 provide(rendererKey, renderer);
 
 const bpStr = ref('');
 const data = shallowRef(null as BlueprintData | null);
 const expandSidebar = ref(true);
+const pinned = ref(false);
+const sidebarExpanded = computed(() => expandSidebar.value || pinned.value);
+const toggleSidebar = () => {
+    // 固定后面板保持常显，点击开关不能隐藏
+    if (pinned.value)
+        return;
+    expandSidebar.value = !expandSidebar.value;
+}
+const togglePin = () => {
+    pinned.value = !pinned.value;
+    if (pinned.value)
+        expandSidebar.value = true;
+}
 const activeTab = ref<'info' | 'operations'>('info')
 const working = ref(false);
 const codeExpired = ref(false);
@@ -167,9 +223,20 @@ watchEffect(onCleanup => {
 });
 
 const buildingFocused = (selected: boolean) => {
-    expandSidebar.value = selected;
+    // 固定状态下取消选择不会收起面板
+    if (selected || !pinned.value)
+        expandSidebar.value = selected;
     if (selected)
         activeTab.value = 'info';
+}
+
+// 右键列表图标：一键剔除全部同 itemId 建筑（支持撤销/重做）
+const removeBuildingsByItem = (itemId: number) => {
+    const queue = commandQueue.value;
+    if (!queue)
+        return;
+    queue.push(new RemoveBuildingsByItemCommand(itemId, queue.data));
+    selectedBuildingIndex.value = null;
 }
 
 const selectedBuilding = computed(() => {
@@ -196,6 +263,53 @@ const iconLayout = computed<number>({
     get() { return data.value?.header.layout ?? 0; },
     set(v) { data.value!.header.layout = v; },
 })
+
+const editingIconSlot = ref<number | null>(null);
+const editHeaderIcon = (index: number) => {
+    if (!data.value)
+        return;
+    editingIconSlot.value = index;
+    iconPickerModal.value?.open();
+}
+const setHeaderIcon = (iconId: number) => {
+    if (data.value && editingIconSlot.value !== null)
+        data.value.header.icons[editingIconSlot.value] = iconId;
+    editingIconSlot.value = null;
+}
+
+/** 将 properties 原始字符串解析为 [{ name, value }] 列表 */
+const propertyPairs = computed<{ name: string; value: string }[]>(() => {
+    const raw = data.value?.header.properties ?? '';
+    if (!raw) return [];
+    return raw.split(';')
+        .map(s => s.trim())
+        .filter(s => s.length > 0)
+        .map(s => {
+            const idx = s.indexOf(':');
+            if (idx < 0) return { name: s, value: '' };
+            return { name: s.substring(0, idx), value: s.substring(idx + 1) };
+        });
+});
+
+const rebuildProperties = (pairs: { name: string; value: string }[]) => {
+    data.value!.header.properties = pairs.map(p => `${p.name}:${p.value};`).join('');
+};
+
+const updateProperty = (index: number, field: 'name' | 'value', val: string) => {
+    const pairs = propertyPairs.value.map(p => ({ ...p }));
+    pairs[index][field] = val;
+    rebuildProperties(pairs);
+};
+
+const addProperty = () => {
+    const pairs = [...propertyPairs.value, { name: '', value: '' }];
+    rebuildProperties(pairs);
+};
+
+const removeProperty = (index: number) => {
+    const pairs = propertyPairs.value.filter((_, i) => i !== index);
+    rebuildProperties(pairs);
+};
 
 const encodeBp = () => {
     if (!codeExpired.value || !data.value)
@@ -247,9 +361,11 @@ const parseBp = (s: string) => {
             data.value.header = reactive(data.value.header);
             parseErrorMessage.value = '';
             watch(data.value, () => codeExpired.value = true);
-            gtag('event', 'bp_parse', {
-                'bp_length': s.length,
-            })
+            if (typeof gtag !== 'undefined') {
+                gtag('event', 'bp_parse', {
+                    'bp_length': s.length,
+                })
+            }
         } catch (e) {
             parseErrorMessage.value = String(e);
             console.error(e);
@@ -328,6 +444,19 @@ const hotkey = (event: KeyboardEvent) => {
         } else if (event.code === 'KeyY' && !event.shiftKey) {
             commandQueue.value?.redo();
         }
+        return;
+    }
+    if (event.altKey || event.metaKey)
+        return;
+    // 在输入框/文本域中打字时不触发
+    const target = event.target as HTMLElement | null;
+    const tag = target?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable)
+        return;
+    // O 或 0：快速打开蓝图面板
+    if (event.code === 'KeyO' || event.code === 'Digit0') {
+        expandSidebar.value = true;
+        activeTab.value = 'info';
     }
 }
 onMounted(() => document.body.addEventListener('keydown', hotkey));
@@ -362,6 +491,29 @@ body {
 
     &.expanded {
         background: url(@/assets/icons/close.svg) center no-repeat;
+    }
+
+    &.pinned {
+        opacity: 0.35;
+        cursor: default;
+    }
+}
+
+.pin-btn {
+    position: absolute;
+    right: 0;
+    top: 60px;
+    height: 60px;
+    width: 60px;
+    border: 0;
+    opacity: 0.55;
+    background: url(@/assets/icons/pin.svg) center / 24px no-repeat, #00000060;
+    transition: opacity 0.2s, background-color 0.2s, transform 0.2s;
+
+    &.active {
+        opacity: 1;
+        background-color: #64a0dc;
+        transform: rotate(45deg);
     }
 }
 
@@ -458,8 +610,123 @@ body {
         }
     }
 
+    /* ---------- 蓝图属性：游戏内样式（切角标签 + 整行内容 + 新建按钮） ---------- */
+    .props-header {
+        align-items: flex-end;
+        column-gap: 5px;
+    }
+
+    .prop-add {
+        flex: none;
+        align-self: flex-end;
+        padding: 2px 10px;
+        white-space: nowrap;
+        background: #4a90d9;
+
+        &:hover {
+            background: #5aa0ec;
+        }
+    }
+
+    .properties-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 6px;
+    }
+
+    .property-item {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .property-name-row {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 6px;
+    }
+
+    $tag-cut: 10px;
+    $tag-clip: polygon(0 0, 100% 0, 100% calc(100% - #{$tag-cut}), calc(100% - #{$tag-cut}) 100%, 0 100%);
+
+    .property-name-row .prop-tag {
+        flex: 0 1 72%;
+        min-width: 0;
+        padding: 1px;
+        background: rgba(150, 195, 235, 0.65);
+        clip-path: $tag-clip;
+    }
+
+    .property-name-row .prop-name {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 3px 8px;
+        border: 0;
+        border-radius: 0;
+        background: rgba(20, 36, 54, 0.92);
+        clip-path: $tag-clip;
+
+        &::placeholder {
+            color: rgba(255, 255, 255, 0.38);
+        }
+
+        &:focus {
+            background: rgba(36, 60, 88, 0.95);
+        }
+    }
+
+    .property-item .prop-value {
+        box-sizing: border-box;
+        padding: 4px 8px;
+        border: 0;
+        border-radius: 3px;
+        background: rgba(255, 255, 255, 0.10);
+
+        &::placeholder {
+            color: rgba(255, 255, 255, 0.35);
+        }
+
+        &:focus {
+            background: rgba(100, 160, 220, 0.18);
+        }
+    }
+
+    .property-name-row .prop-del {
+        flex: none;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        line-height: 1;
+        font-size: 14px;
+        border: 0;
+        border-radius: 50%;
+        background: rgba(192, 57, 43, 0.28);
+        color: #ff8d7d;
+        transition: background 0.15s, color 0.15s;
+
+        &:hover {
+            background: #c0392b;
+            color: #fff;
+        }
+    }
+
+    /* ---------- 蓝图代码区样式微调 ---------- */
     .bp-code {
         word-break: break-all;
+        font-family: 'Menlo', 'Consolas', monospace;
+        font-size: 0.8rem;
+        line-height: 1.4;
+        background: #1e2a33;
+        border-radius: 4px;
+        padding: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+
+        &:focus {
+            background: #1e2a33;
+            border-color: #64a0dc;
+        }
     }
 }
 
@@ -515,7 +782,13 @@ ul.operations {
         "批量替换": "批量替换",
         "撤销": "撤销",
         "重做": "重做",
-        "自动选择语言": "自动选择"
+        "自动选择语言": "自动选择",
+        "新建属性": "新建属性",
+        "新属性": "新属性",
+        "属性内容": "属性内容",
+        "删除属性": "删除属性",
+        "固定面板": "固定面板（固定后无法点击隐藏）",
+        "右键点击剔除": "右键点击建筑可剔除"
     },
     en: {
         "复制": "Copy",
@@ -528,7 +801,13 @@ ul.operations {
         "批量替换": "Batch Replace",
         "撤销": "Undo",
         "重做": "Redo",
-        "自动选择语言": "Auto Select"
+        "自动选择语言": "Auto Select",
+        "新建属性": "New Property",
+        "新属性": "New Property",
+        "属性内容": "Property Value",
+        "删除属性": "Delete Property",
+        "固定面板": "Pin panel (cannot be hidden by clicking)",
+        "右键点击剔除": "Right-click a building to remove it"
     },
 }
 </i18n>

@@ -1,6 +1,6 @@
 <template>
     <div class="icon" :class="{'has-count': props.count !== undefined}" :title="props.alt">
-        <img :src="src" :alt="props.alt">
+        <img :src="src" :alt="props.alt" loading="lazy">
         <div v-if="props.count !== undefined" class="count">{{props.count === 1 ? '' : props.count}}</div>
     </div>
 </template>
