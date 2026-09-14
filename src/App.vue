@@ -153,8 +153,10 @@
         </div>
         <button class="expand-btn" :class="{ expanded: sidebarExpanded, pinned: pinned }"
                 @click="toggleSidebar" ></button>
+        <button class="expand-btn" :class="{ expanded: sidebarExpanded }"
+                @click="toggleSidebar" ></button>
         <button class="pin-btn" :class="{ active: pinned }"
-                :title="t('固定面板')" @click="togglePin" ></button>
+                :title="pinned ? t('解除固定') : t('固定面板')" @click="togglePin" ></button>
     </div>
 </template>
 
@@ -191,16 +193,22 @@ const data = shallowRef(null as BlueprintData | null);
 const expandSidebar = ref(true);
 const pinned = ref(false);
 const sidebarExpanded = computed(() => expandSidebar.value || pinned.value);
+
 const toggleSidebar = () => {
-    // 固定后面板保持常显，点击开关不能隐藏
-    if (pinned.value)
-        return;
-    expandSidebar.value = !expandSidebar.value;
+    if (pinned.value) {
+        // 固定状态下点击关闭：解除固定并收起
+        pinned.value = false;
+        expandSidebar.value = false;
+    } else {
+        expandSidebar.value = !expandSidebar.value;
+    }
 }
+
 const togglePin = () => {
     pinned.value = !pinned.value;
-    if (pinned.value)
+    if (pinned.value) {
         expandSidebar.value = true;
+    }
 }
 const activeTab = ref<'info' | 'operations'>('info')
 const working = ref(false);
@@ -455,9 +463,10 @@ const hotkey = (event: KeyboardEvent) => {
         return;
     // O 或 0：快速打开蓝图面板
     if (event.code === 'KeyO' || event.code === 'Digit0') {
-        expandSidebar.value = true;
-        activeTab.value = 'info';
-    }
+        if (pinned.value) return; // 固定状态时不响应快捷键
+    expandSidebar.value = !expandSidebar.value;
+    if (expandSidebar.value) activeTab.value = 'info';
+}
 }
 onMounted(() => document.body.addEventListener('keydown', hotkey));
 onUnmounted(() => document.body.removeEventListener('keydown', hotkey));
@@ -492,17 +501,12 @@ body {
     &.expanded {
         background: url(@/assets/icons/close.svg) center no-repeat;
     }
-
-    &.pinned {
-        opacity: 0.35;
-        cursor: default;
-    }
 }
 
 .pin-btn {
     position: absolute;
-    right: 0;
-    top: 60px;
+    right: 60px;  /* 位于关闭按钮左侧 */
+    top: 0;
     height: 60px;
     width: 60px;
     border: 0;
@@ -513,7 +517,7 @@ body {
     &.active {
         opacity: 1;
         background-color: #64a0dc;
-        transform: rotate(45deg);
+        // transform: rotate(45deg);
     }
 }
 
