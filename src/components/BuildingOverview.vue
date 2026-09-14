@@ -1,8 +1,8 @@
 <template>
     <h2 class="overview-header">
         {{t('包含设施')}}
-        <span class="overview-hint">{{ t('右键点击剔除') }}</span>
     </h2>
+    <div class="overview-hint">{{ t('右键点击剔除') }}</div>
     <p>{{ t('共{total}个', {total}) }}</p>
     <div class="overview-icons">
         <span v-for="[itemId, count] in buildingCounter" :key="itemId" class="overview-icon-item"
