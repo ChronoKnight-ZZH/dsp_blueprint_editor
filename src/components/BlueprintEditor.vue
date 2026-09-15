@@ -11,6 +11,7 @@ import {
 import { SphereLatitudeGridGeometry, SphereLongitudeGridGeometry } from '@/SphereGridGeometry';
 import { BeltParameters, BlueprintBuilding } from '@/blueprint/parser';
 import { findPosForAreas, gridAreas, calcBuildingTrans, PositionedBlueprint } from '@/blueprint/planet';
+import { buildReforms } from '@/blueprint/reform';
 import { buildingMeta, noIconBuildings } from '@/data/building';
 import { isBelt, isInserter } from '@/data/items';
 import { itemIconId, recipeIconId } from '@/data/icons';
@@ -454,17 +455,23 @@ const b = computed(() => {
 	const transforms = d.buildings.map(b => calcBuildingTrans(R, pos, b));
 	const buildings = buildBuildings(transforms, d.buildings, renderer)
     const bvh = buildBVH(transforms, d.buildings);
+    const reforms = buildReforms(R, pos, d.reformData);
     registerUpdater(commandQueue.value.updater, buildings, pos);
-	return { buildings, bvh };
+	return { buildings, bvh, reforms };
 });
 
 watchEffect(onCleanUp => {
 	if (b.value !== null) {
 		const buildings = b.value.buildings
+		const reforms = b.value.reforms
 		scene.add(buildings);
+		if (reforms)
+			scene.add(reforms);
 		onCleanUp(() => {
             scene.remove(buildings);
             buildings.dispose();
+			if (reforms)
+				scene.remove(reforms);
         });
 	}
 });

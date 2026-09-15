@@ -55,7 +55,7 @@ export interface BlueprintReformRect {
     y: number,
     w: number,
     h: number,
-    /** 地基装饰类型（data 高 3 位）：0 无地基 / 1 默认矩形井盖 / 2 网格 ... 7 无装饰 */
+    /** 地基装饰类型（data 高 3 位）：0 无地基 / 1 默认工字铺 / 2 直铺 / 7 无装饰；1、2 的小方格均为带金属光泽的金属板样式 */
     type: number,
     /** 颜色索引（data 低 5 位） */
     color: number,
