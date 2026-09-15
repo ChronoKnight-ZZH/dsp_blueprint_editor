@@ -41,8 +41,34 @@ export interface BlueprintBuilding {
     parameters: null | AllParameters,
     /** v2 body：分拣器(2011-2014)在 yaw/tilt 之后附带的 7 个 float，语义未完全明确，字节级原样保留 */
     v2ExtraPose?: number[],
-    /** v2 body：参数段之后的不透明扩展字节（通常为 4 字节 0，少数传送带/四向为 9 字节） */
+    /** v2 body（-102 记录，0.10.34+）：信标等建筑的自定义文本，空则不存在该语义字段 */
+    content?: string,
+    /** v2 body：已知字段（content 等）与下一记录起始标记之间的未知扩展字节，正常蓝图不存在，字节级原样保留 */
     extraBytes?: Uint8Array,
+}
+
+/** 地基（地形改造）矩形区域，每个 9 字节 */
+export interface BlueprintReformRect {
+    /** 预留字节，原值保留 */
+    reserved: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    /** 地基装饰类型（data 高 3 位）：0 无地基 / 1 默认矩形井盖 / 2 网格 ... 7 无装饰 */
+    type: number,
+    /** 颜色索引（data 低 5 位） */
+    color: number,
+    areaIndex: number,
+}
+
+/** v2 body 尾部的地基数据（reformData） */
+export interface BlueprintReformData {
+    /** 预留字节，原值保留 */
+    reserved: number,
+    rects: BlueprintReformRect[],
+    customReformColorMask: number,
+    customReformColors: number[],
 }
 
 export interface BlueprintData {
@@ -67,6 +93,12 @@ export interface BlueprintData {
     primaryAreaIdx: number;
     areas: BlueprintArea[];
     buildings: BlueprintBuilding[];
+    /** v2 body：建筑数组之后的预留 int32（0.10.33+） */
+    patch?: number;
+    /** v2 body：地基数据（reformDataFlag=1 时存在，否则为 null） */
+    reformData?: BlueprintReformData | null;
+    /** v2 body：地基数据之后的未知尾部字节（如 0.10.33 的 5 字节预留），字节级原样保留 */
+    tailExtraBytes?: Uint8Array;
 }
 
 abstract class BufferIO {
@@ -95,6 +127,7 @@ class BufferReader extends BufferIO {
     getInt8()  { this.check(1); const v = this.view.getInt8(this.pos);        this.pos += 1; return v }
     getInt16() { this.check(2); const v = this.view.getInt16(this.pos, true); this.pos += 2; return v }
     getInt32() { this.check(4); const v = this.view.getInt32(this.pos, true); this.pos += 4; return v }
+    getUint32() { this.check(4); const v = this.view.getUint32(this.pos, true); this.pos += 4; return v }
 
     getFloat32() { this.check(4); const v = this.view.getFloat32(this.pos, true); this.pos += 4; return v }
 
@@ -106,6 +139,24 @@ class BufferReader extends BufferIO {
         this.pos += length;
         return new Uint8Array(this.view.buffer.slice(start, start + length));
     }
+
+    /** 读取 .NET BinaryWriter 风格的长度前缀字符串：7-bit encoded int 长度 + UTF-8 字节 */
+    getString() {
+        let len = 0;
+        let shift = 0;
+        for (;;) {
+            const b = this.getUint8();
+            len |= (b & 0x7F) << shift;
+            if ((b & 0x80) === 0)
+                break;
+            shift += 7;
+            if (shift > 35)
+                throw new Error('字符串长度前缀解析错误');
+        }
+        if (len === 0)
+            return '';
+        return new TextDecoder('utf-8').decode(this.getView(len));
+    }
 }
 
 class BufferWriter extends BufferIO {
@@ -113,6 +164,7 @@ class BufferWriter extends BufferIO {
     setInt8(value: number)  { this.view.setInt8(this.pos, value);        this.pos += 1; }
     setInt16(value: number) { this.view.setInt16(this.pos, value, true); this.pos += 2; }
     setInt32(value: number) { this.view.setInt32(this.pos, value, true); this.pos += 4; }
+    setUint32(value: number) { this.view.setUint32(this.pos, value, true); this.pos += 4; }
 
     setFloat32(value: number) { this.view.setFloat32(this.pos, value, true); this.pos += 4; }
 
@@ -121,6 +173,29 @@ class BufferWriter extends BufferIO {
         new Uint8Array(this.view.buffer).set(bytes, start);
         this.pos += bytes.length;
     }
+
+    /** 写入 .NET BinaryWriter 风格的长度前缀字符串：7-bit encoded int 长度 + UTF-8 字节 */
+    setString(value: string) {
+        const bytes = new TextEncoder().encode(value);
+        let len = bytes.length >>> 0;
+        while (len >= 0x80) {
+            this.setUint8((len & 0x7F) | 0x80);
+            len >>>= 7;
+        }
+        this.setUint8(len & 0x7F);
+        this.setBytes(bytes);
+    }
+}
+
+/** 7-bit encoded int 编码后的字节数 */
+function encoded7BitLength(value: number): number {
+    let len = 1;
+    let v = value >>> 0;
+    while (v >= 0x80) {
+        len++;
+        v >>>= 7;
+    }
+    return len;
 }
 
 function btoUint8Array(b: string) {
@@ -884,7 +959,6 @@ const V2_RECORD_MARKER = -102;          // 导出时使用的记录起始标记�
 const V2_RECORD_MARKER_MIN = -100;      // 导入时接受的标记下限（0.10.33 用 -101，0.10.34 用 -102）
 const V2_BELT_ITEM_IDS = new Set([2001, 2002, 2003]);
 const V2_INSERTER_ITEM_IDS = new Set([2011, 2012, 2013, 2014]);
-const V2_DEFAULT_EXTRA = new Uint8Array([0, 0, 0, 0]);
 
 function isV2RecordMarkerAt(bytes: Uint8Array, off: number): boolean {
     if (off + 8 > bytes.length)
@@ -897,7 +971,7 @@ function isV2RecordMarkerAt(bytes: Uint8Array, off: number): boolean {
     return bytes[off + 7] < 0x80;
 }
 
-function importBuildingV2(r: BufferReader, bytes: Uint8Array, bodyEnd: number): BlueprintBuilding {
+function importBuildingV2(r: BufferReader, bytes: Uint8Array, last: boolean): BlueprintBuilding {
     function readXYZ(): XYZ {
         return {
             x: r.getFloat32(),
@@ -957,27 +1031,35 @@ function importBuildingV2(r: BufferReader, bytes: Uint8Array, bodyEnd: number): 
         const p = r.getView(length * Int32Array.BYTES_PER_ELEMENT);
         b.parameters = parserFor(itemId).decode(p);
     }
-    // 参数段之后为不透明扩展字节：已知 0 字节（0.10.33）、4 字节（i32=0）或 9 字节
-    const pos = r.position;
-    let extLen: number;
-    if (pos === bodyEnd)
-        extLen = 0;
-    else if (isV2RecordMarkerAt(bytes, pos))
-        extLen = 0; // 0.10.33 等早期 v2 版本无扩展字段，下一记录标记紧跟参数段
-    else if (pos + 4 === bodyEnd || isV2RecordMarkerAt(bytes, pos + 4))
-        extLen = 4;
-    else if (pos + 9 === bodyEnd || isV2RecordMarkerAt(bytes, pos + 9))
-        extLen = 9;
-    else if (bodyEnd - pos < 13)
-        // 剩余字节不足一条最小记录（marker4+index4+itemId2+modelIndex2+areaIndex1=13），
-        // 视为文件尾部的不透明数据（0.10.33 等版本可能存在尾部字段），全部消耗
-        extLen = bodyEnd - pos;
-    else
-        throw new Error('v2 建筑记录存在未知的尾部扩展');
-    if (extLen > 0)
-        b.extraBytes = r.getBytes(extLen);
+    // -102 记录（0.10.34+）参数段之后为 content：int32 长度，>0 时再接 7-bit 前缀字符串（信标文本等）
+    // -101/-100 记录（0.10.30-0.10.33）无此字段
+    if (marker <= V2_RECORD_MARKER) {
+        const contentLength = r.getInt32();
+        if (contentLength > 0)
+            b.content = r.getString();
+    }
+    // 非最后一条记录：已知字段结束后必须紧接下一记录的起始标记；
+    // 若存在未知扩展间隙，则在有限范围内定位下一标记并把间隙作为不透明字节保留
+    if (!last) {
+        const pos = r.position;
+        if (!isV2RecordMarkerAt(bytes, pos)) {
+            let next = -1;
+            for (let d = 1; d <= V2_RECORD_GAP_LIMIT; d++) {
+                if (isV2RecordMarkerAt(bytes, pos + d)) {
+                    next = pos + d;
+                    break;
+                }
+            }
+            if (next < 0)
+                throw new Error('v2 建筑记录存在未知的尾部扩展');
+            b.extraBytes = r.getBytes(next - pos);
+        }
+    }
     return b;
 }
+
+/** 非最后一条记录的未知扩展间隙最大搜索字节数 */
+const V2_RECORD_GAP_LIMIT = 64;
 
 function exportBuilding(w: BufferWriter, b: BlueprintBuilding) {
     function writeXYZ(v: {x: number, y: number, z: number}) {
@@ -1022,8 +1104,18 @@ function v2BuildingSize(b: BlueprintBuilding): number {
     result += 20; // out/in 8 + slots 6 + recipe 2 + filter 2 + plen 2
     if (b.parameters !== null)
         result += parserFor(b.itemId).encodedSize(b.parameters, 2) * Int32Array.BYTES_PER_ELEMENT;
-    result += b.extraBytes !== undefined ? b.extraBytes.length : V2_DEFAULT_EXTRA.length;
+    result += v2ContentSize(b.content); // content 长度前缀（必有）+ 字符串
+    if (b.extraBytes !== undefined)
+        result += b.extraBytes.length;
     return result;
+}
+
+/** -102 记录 content 段大小：int32 长度，非空时再追加 7-bit 前缀 + UTF-8 字节 */
+function v2ContentSize(content: string | undefined): number {
+    if (content === undefined || content.length === 0)
+        return 4;
+    const byteLen = new TextEncoder().encode(content).length;
+    return 4 + encoded7BitLength(byteLen) + byteLen;
 }
 
 function exportBuildingV2(w: BufferWriter, b: BlueprintBuilding) {
@@ -1074,7 +1166,95 @@ function exportBuildingV2(w: BufferWriter, b: BlueprintBuilding) {
     } else {
         w.setInt16(0);
     }
-    w.setBytes(b.extraBytes !== undefined ? b.extraBytes : V2_DEFAULT_EXTRA);
+    // content：int32 写入字符数（与游戏一致），非空时再写 7-bit 前缀的 UTF-8 字符串
+    if (b.content !== undefined && b.content.length > 0) {
+        w.setInt32(b.content.length);
+        w.setString(b.content);
+    } else {
+        w.setInt32(0);
+    }
+    if (b.extraBytes !== undefined)
+        w.setBytes(b.extraBytes);
+}
+
+// ===== v2 body 尾部：patch(int32) + reformDataFlag(u8) + reformData（0.10.33+）=====
+
+const REFORM_COUNT_LIMIT = 2930400; // 星球最大格点数量级，用于合理性校验
+
+function hasReformData(bp: BlueprintData): bp is BlueprintData & { reformData: BlueprintReformData } {
+    return bp.reformData != null && bp.reformData.rects.length > 0;
+}
+
+function importReformData(r: BufferReader): BlueprintReformData {
+    const reserved = r.getUint8();
+    const rectLen = r.getInt32();
+    if (rectLen < 0 || rectLen > REFORM_COUNT_LIMIT)
+        throw new Error('地基数据解析错误：rectLen 超出合法范围');
+    const rects: BlueprintReformRect[] = [];
+    for (let i = 0; i < rectLen; i++) {
+        const rectReserved = r.getUint8();
+        const x = r.getInt16();
+        const y = r.getInt16();
+        const w = r.getUint8();
+        const h = r.getUint8();
+        const data = r.getUint8();
+        const areaIndex = r.getUint8();
+        rects.push({
+            reserved: rectReserved,
+            x, y, w, h,
+            // data 高 3 位为地基装饰类型，低 5 位为颜色索引
+            type: data >> 5,
+            color: data & 0x1F,
+            areaIndex,
+        });
+    }
+    const customReformColorMask = r.getUint32();
+    const colorLen = r.getInt32();
+    if (colorLen < 0 || colorLen > REFORM_COUNT_LIMIT)
+        throw new Error('地基数据解析错误：customReformColors 长度超出合法范围');
+    const customReformColors: number[] = [];
+    for (let i = 0; i < colorLen; i++)
+        customReformColors.push(r.getUint32());
+    return { reserved, rects, customReformColorMask, customReformColors };
+}
+
+function exportReformData(w: BufferWriter, d: BlueprintReformData) {
+    w.setUint8(d.reserved);
+    w.setInt32(d.rects.length);
+    for (const rect of d.rects) {
+        w.setUint8(rect.reserved);
+        w.setInt16(rect.x);
+        w.setInt16(rect.y);
+        w.setUint8(rect.w);
+        w.setUint8(rect.h);
+        w.setUint8(((rect.type & 0x07) << 5) | (rect.color & 0x1F));
+        w.setUint8(rect.areaIndex);
+    }
+    w.setUint32(d.customReformColorMask >>> 0);
+    w.setInt32(d.customReformColors.length);
+    for (const color of d.customReformColors)
+        w.setUint32(color >>> 0);
+}
+
+function reformDataSize(d: BlueprintReformData): number {
+    // reserved 1 + rectLen 4 + 每 rect 9 + mask 4 + colorLen 4 + 每 color 4
+    return 1 + 4 + d.rects.length * 9 + 4 + 4 + d.customReformColors.length * 4;
+}
+
+function importTailV2(r: BufferReader, bodyEnd: number) {
+    const patch = r.getInt32();
+    const reformDataFlag = r.getUint8();
+    let reformData: BlueprintReformData | null = null;
+    if (reformDataFlag !== 0)
+        reformData = importReformData(r);
+    const remain = bodyEnd - r.position;
+    if (remain < 0)
+        throw new Error('蓝图尾部数据解析错误：地基数据超出 body 范围');
+    // 0.10.33 早期版本在 flag 之后仍有预留字节（实测 5 字节），语义未知，原样保留
+    let tailExtraBytes: Uint8Array | undefined;
+    if (remain > 0)
+        tailExtraBytes = r.getBytes(remain);
+    return { patch, reformData, tailExtraBytes };
 }
 
 const START = 'BLUEPRINT:';
@@ -1135,9 +1315,17 @@ export function fromStr(strData: string): BlueprintData {
 
     const numBuildings = reader.getInt32();
     const buildings: Array<BlueprintBuilding> = [];
+    let patch: number | undefined;
+    let reformData: BlueprintReformData | null | undefined;
+    let tailExtraBytes: Uint8Array | undefined;
     if (meta.version >= 2) {
         for (let i = 0; i < numBuildings; i++)
-            buildings.push(importBuildingV2(reader, decoded, decoded.length));
+            buildings.push(importBuildingV2(reader, decoded, i === numBuildings - 1));
+        // 建筑数组之后：patch + reformDataFlag + reformData（+ 0.10.33 预留尾部）
+        const tail = importTailV2(reader, decoded.length);
+        patch = tail.patch;
+        reformData = tail.reformData;
+        tailExtraBytes = tail.tailExtraBytes;
     } else {
         for (let i = 0; i < numBuildings; i++)
             buildings.push(importBuilding(reader));
@@ -1148,6 +1336,9 @@ export function fromStr(strData: string): BlueprintData {
         ...meta,
         areas,
         buildings,
+        patch,
+        reformData,
+        tailExtraBytes,
     };
 }
 
@@ -1159,6 +1350,12 @@ function encodedSize(bp: BlueprintData): number {
     if (bp.version >= 2) {
         for (const b of bp.buildings)
             result += v2BuildingSize(b);
+        result += 4; // patch
+        result += 1; // reformDataFlag
+        if (hasReformData(bp))
+            result += reformDataSize(bp.reformData);
+        if (bp.tailExtraBytes !== undefined)
+            result += bp.tailExtraBytes.length;
         return result;
     }
     result += 61 * bp.buildings.length;
@@ -1219,6 +1416,19 @@ export function toStr(bp: BlueprintData): string {
             exportBuildingV2(writer, b);
         else
             exportBuilding(writer, b);
+    }
+
+    if (bp.version >= 2) {
+        // 预留 patch（游戏 0.10.33+ 实测写 1），随后为地基数据标记与内容
+        writer.setInt32(bp.patch ?? 1);
+        if (hasReformData(bp)) {
+            writer.setUint8(1);
+            exportReformData(writer, bp.reformData);
+        } else {
+            writer.setUint8(0);
+        }
+        if (bp.tailExtraBytes !== undefined)
+            writer.setBytes(bp.tailExtraBytes);
     }
 
     result += btoa(Uint8ArrayTob(pako.gzip(decoded)));
