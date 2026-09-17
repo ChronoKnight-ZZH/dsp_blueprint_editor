@@ -1,46 +1,38 @@
 <template>
     <div class="container">
-        <BlueprintEditor ref="renderer"
-            v-model:selectedBuildingIndex="selectedBuildingIndex"
+        <BlueprintEditor ref="renderer" v-model:selectedBuildingIndex="selectedBuildingIndex"
             @update:selectedBuildingIndex="i => buildingFocused(i !== null)" />
         <div class="sidebar" :class="{ expanded: sidebarExpanded }">
             <div>
-                <div class="info-tab tab"
-                    :class="{ active: activeTab === 'info'}"
-                    @click="activeTab = 'info'"></div>
-                <div class="operations-tab tab"
-                    :class="{ active: activeTab === 'operations'}"
+                <div class="info-tab tab" :class="{ active: activeTab === 'info' }" @click="activeTab = 'info'"></div>
+                <div class="operations-tab tab" :class="{ active: activeTab === 'operations' }"
                     @click="activeTab = 'operations'"></div>
             </div>
             <div v-if="activeTab === 'info'">
                 <section style="display: flex; flex-direction: row; gap: 5px;">
                     <div>
-                        <label for="iconLayout">{{t('图标布局')}}</label>
-                        <select id="iconLayout" :disabled="!data"
-                                v-model="iconLayout">
-                            <option v-for="[id, s] of allIconLayouts" :key="id" :value="id">{{s}}</option>
+                        <label for="iconLayout">{{ t('图标布局') }}</label>
+                        <select id="iconLayout" :disabled="!data" v-model="iconLayout">
+                            <option v-for="[id, s] of allIconLayouts" :key="id" :value="id">{{ s }}</option>
                         </select>
-                        <label for="shortDesc">{{t('缩略图文字')}}</label>
-                        <input type="text" id="shortDesc" :disabled="!data"
-                            :value="data?.header.shortDesc"
+                        <label for="shortDesc">{{ t('缩略图文字') }}</label>
+                        <input type="text" id="shortDesc" :disabled="!data" :value="data?.header.shortDesc"
                             @input="e => data!.header.shortDesc = (e.target as HTMLInputElement).value">
                     </div>
                     <BlueprintIcon style="height: 90px; flex: none;" :layout-id="iconLayout" :icons="data?.header.icons"
-                        editable @edit="editHeaderIcon"/>
-                    <IconPickerModal ref="iconPickerModal" @select="setHeaderIcon"/>
+                        editable @edit="editHeaderIcon" />
+                    <IconPickerModal ref="iconPickerModal" @select="setHeaderIcon" />
                 </section>
                 <section v-if="data">
                     <div class="row props-header">
                         <div style="flex: 1;">
-                            <label for="author">{{t('作者')}}</label>
-                            <input type="text" id="author"
-                                :value="data.header.author"
+                            <label for="author">{{ t('作者') }}</label>
+                            <input type="text" id="author" :value="data.header.author"
                                 @input="e => data!.header.author = (e.target as HTMLInputElement).value">
                         </div>
                         <div style="flex: 1;">
-                            <label for="bpVersion">{{t('蓝图版本')}}</label>
-                            <input type="text" id="bpVersion"
-                                :value="data.header.blueprintVersion"
+                            <label for="bpVersion">{{ t('蓝图版本') }}</label>
+                            <input type="text" id="bpVersion" :value="data.header.blueprintVersion"
                                 @input="e => data!.header.blueprintVersion = (e.target as HTMLInputElement).value">
                         </div>
                         <button type="button" class="prop-add" :title="t('新建属性')" @click="addProperty">
@@ -51,46 +43,48 @@
                         <div v-for="(p, i) in propertyPairs" :key="i" class="property-item">
                             <div class="property-name-row">
                                 <div class="prop-tag">
-                                    <input type="text" class="prop-name"
-                                        :value="p.name" :placeholder="t('新属性')"
+                                    <input type="text" class="prop-name" :value="p.name" :placeholder="t('新属性')"
                                         @input="e => updateProperty(i, 'name', (e.target as HTMLInputElement).value)">
                                 </div>
-                                <button type="button" class="prop-del" :title="t('删除属性')" @click="removeProperty(i)">×</button>
+                                <button type="button" class="prop-del" :title="t('删除属性')"
+                                    @click="removeProperty(i)">×</button>
                             </div>
-                            <input type="text" class="prop-value"
-                                :value="p.value" :placeholder="t('属性内容')"
+                            <input type="text" class="prop-value" :value="p.value" :placeholder="t('属性内容')"
                                 @input="e => updateProperty(i, 'value', (e.target as HTMLInputElement).value)">
                         </div>
                     </div>
                 </section>
                 <section>
-                    <label for="desc">{{t('蓝图介绍')}}</label>
-                    <textarea rows="2" id="desc" :disabled="!data"
-                            :value="data?.header.desc"
-                            @input="e => data!.header.desc = (e.target as HTMLInputElement).value"
-                    ></textarea>
+                    <label for="desc">{{ t('蓝图介绍') }}</label>
+                    <textarea rows="2" id="desc" :disabled="!data" :value="data?.header.desc"
+                        @input="e => data!.header.desc = (e.target as HTMLInputElement).value"></textarea>
                 </section>
                 <section>
                     <div class="row">
                         <label for="bp-str" style="margin-right: auto;">{{ t('蓝图代码') }}</label>
-                        <button style="margin-left: 4px;" @click="copy" :disabled="working || !bpStr">{{ t('复制') }}</button>
+                        <button style="margin-left: 4px;" @click="copy" :disabled="working || !bpStr">{{ t('复制')
+                            }}</button>
                         <button style="margin-left: 4px;" @click="paste" :disabled="working">{{ t('粘贴') }}</button>
                     </div>
                     <textarea class="bp-code" rows="3" id="bp-str" v-model="bpStrInput"
-                            @copy="onCopy" @cut="onCut" @paste="onPaste"
-                            @focus="encodeBp" @change="e => parseBp((e.target as HTMLTextAreaElement).value)">
+                        :placeholder="isDragOver ? t('拖拽文件到此处打开') : ''"
+                        :class="{ 'drag-over': isDragOver }"
+                        @copy="onCopy" @cut="onCut" @paste="onPaste"
+                        @focus="encodeBp" @change="e => parseBp((e.target as HTMLTextAreaElement).value)"
+                        @dragover.prevent="onDragOver"
+                        @dragleave.prevent="onDragLeave"
+                        @drop.prevent="onDrop">
                     </textarea>
                     <div class="row" style="align-items: stretch; column-gap: 4px;">
                         <button @click="parseBp('')" :disabled="working"
-                                style="position: relative; flex: auto; width: 50px;" >
+                            style="position: relative; flex: auto; width: 50px;">
                             {{ bpStr ? t("清空") : t("选择文件") }}
-                            <input v-if="!bpStr" @change="onBpFile" :disabled="working"
-                                type="file" accept="text/plain" id="blueprint-file"
+                            <input v-if="!bpStr" @change="onBpFile" :disabled="working" type="file"
+                                accept=".txt,text/plain" id="blueprint-file"
                                 style="position: absolute; inset: 0; opacity: 0;" />
                         </button>
-                        <a v-if="bpStr && data" class="button" @click="prepareSave"
-                            :href="bpUrl" :download="data.header.shortDesc + '.txt'"
-                            style="flex: auto; width: 50px;" >
+                        <a v-if="bpStr && data" class="button" @click="prepareSave" :href="bpUrl"
+                            :download="data.header.shortDesc + '.txt'" style="flex: auto; width: 50px;">
                             {{ t("保存文件") }}
                         </a>
                     </div>
@@ -98,11 +92,11 @@
                 </section>
                 <section>
                     <div class="row">
-                        <span style="margin-right: auto;">{{t('创建版本号')}}</span>
+                        <span style="margin-right: auto;">{{ t('创建版本号') }}</span>
                         <span>{{ data?.header.gameVersion }}</span>
                     </div>
                     <div class="row">
-                        <span style="margin-right: auto;">{{t('创建时间')}}</span>
+                        <span style="margin-right: auto;">{{ t('创建时间') }}</span>
                         <span>{{ data?.header.time.toLocaleString([], { timeZone: 'UTC' }) }}</span>
                     </div>
                 </section>
@@ -118,7 +112,7 @@
                             <img src="@/assets/icons/find_replace.svg">
                             {{ t('批量替换') }}
                         </button>
-                        <ReplaceModal :blueprint="data" ref="replaceModal"/>
+                        <ReplaceModal :blueprint="data" ref="replaceModal" />
                     </li>
                     <li>
                         <button @click="commandQueue!.undo()" :disabled="!commandQueue.canUndo()">
@@ -140,7 +134,7 @@
                             Languages
                         </label>
                         <select id="select-language" v-model="lang">
-                            <option value="auto">{{t('自动选择语言')}}</option>
+                            <option value="auto">{{ t('自动选择语言') }}</option>
                             <option value="en">English</option>
                             <option value="zh">中文</option>
                         </select>
@@ -148,15 +142,15 @@
                 </li>
             </ul>
             <footer>
-                {{ version }}<SWStatus />
+                {{ version }}
+                <SWStatus />
             </footer>
         </div>
         <button class="expand-btn" :class="{ expanded: sidebarExpanded, pinned: pinned }"
-                @click="toggleSidebar" ></button>
-        <button class="expand-btn" :class="{ expanded: sidebarExpanded }"
-                @click="toggleSidebar" ></button>
-        <button class="pin-btn" :class="{ active: pinned }"
-                :title="pinned ? t('解除固定') : t('固定面板')" @click="togglePin" ></button>
+            @click="toggleSidebar"></button>
+        <button class="expand-btn" :class="{ expanded: sidebarExpanded }" @click="toggleSidebar"></button>
+        <button class="pin-btn" :class="{ active: pinned }" :title="pinned ? t('解除固定') : t('固定面板')"
+            @click="togglePin"></button>
     </div>
 </template>
 
@@ -260,7 +254,7 @@ const buildingInfo = computed(() => {
 provide(buildingInfoKey, buildingInfo);
 
 const allIconLayouts = new Map<number, string>([
-    [ 1, '无'],
+    [1, '无'],
     [10, '1-1'], [11, '1-2'],
     [20, '2-1'], [21, '2-2'], [22, '2-3'], [23, '2-4'], [24, '2-5'],
     [30, '3-1'], [31, '3-2'], [32, '3-3'], [33, '3-4'],
@@ -387,15 +381,78 @@ const parseBp = (s: string) => {
     codeExpired.value = false;
 }
 
+// 拖拽状态
+const isDragOver = ref(false);
+
+// 拖拽进入
+const onDragOver = (e: DragEvent) => {
+    isDragOver.value = true;
+    if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'copy';
+    }
+};
+
+// 拖拽离开
+const onDragLeave = () => {
+    isDragOver.value = false;
+};
+
+// 拖拽放下：读取文件内容并解析
+const onDrop = async (e: DragEvent) => {
+    isDragOver.value = false;
+    if (!e.dataTransfer)
+        return;
+
+    const files = e.dataTransfer.files;
+    if (files.length === 0)
+        return;
+
+    const file = files[0];
+    // 限制文件类型：仅允许 .txt 或 text/plain
+    const isTxt = file.name.toLowerCase().endsWith('.txt')
+        || file.type === 'text/plain';
+
+    if (!isTxt) {
+        parseErrorMessage.value = t('仅支持 .txt 文件');
+        return;
+    }
+
+    working.value = true;
+    try {
+        parseBp(await file.text());
+    } catch (err) {
+        parseErrorMessage.value = String(err);
+        console.error(err);
+    } finally {
+        working.value = false;
+    }
+};
 const onBpFile = async (e: Event) => {
     const input = e.target as HTMLInputElement;
     if (input.files && input.files[0]) {
+        const file = input.files[0];
+        // 限制文件类型：仅允许 .txt 或 text/plain
+        const isTxt = file.name.toLowerCase().endsWith('.txt')
+            || file.type === 'text/plain';
+
+        if (!isTxt) {
+            parseErrorMessage.value = t('仅支持 .txt 文件');
+            input.value = '';
+            return;
+        }
+
         working.value = true;
-        parseBp(await input.files[0].text());
-        working.value = false;
+        try {
+            parseBp(await file.text());
+        } catch (err) {
+            parseErrorMessage.value = String(err);
+            console.error(err);
+        } finally {
+            working.value = false;
+        }
     }
     input.value = '';
-}
+};
 
 const onCopy = (e: ClipboardEvent) => {
     if (!e.clipboardData)
@@ -464,9 +521,9 @@ const hotkey = (event: KeyboardEvent) => {
     // O 或 0：快速打开蓝图面板
     if (event.code === 'KeyO' || event.code === 'Digit0') {
         if (pinned.value) return; // 固定状态时不响应快捷键
-    expandSidebar.value = !expandSidebar.value;
-    if (expandSidebar.value) activeTab.value = 'info';
-}
+        expandSidebar.value = !expandSidebar.value;
+        if (expandSidebar.value) activeTab.value = 'info';
+    }
 }
 onMounted(() => document.body.addEventListener('keydown', hotkey));
 onUnmounted(() => document.body.removeEventListener('keydown', hotkey));
@@ -505,7 +562,8 @@ body {
 
 .pin-btn {
     position: absolute;
-    right: 60px;  /* 位于关闭按钮左侧 */
+    right: 60px;
+    /* 位于关闭按钮左侧 */
     top: 0;
     height: 60px;
     width: 60px;
@@ -531,9 +589,11 @@ body {
         opacity: 1.0;
     }
 }
+
 .info-tab {
     background: url(@/assets/icons/menu.svg) center no-repeat;
 }
+
 .operations-tab {
     background: url(@/assets/icons/settings.svg) center no-repeat;
 }
@@ -601,7 +661,9 @@ body {
         }
     }
 
-    textarea, input[type="text"], select {
+    textarea,
+    input[type="text"],
+    select {
         background: #ffffff40;
         border: 0;
         width: 100%;
@@ -609,6 +671,7 @@ body {
         box-sizing: border-box;
         resize: none;
         color: inherit;
+
         &:focus {
             background: #4f6671;
         }
@@ -734,18 +797,44 @@ body {
     }
 }
 
+.bp-code {
+    word-break: break-all;
+    font-family: 'Menlo', 'Consolas', monospace;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    background: #1e2a33;
+    border-radius: 4px;
+    padding: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+
+    &:focus {
+        background: #1e2a33;
+        border-color: #64a0dc;
+    }
+
+    // 拖拽悬停时高亮
+    &.drag-over {
+        border-color: #64a0dc;
+        background: #24384d;
+        box-shadow: 0 0 0 2px rgba(100, 160, 220, 0.35);
+    }
+}
+
 ul.operations {
     padding: 0;
     display: flex;
     flex-direction: column;
     flex: auto;
+
     >li {
         display: block;
         list-style: none;
         border-bottom: 1px solid #fff6;
         margin: 0;
 
-        button, .select-li {
+        button,
+        .select-li {
             box-sizing: border-box;
             padding: 5px;
             color: white;
@@ -758,6 +847,7 @@ ul.operations {
                 opacity: 0.5;
             }
         }
+
         img {
             vertical-align: middle;
         }
@@ -766,6 +856,7 @@ ul.operations {
 
 .select-li {
     display: flex;
+
     >select {
         margin-left: 5px;
         flex: 1 100px;
@@ -792,7 +883,9 @@ ul.operations {
         "属性内容": "属性内容",
         "删除属性": "删除属性",
         "固定面板": "固定面板（固定后无法点击隐藏）",
-        "右键点击剔除": "右键点击建筑可剔除"
+        "右键点击剔除": "右键点击建筑可剔除",
+        "仅支持 .txt 文件": "仅支持 .txt 文件",
+        "拖拽文件到此处打开": "拖拽文件到此处打开"
     },
     en: {
         "复制": "Copy",
@@ -811,7 +904,9 @@ ul.operations {
         "属性内容": "Property Value",
         "删除属性": "Delete Property",
         "固定面板": "Pin panel (cannot be hidden by clicking)",
-        "右键点击剔除": "Right-click a building to remove it"
+        "右键点击剔除": "Right-click a building to remove it",
+        "仅支持 .txt 文件": "Only .txt files are supported",
+        "拖拽文件到此处打开": "Drop file here to open"
     },
 }
 </i18n>

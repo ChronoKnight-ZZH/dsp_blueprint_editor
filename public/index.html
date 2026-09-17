@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh">
+  <head>
+<% if (process.env.NODE_ENV === 'production') { %>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-880H9H1JJT"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-880H9H1JJT');
+</script>
+<% } else { %>
+<script>
+    function gtag() { console.log('gtag', arguments); }
+</script>
+<% } %>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+    <link rel="icon" href="<%= BASE_URL %>favicon.ico">
+    <link rel="apple-touch-icon" href="<%= BASE_URL %>img/icons/apple-touch-icon.png">
+    <link rel="mask-icon" href="<%= BASE_URL %>img/icons/safari-pinned-tab.svg" color="#7F86B2">
+    <meta name="msapplication-square150x150logo" content="<%= BASE_URL %>img/icons/mstile-150x150.png">
+    <meta name="msapplication-TileColor" content="#7F86B2">
+    <script charset="UTF-8" id="LA_COLLECT" src="//sdk.51.la/js-sdk-pro.min.js"></script>
+    <script>LA.init({id:"3RDSQAvkyRBnMeFa",ck:"3RDSQAvkyRBnMeFa",autoTrack:true})</script>
+    <title>戴森球计划蓝图预览</title>
+  </head>
+  <body>
+    <noscript>
+      <strong>请启用JavaScript以预览戴森球计划蓝图</strong>
+    </noscript>
+    <div id="app"></div>
+    <!-- built files will be auto injected -->
+  </body>
+</html>
