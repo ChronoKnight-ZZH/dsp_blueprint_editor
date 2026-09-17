@@ -1,5 +1,5 @@
 import { BlueprintBuilding, BlueprintData } from "./parser";
-import { itemsMap } from "@/data/items";
+import { itemsMap, isBelt, isInserter } from "@/data/items";
 import { Command, Updater } from "@/command";
 
 /**
@@ -121,8 +121,25 @@ export class UpgradeCommand implements Command {
         for (const { b } of this.upgraded) {
             b.itemId = itemId;
             b.modelIndex = modelIndex;
-            updater.updateBuildingIcon.dispatch(b);
+            this.dispatchIconUpdate(b, updater);
         }
+    }
+
+    /**
+     * 按 building.itemId 类型分发到正确的图标刷新通道。
+     *
+     * 传送带/分拣器的图标挂在 updateBeltIcon/updateSorterIcon 通道，只有当
+     * iconId>0 / filterId>0 时才在 IconGeometry.indexMap 中注册槽位。若统一走
+     * updateBuildingIcon，这两类建筑会在 IconGeometry.updateIconId 里找不到
+     * 槽位而抛 'No icon to update'，故需按类型分流。
+     */
+    private dispatchIconUpdate(b: BlueprintBuilding, updater: Updater) {
+        if (isBelt(b.itemId))
+            updater.updateBeltIcon.dispatch(b);
+        else if (isInserter(b.itemId))
+            updater.updateSorterIcon.dispatch(b);
+        else
+            updater.updateBuildingIcon.dispatch(b);
     }
 
     do(_data: BlueprintData, updater: Updater) {
@@ -130,10 +147,11 @@ export class UpgradeCommand implements Command {
     }
 
     undo(_data: BlueprintData, updater: Updater) {
+        // 复用 dispatchIconUpdate 的按类型分发逻辑，保证 do/undo 对称
         for (const { b, oldItemId, oldModelIndex } of this.upgraded) {
             b.itemId = oldItemId;
             b.modelIndex = oldModelIndex;
-            updater.updateBuildingIcon.dispatch(b);
+            this.dispatchIconUpdate(b, updater);
         }
     }
 
