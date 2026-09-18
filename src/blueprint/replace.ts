@@ -17,6 +17,9 @@ export interface ReplaceParams {
 }
 
 export class ReplaceCommand implements Command {
+    /** 只改 recipeId / filterId / iconId / header.icons，几何不变 → 局部刷新 */
+    readonly silent = true;
+
     recipeBuildings: BlueprintBuilding[] = [];
     filterBuildings: BlueprintBuilding[] = [];
     stationStorage: {b: BlueprintBuilding, i: number}[] = [];

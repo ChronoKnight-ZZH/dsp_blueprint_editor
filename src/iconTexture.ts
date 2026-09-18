@@ -60,4 +60,9 @@ export class IconTexture {
 
         return index;
     }
+
+    /** 判断 iconId 是否在图集中有分配的槽位（不关心是否已加载纹理数据） */
+    has(iconId: number): boolean {
+        return this.iconIds.has(iconId);
+    }
 }

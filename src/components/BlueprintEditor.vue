@@ -55,12 +55,17 @@ class AllBuildings extends Object3D {
         public readonly iconTexture: IconTexture,
         public readonly cargos: Cargos,
         public readonly modelRef: { mesh: InstancedMesh, instance: number }[],
+        public readonly subscriptMesh: IconSubscript | null = null,
+        /** 建筑 → 下标文本在 subscriptMesh 中的起始字符位置与长度；belt count 变化时用于局部刷新 */
+        public readonly subscriptMap: Map<BlueprintBuilding, { startIdx: number; length: number }> = new Map(),
     ) {
         super();
         this.add(...objects);
         this.add(iconsMesh);
         if (cargos)
             this.add(cargos);
+        if (subscriptMesh)
+            this.add(subscriptMesh);
     }
 
     public get icons() {
@@ -255,6 +260,7 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
 		const icons = new IconGeometry(count);
 
 		let subscriptsMesh: null | IconSubscript = null;
+		const subscriptMap = new Map<BlueprintBuilding, { startIdx: number; length: number }>();
 		if (subscripts.size > 0) {
 			let numChars = 0;
 			for (const s of subscripts.values()) {
@@ -274,6 +280,7 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
 			const sub = subscripts.get(b);
 			if (sub !== undefined) {
 				subscriptsMesh!.setText(subscriptIdx, pos, beltIconScale, sub);
+				subscriptMap.set(b, { startIdx: subscriptIdx, length: sub.length });
 				subscriptIdx += sub.length;
 			}
 		}
@@ -297,7 +304,7 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
 		if (subscriptsMesh !== null) {
 			subscriptsMesh.needsUpdate();
 		}
-		return [icons, subscriptsMesh] as const;
+		return [icons, subscriptsMesh, subscriptMap] as const;
 	}
 
 	const belts = buildings.filter(b => isBelt(b.itemId));
@@ -337,16 +344,15 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
 		meshes.push(...buildBoxes(boxes));
 
     const iconTexture = new IconTexture(renderer);
-	const [icons, subscriptsMesh] = buildIcons(iconBuildings, iconBelts, iconInsterters)
+	const [icons, subscriptsMesh, subscriptMap] = buildIcons(iconBuildings, iconBelts, iconInsterters)
     if (subscriptsMesh) {
         subscriptsMesh.renderOrder = 11;
-        meshes.push(subscriptsMesh);
     }
 
     const iconMesh = new Icons(iconTexture.texture, icons);
     iconMesh.renderOrder = 10;
 
-	return new AllBuildings(meshes, iconMesh, iconTexture, cargosMesh, modelRef);
+	return new AllBuildings(meshes, iconMesh, iconTexture, cargosMesh, modelRef, subscriptsMesh, subscriptMap);
 }
 
 function buildBVH(transforms: Matrix4[][], buildings: BlueprintBuilding[]) {
@@ -369,37 +375,79 @@ function buildBVH(transforms: Matrix4[][], buildings: BlueprintBuilding[]) {
 }
 
 function registerUpdater(updater: Updater, buildings: AllBuildings, posBP: PositionedBlueprint) {
+    // 先清空所有旧回调，防止场景重建时重复注册导致陈旧回调引用已销毁的 AllBuildings
+    updater.clearAll();
+
     updater.updateBuildingIcon.on(b => {
-        const iconId = buildings.iconTexture.requestIcon(buildingIconId(b));
-        buildings.icons.updateIconId(b, iconId);
+        const icons = buildings.icons;
+        // hasIcon 守卫：跳过 noIconBuildings（分流器/监测器等）与从未被渲染的建筑
+        if (!icons.hasIcon(b))
+            return;
+        const rawIconId = buildingIconId(b);
+        const iconId = rawIconId > 0 ? buildings.iconTexture.requestIcon(rawIconId) : 0;
+        icons.updateIconId(b, iconId);
     });
 
     updater.updateBeltIcon.on(b => {
-        const iconId = b.parameters ? buildings.iconTexture.requestIcon((b.parameters as BeltParameters).iconId) : 0;
         const icons = buildings.icons;
+        const params = b.parameters as BeltParameters | null;
+        const rawIconId = params ? params.iconId : 0;
+        const iconId = rawIconId > 0 ? buildings.iconTexture.requestIcon(rawIconId) : 0;
+
         if (icons.hasIcon(b)) {
+            // 已有图标 → 直接更新 UV（包括 iconId=0 清空图标的情况）
             icons.updateIconId(b, iconId);
-        } else if (iconId != 0) {
+        } else if (iconId !== 0) {
+            // 之前无图标，现在有了 → 动态添加
             const pos = new Vector3();
-            const trans = calcBuildingTrans(R, posBP, b)
-            beltIconPos(b, trans[0], pos)
+            const trans = calcBuildingTrans(R, posBP, b);
+            beltIconPos(b, trans[0], pos);
             icons.addIcon(b, iconId, pos, beltIconScale, true);
         }
     });
 
-    updater.updateBeltIconSubscript.on(() => { throw new Error('Method not implemented.') });
+    updater.updateBeltIconSubscript.on(b => {
+        const subEntry = buildings.subscriptMap.get(b);
+        if (!subEntry || !buildings.subscriptMesh)
+            return;
+        const params = b.parameters as BeltParameters | null;
+        if (!params)
+            return;
+        // 重算 count 文本并更新 subscriptMesh 的 iconId / iconPos 属性
+        let s: string;
+        if (params.count >= 100000)
+            s = Math.floor(params.count / 1000).toFixed(0) + 'k';
+        else
+            s = params.count.toFixed(0);
+        // 保护：若新文本长度与初始构建时不同，跳过本次局部刷新（下一非 silent 命令会重建场景）
+        // 原因：subscriptMesh 是连续字符池，长度变化会覆盖/遗漏后续 belt 的下标
+        if (s.length !== subEntry.length)
+            return;
+        const pos = new Vector3();
+        const trans = calcBuildingTrans(R, posBP, b);
+        beltIconPos(b, trans[0], pos);
+        buildings.subscriptMesh.setText(subEntry.startIdx, pos, beltIconScale, s);
+        buildings.subscriptMesh.needsUpdate();
+    });
+
     updater.updateSorterIcon.on(b => {
-        const iconId = buildings.iconTexture.requestIcon(itemIconId(b.filterId));
         const icons = buildings.icons;
+        const rawIconId = b.filterId;
+        const iconId = rawIconId > 0 ? buildings.iconTexture.requestIcon(itemIconId(rawIconId)) : 0;
+
         if (icons.hasIcon(b)) {
             icons.updateIconId(b, iconId);
-        } else if (iconId != 0) {
+        } else if (iconId !== 0) {
+            // 之前无图标，现在有了 → 动态添加
             const pos = new Vector3();
-            const trans = calcBuildingTrans(R, posBP, b)
-            sorterIconPos(b, trans[0], pos)
+            const trans = calcBuildingTrans(R, posBP, b);
+            sorterIconPos(b, trans[0], pos);
             icons.addIcon(b, iconId, pos, sorterIconScale, true);
         }
     });
+
+    // updateStationInfo：当前物流塔面板自己响应式刷新即可；
+    // 若未来要按库存首物品染色，在这里改颜色 attribute。
 }
 
 const R = 200.2;

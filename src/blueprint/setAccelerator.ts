@@ -39,6 +39,9 @@ export interface SetAcceleratorParams {
  * ```
  */
 export class SetAcceleratorCommand implements Command {
+    /** 只改 acceleratorMode 字段，几何不变 → 局部刷新 */
+    readonly silent = true;
+
     /** 目标模式 @type {AcceleratorMode} */
     targetMode: AcceleratorMode;
 

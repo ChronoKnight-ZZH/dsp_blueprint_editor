@@ -52,8 +52,10 @@ const onclick = (e: MouseEvent) => {
     background: black;
     padding: 10px;
     max-height: 90vh;
-    min-width: max(30vw, 180px);
     max-width: 90vw;
+    width: max-content;
+    overflow: auto;
+    box-sizing: border-box;
 }
 
 .modal::backdrop {

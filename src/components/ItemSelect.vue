@@ -61,5 +61,5 @@ const selected = (i: Item | null) => {
 </script>
 
 <style lang="scss">
-// style shared with RecipeSelect
+@import './_icon-select';
 </style>
