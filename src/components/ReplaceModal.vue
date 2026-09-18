@@ -1,83 +1,70 @@
 <template>
     <Modal v-model:open="open">
-        <h2>{{ t('批量替换') }}</h2>
-        <div class="modal-text">
-            <div class="modal-text">{{ t('范围：') }}</div>
-            <div>
-                <span class="replace-scope">
-                    <input type="checkbox" id="replace-recipe" v-model="r.scope.recipe"
-                        @change="onScopeChange('recipe')"><label for="replace-recipe">{{ t('配方') }}</label>
-                </span>
-                <span class="replace-scope">
-                    <input type="checkbox" id="replace-filter" v-model="r.scope.filter"
-                        @change="onScopeChange('filter')"><label for="replace-filter">{{ t('分拣器筛选') }}</label>
-                </span>
-                <span class="replace-scope">
-                    <input type="checkbox" id="replace-station" v-model="r.scope.station"
-                        @change="onScopeChange('station')"><label for="replace-station">{{ t('物流塔栏位') }}</label>
-                </span>
-            </div>
-            <div>
-                <span class="replace-scope">
-                    <input type="checkbox" id="replace-building-level" v-model="r.scope.buildingLevel"
-                        @change="onScopeChange('buildingLevel')"><label for="replace-building-level">{{ t('升降建筑等级')
-                        }}</label>
-                </span>
-                <span class="replace-scope">
-                    <input type="checkbox" id="replace-band-icon" v-model="r.scope.beltIcon"
-                        @change="onScopeChange('beltIcon')"><label for="replace-band-icon">{{ t('传送带图标') }}</label>
-                </span>
-                <span class="replace-scope">
-                    <input type="checkbox" id="replace-bp-icon" v-model="r.scope.blueprintIcon"
-                        @change="onScopeChange('blueprintIcon')"><label for="replace-bp-icon">{{ t('蓝图图标') }}</label>
-                </span>
-            </div>
+        <h2>{{t('批量替换')}}</h2>
+        <div>
+            {{t('范围：')}}
+            <span class="replace-scope">
+                <input type="checkbox" id="replace-recipe" v-model="r.scope.recipe" @change="onScopeChange('recipe')"><label for="replace-recipe">{{t('配方')}}</label>
+            </span>
+            <span class="replace-scope">
+                <input type="checkbox" id="replace-filter" v-model="r.scope.filter" @change="onScopeChange('filter')"><label for="replace-filter">{{t('分拣器筛选')}}</label>
+            </span>
+            <span class="replace-scope">
+                <input type="checkbox" id="replace-station" v-model="r.scope.station" @change="onScopeChange('station')"><label for="replace-station">{{t('物流塔栏位')}}</label>
+            </span>
+            <span class="replace-scope">
+                <input type="checkbox" id="replace-band-icon" v-model="r.scope.beltIcon" @change="onScopeChange('beltIcon')"><label for="replace-band-icon">{{t('传送带图标')}}</label>
+            </span>
+            <span class="replace-scope">
+                <input type="checkbox" id="replace-bp-icon" v-model="r.scope.blueprintIcon" @change="onScopeChange('blueprintIcon')"><label for="replace-bp-icon">{{t('蓝图图标')}}</label>
+            </span>
+            <span class="replace-scope">
+                <input type="checkbox" id="replace-building-level" v-model="r.scope.buildingLevel" @change="onScopeChange('buildingLevel')"><label for="replace-building-level">{{t('升降建筑等级')}}</label>
+            </span>
         </div>
         <template v-if="r.scope.buildingLevel">
-            <div>{{ t('源建筑：') }}</div>
-            <div class="icon-row" style="flex-wrap: wrap;width: 60%;">
+            <div>{{t('源建筑：')}}</div>
+            <div class="icon-row">
                 <span v-for="id in sourceOptions" :key="id" class="icon-cell"
-                    :class="{ selected: r.sourceItemId === id }" :title="itemName(id)" @click="r.sourceItemId = id">
-                    <BuildingIcon :icon-id="itemIconId(id)" :alt="itemName(id)" />
+                      :class="{selected: r.sourceItemId === id}"
+                      :title="itemName(id)" @click="r.sourceItemId = id">
+                    <BuildingIcon :icon-id="itemIconId(id)" :alt="itemName(id)"/>
                 </span>
             </div>
-            <div>{{ t('目标建筑：') }}</div>
+            <div>{{t('目标建筑：')}}</div>
             <div class="icon-row">
-                <span v-if="targetOptions.length === 0" class="empty-hint">{{ t('请选择源建筑') }}</span>
+                <span v-if="targetOptions.length === 0" class="empty-hint">{{t('请选择源建筑')}}</span>
                 <span v-for="id in targetOptions" :key="id" class="icon-cell"
-                    :class="{ selected: r.targetItemId === id }" :title="itemName(id)" @click="r.targetItemId = id">
-                    <BuildingIcon :icon-id="itemIconId(id)" :alt="itemName(id)" />
+                      :class="{selected: r.targetItemId === id}"
+                      :title="itemName(id)" @click="r.targetItemId = id">
+                    <BuildingIcon :icon-id="itemIconId(id)" :alt="itemName(id)"/>
                 </span>
             </div>
         </template>
         <template v-else>
-            <span>{{ t('搜索：') }}
-                <RecipeSelect v-model:recipeId="r.searchRecipe" />
-            </span>
-            <span>{{ t('替换：') }}
-                <RecipeSelect v-model:recipeId="r.replaceRecipe" />
-            </span>
+            <div>{{t('搜索：')}} <RecipeSelect v-model:recipeId="r.searchRecipe"/></div>
+            <div>{{t('替换：')}} <RecipeSelect v-model:recipeId="r.replaceRecipe"/></div>
         </template>
-        <!-- 仅在“配方”范围被勾选时显示：替换配方后顺带翻转加速模式 -->
-        <div v-if="r.scope.recipe" class="replace-scope-row">
-            <div v-if="r.scope.recipe" class="accelerator-row">
-                <span>{{ t('加速模式：') }}</span>
-                <label class="accelerator-option">
-                    <input type="radio" :value="null" v-model="r.acceleratorMode" />
-                    <span>{{ t('不改变') }}</span>
-                </label>
-                <label class="accelerator-option">
-                    <input type="radio" :value="AcceleratorMode.ExtraOutput" v-model="r.acceleratorMode" />
-                    <span>{{ t('额外产出') }}</span>
-                </label>
-                <label class="accelerator-option">
-                    <input type="radio" :value="AcceleratorMode.Accelerate" v-model="r.acceleratorMode" />
-                    <span>{{ t('生产加速') }}</span>
-                </label>
-            </div>
-        </div>
-        <div >
-            <button @click="execute" :disabled="!canExecute">{{ t('全部替换') }}</button>
+                    <!-- 加速模式（仅配方范围勾选时显示） -->
+            <section v-if="r.scope.recipe" class="modal-section">
+                <div class="section-label">{{ t('加速模式：') }}</div>
+                <div class="radio-group">
+                    <label class="radio-option">
+                        <input type="radio" :value="null" v-model="r.acceleratorMode" />
+                        <span>{{ t('不改变') }}</span>
+                    </label>
+                    <label class="radio-option">
+                        <input type="radio" :value="AcceleratorMode.ExtraOutput" v-model="r.acceleratorMode" />
+                        <span>{{ t('额外产出') }}</span>
+                    </label>
+                    <label class="radio-option">
+                        <input type="radio" :value="AcceleratorMode.Accelerate" v-model="r.acceleratorMode" />
+                        <span>{{ t('生产加速') }}</span>
+                    </label>
+                </div>
+            </section>
+        <div>
+            <button @click="execute" :disabled="!canExecute">{{t('全部替换')}}</button>
         </div>
     </Modal>
 </template>
@@ -230,52 +217,6 @@ const execute = () => {
 
     @media screen and (max-width: 360px) {
         display: block;
-    }
-}
-
-.replace-scope-row {
-    margin-top: 0.25rem;
-}
-
-.icon-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.25rem;
-    margin: 0.25rem 0 0.75rem;
-}
-
-.icon-cell {
-    display: inline-block;
-    cursor: pointer;
-    border-radius: 4px;
-    padding: 2px;
-
-    &:hover {
-        outline: 1px solid rgba(120, 180, 255, .7);
-    }
-
-    &.selected {
-        outline: 2px solid #6cf;
-    }
-}
-
-.empty-hint {
-    color: rgba(255, 255, 255, 0.5);
-    font-size: 0.8rem;
-}
-
-.accelerator-row {
-    margin-top: 0.25rem;
-}
-
-.accelerator-option {
-    display: inline-block;
-    margin-left: 10px;
-    cursor: pointer;
-
-    input {
-        vertical-align: middle;
-        margin-right: 4px;
     }
 }
 </style>

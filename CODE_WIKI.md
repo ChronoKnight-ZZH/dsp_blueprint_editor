@@ -44,8 +44,10 @@
 - 信息面板编辑蓝图头部（图标、作者、版本、属性、介绍）。
 - 在 3D 场景中点选建筑查看详情，右键剔除单个或同类建筑。
 - 批量替换配方 / 过滤器 / 物流塔栏位 / 传送带图标 / 蓝图图标。
+- 批量建筑升降级（传送带/分拣器/制造台/熔炉/研究站/化工厂，支持跳级与降级）。
+- 批量替换配方时顺带翻转"生产加速 / 额外产出"模式（仅作用于被替换到的建筑）。
 - 完整的撤销/重做（Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z）。
-- 复制 / 保存为 .txt 文件，输出与游戏格式字节级一致。
+- 复制 / 保存为 .txt 文件，输出与游戏格式字节级一致；支持拖拽 .txt 文件直接打开。
 - 中英双语 UI 与物品/配方名称。
 
 ---
@@ -203,6 +205,8 @@
 | `planet.ts` | 把蓝图分区（`BlueprintArea`）摆放回 200 段标准星球的经纬度，输出每个建筑在 3D 球面的变换矩阵。 |
 | `buildingInfo.ts` | 根据建筑的 `outputObjIdx/inputObjIdx` 等字段构建建筑邻接表，供信息面板展示上下游链路。 |
 | `replace.ts` | `ReplaceCommand`：按配方/过滤器/物流塔栏位/传送带图标/蓝图图标 5 个维度批量替换。 |
+| `upgrade.ts` | `UpgradeCommand`：建筑升降级；`upgradeEdges` 升降级有向图、`reachableTargets` 路径计算、`upgradeableItems` 候选集合。 |
+| `setAccelerator.ts` | `SetAcceleratorCommand`：批量设置"生产加速 / 额外产出"模式，支持按建筑子集与研究站过滤。 |
 | `removeBuilding.ts` | `RemoveBuildingsCommand` / `RemoveBuildingCommand` / `RemoveBuildingsByItemCommand`：删除建筑并维护 index 与交叉引用。 |
 
 ### 5.2 命令与状态层 `src/`
@@ -247,7 +251,7 @@
 | `SpitterInfo.vue` | 四向分流器（优先级 + v2 extra）。 |
 | `WorkEnergyParam.vue` | 工作能耗通用参数输入。 |
 | `ItemSelect.vue` / `RecipeSelect.vue` / `IconPickerModal.vue` | 物品/配方/图标的搜索选择模态框。 |
-| `ReplaceModal.vue` | 批量替换弹窗。 |
+| `ReplaceModal.vue` | 批量替换弹窗：6 个互斥范围 Tab（配方/分拣器筛选/物流塔栏位/传送带图标/蓝图图标/升降建筑等级）；切换到"升降建筑等级"显示源/目标建筑图标网格；勾选"配方"时附加速模式单选组（不改变/额外产出/生产加速），执行后顺带推送 `SetAcceleratorCommand`。 |
 | `ModalDSP.vue` / `SwitchDSP.vue` / `ColorPreview.vue` | 通用模态框/开关/颜色预览基础控件。 |
 
 ### 5.5 数据与资源模块 `src/data/`
@@ -378,6 +382,48 @@
 - `raycast(ray)`：递归遍历，把命中三角形的 `{index, distanceSquared}` 升序返回，用于点击拾取。
 - `boxes`：暴露每个建筑的选择盒矩阵，供高亮与拾取。
 
+### 6.10 `blueprint/upgrade.ts` 建筑升降级
+
+#### 常量与导出
+
+- `upgradeEdges: [number, number][]`：低级 → 高级的有向边集合，覆盖传送带（2001→2002→2003）、分拣器（2011→2012→2013→2014）、制造台（2303→2304→2305→2318）、熔炉（2302→2315→2319）、研究站（2901→2902）、化工厂（2309→2317）。注：源码注释明确修正了原 `2302→2319` 的笔误，按"位面 → 负熵"的真实意图拆为 `2302→2315` 与 `2315→2319`。
+- `upAdj` / `downAdj`：模块内部由 `upgradeEdges` 构建的升级/降级邻接表（`Record<number, number[]>`）。
+- `upgradeableItems: number[]`：所有参与升降级的 itemId 去重升序集合，供 UI 渲染候选图标网格。
+
+#### 函数
+
+| 函数 | 作用 |
+| --- | --- |
+| `reachN(adj, start, n)` | 从 `start` 出发走恰好 `n` 步能到达的节点前沿（不含自身），用迭代 BFS 推进；用于可达性查询。 |
+| `reachableTargets(fromId)` | 返回 `fromId` 在升降级图上能到达的全部目标 itemId（升级 + 降级，含跳级），合并 1..maxSteps 步的 `reachN` 前沿；不可升降级 itemId 返回 `[]`。 |
+
+#### `UpgradeCommand implements Command`
+
+- 构造 `(bp, fromItemId, toItemId)`：校验 `toItemId` 在 `itemsMap` 中且 `models.length > 0`，缓存 `toModelIndex = toItem.models[0]`；遍历 `bp.buildings` 收集所有 `itemId === fromItemId` 的建筑到 `upgraded` 数组，并快照其 `oldItemId / oldModelIndex`。
+- `do(_data, updater)`：把每个目标建筑的 `itemId` 与 `modelIndex` 改写为 `toItemId / toModelIndex`，按类型派发图标刷新。
+- `undo(_data, updater)`：逐建筑恢复 `oldItemId / oldModelIndex`，对称派发图标刷新。
+- `merge()` 恒返回 `false`。
+- **图标刷新分流** `dispatchIconUpdate(b, updater)`：传送带走 `updateBeltIcon`、分拣器走 `updateSorterIcon`、其它走 `updateBuildingIcon`。原因：传送带/分拣器的图标槽位仅在 `iconId>0 / filterId>0` 时注册到 `IconGeometry.indexMap`，统一走 `updateBuildingIcon` 会因找不到槽位而抛 `'No icon to update'`。
+- **不变性约束**：仅适用于参数格式在各等级间一致的建筑（传送带/分拣器/制造台/熔炉/研究站/化工厂），`parameters` 原样保留无需改动。
+
+### 6.11 `blueprint/setAccelerator.ts` 加速模式设置
+
+#### 类型
+
+- `SetAcceleratorParams`：`{ mode: AcceleratorMode; buildingIndexes?: number[]; labOnly?: boolean }`。
+  - `mode`：目标模式（`Accelerate` 生产加速 / `ExtraOutput` 额外产出）。
+  - `buildingIndexes`：可选，只作用于这些建筑；省略则对全蓝图生效。
+  - `labOnly`：可选，仅作用于研究站（itemId 2901 / 2902）。
+
+#### `SetAcceleratorCommand implements Command`
+
+- 构造 `(bp, params)`：缓存 `targetMode`；遍历 `bp.buildings`，按 `buildingIndexes` 集合与 `labOnly` 过滤，只收集 `parameters` 含 `acceleratorMode` 字段（即 `AssembleParamerters` / `LabParamerters`）的建筑，对每个命中建筑快照其原始 `acceleratorMode` 到 `originalModes`。
+- `apply(modes, updater)`：内部工具——把 `buildings[i].parameters.acceleratorMode` 写入对应模式，并 `updateBuildingIcon.dispatch(b)` 派发增量刷新。
+- `do(_data, updater)`：用 `targetMode` 数组调用 `apply`，统一设为目标模式。
+- `undo(_data, updater)`：用 `originalModes` 数组调用 `apply`，逐建筑精确恢复——混合模式场景下撤销也不会错乱。
+- `merge()` 恒返回 `false`。
+- **典型用法**：`ReplaceModal.vue` 在勾选"配方"范围并选了具体加速模式时，先 `push(new ReplaceCommand(...))`，再读取 `replaceCmd.recipeBuildings.map(b => b.index)` 作为 `buildingIndexes` 推送 `SetAcceleratorCommand`，从而只对刚被替换配方的建筑翻转加速模式，避免影响其它建筑。
+
 ---
 
 ## 7. 蓝图二进制格式与参数编解码
@@ -495,6 +541,8 @@ App.vue 的 watchEffect 把 codeExpired 置 true（蓝图字符串需重生成�
 | 命令 | 文件 | 作用 |
 | --- | --- | --- |
 | `ReplaceCommand` | `blueprint/replace.ts` | 5 维批量替换配方/过滤器/物流塔/传送带图标/蓝图图标 |
+| `UpgradeCommand` | `blueprint/upgrade.ts` | 建筑升降级：把所有 `itemId === fromItemId` 的建筑改写为 `toItemId` 并同步 `modelIndex`，按类型分流图标刷新通道 |
+| `SetAcceleratorCommand` | `blueprint/setAccelerator.ts` | 批量设置"生产加速 / 额外产出"模式；支持按 `buildingIndexes` 子集与 `labOnly` 过滤，撤销时逐建筑恢复原始模式 |
 | `RemoveBuildingsCommand` | `blueprint/removeBuilding.ts` | 批量删除建筑，维护 index 与交叉引用 |
 | `RemoveBuildingCommand` | 同上 | 单个建筑删除（3D 右键） |
 | `RemoveBuildingsByItemCommand` | 同上 | 同 itemId 全部删除（列表右键） |
@@ -677,6 +725,12 @@ cat blueprint.txt | yarn cli > bp.json
 | `noIconBuildings` | 分流器/集装机/监测器/喷涂机/电力感应塔/无线输电塔不渲染图标。 |
 | `VERSION` | 来自 `git describe`，由 webpack DefinePlugin 注入。 |
 | `publicPath` | `/dsp_blueprint_editor/`，与 GitHub Pages 子路径一致。 |
+| `upgradeEdges` | 建筑升降级有向边集合（低级→高级），覆盖传送带/分拣器/制造台/熔炉/研究站/化工厂；`upAdj`/`downAdj` 是其正反向邻接表。 |
+| `reachableTargets(fromId)` | 在升降级图上从 `fromId` 能到达的全部目标 itemId（升级+降级+跳级），用于 `ReplaceModal` 渲染目标建筑候选。 |
+| `UpgradeCommand` | 建筑升降级命令：改写 itemId/modelIndex，按类型分流到 `updateBeltIcon`/`updateSorterIcon`/`updateBuildingIcon` 三个图标刷新通道。 |
+| `SetAcceleratorCommand` | 批量设置加速模式命令：作用于含 `acceleratorMode` 字段的建筑（制造台/熔炉/精炼厂/化工厂/对撞机/研究站）；`ReplaceModal` 在替换配方后用它顺带翻转模式。 |
+| `AcceleratorMode` | 加速模式枚举：`Accelerate`=生产加速、`ExtraOutput`=额外产出；由 `assembleParamParser`/`labParamParser` 编解码。 |
+| `dispatchIconUpdate` | `UpgradeCommand` 内部的图标刷新分流函数，避免传送带/分拣器走错通道抛 `'No icon to update'`。 |
 
 ---
 
