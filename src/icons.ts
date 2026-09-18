@@ -161,7 +161,7 @@ export class IconGeometry extends InstancedBufferGeometry {
     updateIconId(b: BlueprintBuilding, iconId: number) {
         const index = this.indexMap.get(b);
         if (index === undefined)
-            throw new Error('No icon to update')
+            return;  // 无图标建筑（noIconBuildings）或从未被渲染的建筑，静默跳过
         const idAttr = this.getAttribute('iconId') as InstancedBufferAttribute;
         (idAttr.array as Int32Array)[index] = iconId;
         updateAttr(idAttr, index);

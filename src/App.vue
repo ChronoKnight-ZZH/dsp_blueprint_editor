@@ -219,7 +219,8 @@ provide(commandQueueKey, commandQueue);
 
 watchEffect(onCleanup => {
     if (commandQueue.value) {
-        const stopWatch = watch(commandQueue.value.execVersion, () => codeExpired.value = true);
+        // 非 silent 命令（几何/拓扑变更）与 silent 命令（纯数据变更）都应标记蓝图代码过期
+        const stopWatch = watch(commandQueue.value.stateVersion, () => codeExpired.value = true);
         onCleanup(stopWatch);
     }
 });

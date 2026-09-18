@@ -16,6 +16,10 @@ export class EventDispatcher<TArgs extends Array<any>> {
             cb(...args);
         }
     }
+    /** 清空所有回调，防止 registerUpdater 在重建时重复注册 */
+    clear() {
+        this.callbacks.clear();
+    }
 }
 
 
@@ -26,12 +30,27 @@ export class Updater {
     updateSorterIcon = new EventDispatcher<[b: BlueprintBuilding]>();
 
     updateStationInfo = new EventDispatcher<[b: BlueprintBuilding]>();
+
+    /** 清空所有 dispatcher 的回调（场景重建前调用，避免陈旧回调引用已销毁的 AllBuildings） */
+    clearAll() {
+        this.updateBuildingIcon.clear();
+        this.updateBeltIcon.clear();
+        this.updateBeltIconSubscript.clear();
+        this.updateSorterIcon.clear();
+        this.updateStationInfo.clear();
+    }
 }
 
 export interface Command {
     do(data: BlueprintData, updater: Updater): void;
     undo(data: BlueprintData, updater: Updater): void;
     merge(c: Command): boolean;
+    /**
+     * true  = 只改图标/颜色/文字/纯数据，不改变几何/拓扑 → 触发 stateVersion++，不触发 execVersion++
+     * false = 改了几何/拓扑（模型/尺寸/位置/连接关系/数组增删） → 触发 execVersion++，3D 层重建
+     * 省略等价于 false
+     */
+    readonly silent?: boolean;
 }
 
 export class CommandQueue {
@@ -44,7 +63,15 @@ export class CommandQueue {
         this.trim()
     }
 
-    private readonly stateVersion = ref(0);
+    /**
+     * 状态版本号：每次命令（无论 silent 与否）都递增。
+     * 用于通知 App.vue 蓝图代码需要重新生成（codeExpired）。
+     */
+    public readonly stateVersion = ref(0);
+    /**
+     * 执行版本号：仅非 silent 命令递增。
+     * 用于通知 BlueprintEditor 整体重建 3D 场景（几何/拓扑变更）。
+     */
     public readonly execVersion = ref(0);
     public readonly updater;
     constructor(public readonly data: BlueprintData) {
@@ -74,7 +101,8 @@ export class CommandQueue {
         this.currentPosition++;
         this.trim();
         this.stateVersion.value++;
-        this.execVersion.value++;
+        if (!c.silent)
+            this.execVersion.value++;
     }
 
     public canUndo() {
@@ -85,9 +113,11 @@ export class CommandQueue {
     public undo() {
         if (!this.canUndo())
             return false;
-        this.commands[--this.currentPosition].undo(this.data, this.updater);
+        const cmd = this.commands[--this.currentPosition];
+        cmd.undo(this.data, this.updater);
         this.stateVersion.value++;
-        this.execVersion.value++;
+        if (!cmd.silent)
+            this.execVersion.value++;
         return true;
     }
 
@@ -99,9 +129,11 @@ export class CommandQueue {
     public redo() {
         if (!this.canRedo())
             return false;
-        this.commands[this.currentPosition++].do(this.data, this.updater);
+        const cmd = this.commands[this.currentPosition++];
+        cmd.do(this.data, this.updater);
         this.stateVersion.value++;
-        this.execVersion.value++;
+        if (!cmd.silent)
+            this.execVersion.value++;
         return true;
     }
 }
