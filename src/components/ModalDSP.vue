@@ -45,10 +45,6 @@ const onclick = (e: MouseEvent) => {
 .modal {
     padding: 0;
     border: #FFFA solid 1px;
-    display: flex; /* 弹性布局 */
-}
-.modal-text {
-/* text-align: center;  */
 }
 
 .modal-window {
@@ -56,20 +52,8 @@ const onclick = (e: MouseEvent) => {
     background: black;
     padding: 10px;
     max-height: 90vh;
-    min-width: max(30vw, 150px);
+    min-width: max(30vw, 180px);
     max-width: 90vw;
-    display: flex; /* 弹性布局 */
-    justify-content: center; /* 水平居中 */
-    align-items: center; /* 垂直居中 */
-    flex-direction: column;
-    flex-wrap: wrap;
-    gap: 10px;
-    width: 100%;
-    height: 100%;
-    overflow: auto;
-    box-sizing: border-box;
-    border-radius: 10px;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
 }
 
 .modal::backdrop {

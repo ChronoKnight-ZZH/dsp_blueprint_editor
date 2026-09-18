@@ -76,32 +76,70 @@ const selected = (i: Recipe | null) => {
     padding-top: 100%;
 }
 
+/* ---------- 图标网格 ---------- */
 .icon-grid {
     display: inline-grid;
-    @media screen and (max-width: 640px) {
-        display: grid;
-    }
     --cell-size: 40px;
+
+    /* ---------- 用固定尺寸的 track 替代 1fr ---------- */
     &.recipe {
-        grid-template: repeat(7, 1fr) / repeat(7, 1fr);
+        grid-template: repeat(7, var(--cell-size)) / repeat(7, var(--cell-size));
+        width: calc(7 * var(--cell-size));
         height: calc(7 * var(--cell-size));
     }
     &.item {
-        grid-template: repeat(8, 1fr) / repeat(7, 1fr);
+        grid-template: repeat(8, var(--cell-size)) / repeat(7, var(--cell-size));
+        width: calc(7 * var(--cell-size));
         height: calc(8 * var(--cell-size));
     }
-    width: calc(7 * var(--cell-size));
 
-    .icon {
+    /* ---------- 约束 grid 直接子项（就是 .icon） ---------- */
+    > .icon {
         width: var(--cell-size);
         height: var(--cell-size);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;      /* 关键：防止内部 img 溢出到相邻格子 */
+        box-sizing: border-box;
+        cursor: pointer;
+
+        /* 关键：约束内部 img，否则图片按原图尺寸渲染会重叠 */
+        > img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+            pointer-events: none;   /* 点击事件交给 .icon */
+        }
+
+        /* 兼容其他可能的内部元素 */
+        > svg,
+        > canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+    }
+
+    /* ---------- 手机端：缩小单元格 ---------- */
+    @media screen and (max-width: 640px) {
+        display: grid;
+        --cell-size: 36px;
+    }
+
+    @media screen and (max-width: 360px) {
+        --cell-size: 32px;
     }
 }
 
+/* ---------- Tab ---------- */
 .icon-tab {
     display: inline-block;
     text-align: center;
     opacity: 0.6;
+    cursor: pointer;
+    transition: opacity 0.15s;
 
     &.active {
         opacity: 1.0;
@@ -111,6 +149,13 @@ const selected = (i: Recipe | null) => {
         width: 60px;
         height: 60px;
         display: block;
+    }
+
+    @media screen and (max-width: 640px) {
+        img {
+            width: 48px;
+            height: 48px;
+        }
     }
 }
 </style>
