@@ -11,6 +11,9 @@
         display: block;
     }
 }
+.icon-grid > .icon {
+    outline: 1px solid red;
+}
 
 .icon-placeholder {
     border: 1px dashed currentColor;
@@ -25,9 +28,11 @@
 
     /* ---------- 用固定尺寸的 track 替代 1fr ---------- */
     &.recipe {
-        grid-template: repeat(7, var(--cell-size)) / repeat(7, var(--cell-size));
+        /* 配方数据组件页实际占 8 行（grid[1] 1-8），必须与数据一致，
+           否则第 8 行会落入隐式轨道溢出固定高度容器，与相邻网格图标重叠 */
+        grid-template: repeat(8, var(--cell-size)) / repeat(7, var(--cell-size));
         width: calc(7 * var(--cell-size));
-        height: calc(7 * var(--cell-size));
+        height: calc(8 * var(--cell-size));
     }
     &.item {
         grid-template: repeat(8, var(--cell-size)) / repeat(7, var(--cell-size));

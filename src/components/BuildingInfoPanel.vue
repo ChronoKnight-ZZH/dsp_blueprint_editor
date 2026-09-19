@@ -55,6 +55,7 @@
         <SwitchDSP :opened="(bParams as TankParameters).input">{{ t('储液罐输入') }}</SwitchDSP>
     </div>
     <DispenserInfo v-if="isDispenser(building.itemId)" :building="building" />
+    <HoloBeaconInfo v-if="isHoloBeacon(building.itemId)" :building="building" />
 </template>
 
 <script lang="ts">
@@ -92,7 +93,7 @@ import { itemIconId } from '@/data/icons';
 import {
     isLab, allAssemblers, isBelt, isStation, itemsMap, isInserter, isStorage, isTank,
     isEjector, isEnergyExchanger, isArtificialStar, isRayReciver, isMonitor, isSplitter,
-    isBattleBase, isDispenser,
+    isBattleBase, isDispenser, isHoloBeacon,
 } from '@/data/items';
 import { recipesMap } from '@/data';
 import { commandQueueKey } from '@/define';
@@ -104,6 +105,7 @@ import MonitorInfo from './MonitorInfo.vue';
 import BattleBaseInfo from './BattleBaseInfo.vue';
 import StorageInfo from './StorageInfo.vue';
 import DispenserInfo from './DispenserInfo.vue';
+import HoloBeaconInfo from './HoloBeaconInfo.vue';
 import SwitchDSP from './SwitchDSP.vue';
 const SplitterInfo = defineAsyncComponent(() => import(/* webpackChunkName: "renderer" */'./SpitterInfo.vue'));
 

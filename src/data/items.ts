@@ -71,6 +71,10 @@ export function isDispenser(id: number) {
     return id === 2107;
 }
 
+export function isHoloBeacon(id: number) {
+    return id === 2401;
+}
+
 export const allAssemblers = new Set([
     2303, // 制造台
     2304,

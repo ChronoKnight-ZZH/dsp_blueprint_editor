@@ -8,7 +8,8 @@ const V1_BLUEPRINT = 'BLUEPRINT:0,10,401,0,0,0,0,0,637818182165693716,0.9.24.112
 function extractBody(strData: string): Uint8Array {
     const p1 = strData.indexOf('"', 'BLUEPRINT:'.length) + 1;
     const p2 = strData.length - 33;
-    return pako.ungzip(Buffer.from(strData.substring(p1, p2), 'base64'));
+    console.log(pako.ungzip(new Uint8Array(Buffer.from(strData.substring(p1, p2), 'base64'))))
+    return pako.ungzip(new Uint8Array(Buffer.from(strData.substring(p1, p2), 'base64')));
 }
 
 function headerCells(strData: string): string[] {

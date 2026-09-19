@@ -12,7 +12,7 @@ function readFixture(file: string): string {
 function extractBody(strData: string): Uint8Array {
     const p1 = strData.indexOf('"', 'BLUEPRINT:'.length) + 1;
     const p2 = strData.length - 33;
-    return pako.ungzip(Buffer.from(strData.substring(p1, p2), 'base64'));
+    return pako.ungzip(new Uint8Array(Buffer.from(strData.substring(p1, p2), 'base64')));
 }
 
 describe('reform data (地基) support', () => {

@@ -71,6 +71,7 @@ const buildingMetaRaw: [number, { color: number | null, box: [number, number, nu
     [482, { color: null,     box: [2.5, 15.0, 2.5], offset: [0.0, 7.5, 0.0] }], // 地面电浆炮
     [422, { color: null,     box: [6.0, 7.0, 6.0], offset: [0.0, 3.5, 0.0] }], // 干扰塔
     [371, { color: 0x718495, box: [3.0, 1.9, 3.2], offset: [0.0, 1.1, 0.0] }], // 物流配送器
+    [664, { color: 0x7ED6DF, box: [2, 3, 2], offset: [0.0, 0.9, 0.0] }], // 全息信标
 ])
 
 export const buildingMeta = new Map<number, BuildingMeta>();
