@@ -760,6 +760,10 @@ export const items: Item[] = [
         name: '地面电浆炮', icon: 'turret-plasma-ground',
     },
     {
+        id: 2401, models: [664], grid: [2, 6, 1],
+        name: '全息信标', icon: 'holographic_beacon',
+    },
+    {
         id: 6001, models: [], grid: [1, 8, 1],
         name: '电磁矩阵', icon: 't-matrix',
         productive: true,

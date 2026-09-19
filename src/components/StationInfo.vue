@@ -1,5 +1,5 @@
 <template>
-    <template v-for="(s, i) in p.storage" :key="i">
+    <template v-for="(s, i) in storageList" :key="i">
         <div class="station-storage">
             <ItemSelect :item-id="s.itemId > 0 ? s.itemId : null"
                 @update:item-id="itemId => setItemId(i, itemId)"/>
@@ -100,11 +100,13 @@ class SetStationStorageItemCommand implements Command {
         this.setItemId(this.previousItemId, updater);
     }
     merge() { return false; }
+    /** 只改 storage 数据，不改几何/拓扑 → 局部刷新，不重建 3D 场景 */
+    readonly silent = true;
 }
 </script>
 
 <script lang="ts" setup>
-import { computed, inject, triggerRef } from 'vue';
+import { computed, inject } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import { truth } from '@/utils';
@@ -119,15 +121,26 @@ const props = defineProps<{
     building: BlueprintBuilding,
 }>();
 
-const p = computed(() => props.building.parameters as StationParameters);
-const pc = computed(() => props.building.parameters as AdvancedMiningMachineParameters);
-
 const buildingInfo = inject(buildingInfoKey)!.value!;
 const commandQueue = inject(commandQueueKey)!.value!;
 
-commandQueue.updater.updateStationInfo.onMounted(b => {
-    if (b === props.building)
-        triggerRef(p);
+// 局部刷新：监听 stateVersion（silent 命令触发），不重建 3D 场景
+const stateVersion = commandQueue.stateVersion;
+
+const p = computed(() => {
+    stateVersion.value;
+    return props.building.parameters as StationParameters;
+});
+const pc = computed(() => {
+    stateVersion.value;
+    return props.building.parameters as AdvancedMiningMachineParameters;
+});
+
+// 关键：返回新数组引用，确保 stateVersion 变化时 v-for 必定重渲染
+// （p 返回同一对象引用，computed 缓存比较 === 会跳过下游 effect）
+const storageList = computed(() => {
+    stateVersion.value;
+    return [...p.value.storage];
 });
 
 const setItemId = (storageIndex: number, itemId: number | null) => {
