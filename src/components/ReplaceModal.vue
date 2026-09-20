@@ -90,21 +90,21 @@ const commandQueue = inject(commandQueueKey)!.value!;
 const open = ref(false);
 
 defineExpose({
-    // reset: () => {
-    //     r.searchRecipe = null;
-    //     r.replaceRecipe = null;
-    //     r.sourceItemId = null;
-    //     r.targetItemId = null;
-    //     r.acceleratorMode = null;
-    //     r.scope = {
-    //         recipe: false,
-    //         filter: false,
-    //         station: false,
-    //         beltIcon: false,
-    //         blueprintIcon: false,
-    //         buildingLevel: false,
-    //     };
-    // },
+    reset: () => {
+        r.searchRecipe = null;
+        r.replaceRecipe = null;
+        r.sourceItemId = null;
+        r.targetItemId = null;
+        r.acceleratorMode = null;
+        r.scope = {
+            recipe: false,
+            filter: false,
+            station: false,
+            beltIcon: false,
+            blueprintIcon: false,
+            buildingLevel: false,
+        };
+    },
     open: () => open.value = true,
 })
 

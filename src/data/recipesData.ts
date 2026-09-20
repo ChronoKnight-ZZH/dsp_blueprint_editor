@@ -1903,11 +1903,12 @@ export const recipes: Recipe[] = [
         grid: [2, 3, 4],
     },
     {
-        id: 161, name: '全息信标', time: 360,
+        id: 161, name: '全息信标', time: 240,
         from: [
-            {item: itemsMap.get(1101)!, count: 4},
-            {item: itemsMap.get(1110)!, count: 2},
-            {item: itemsMap.get(1111)!, count: 1},
+            {item: itemsMap.get(1101)!, count: 3},
+            {item: itemsMap.get(1111)!, count: 4},
+            {item: itemsMap.get(1401)!, count: 2},
+            {item: itemsMap.get(1301)!, count: 2},
         ],
         to: [
             {item: itemsMap.get(2401)!, count: 1},

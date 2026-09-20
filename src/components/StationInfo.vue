@@ -56,6 +56,9 @@ const roleClass = new Map([
 
 class SetStationStorageItemCommand implements Command {
     public readonly previousItemId;
+    public readonly previousLocalLogic;
+    public readonly previousRemoteLogic;
+    public readonly previousMax;
     public readonly belts: BlueprintBuilding[];
 
     constructor(
@@ -67,6 +70,9 @@ class SetStationStorageItemCommand implements Command {
         const p = building.parameters as StationParameters;
         const s = p.storage[storageIndex];
         this.previousItemId = s.itemId;
+        this.previousLocalLogic = s.localLogic;
+        this.previousRemoteLogic = s.remoteLogic;
+        this.previousMax = s.max;
 
         this.belts = [];
         const adj = buildingInfo.adjacency[this.building.index];
@@ -94,9 +100,20 @@ class SetStationStorageItemCommand implements Command {
         }
     }
     do(data: BlueprintData, updater: Updater): void {
+        // 每次设置物品时，强制重置为默认值：本地供应 + 星际供应，上限 20000
+        if (this.newItemId !== 0) {
+            const s = (this.building.parameters as StationParameters).storage[this.storageIndex];
+            s.localLogic = LogisticRole.Supply;
+            s.remoteLogic = LogisticRole.Supply;
+            s.max = 20000;
+        }
         this.setItemId(this.newItemId, updater);
     }
     undo(data: BlueprintData, updater: Updater): void {
+        const s = (this.building.parameters as StationParameters).storage[this.storageIndex];
+        s.localLogic = this.previousLocalLogic;
+        s.remoteLogic = this.previousRemoteLogic;
+        s.max = this.previousMax;
         this.setItemId(this.previousItemId, updater);
     }
     merge() { return false; }
