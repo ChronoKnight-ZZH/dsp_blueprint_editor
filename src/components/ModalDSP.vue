@@ -52,7 +52,7 @@ const onclick = (e: MouseEvent) => {
     background: black;
     padding: 10px;
     max-height: 90vh;
-    max-width: 90vw;
+    max-width: 300vw;
     width: max-content;
     overflow: auto;
     box-sizing: border-box;

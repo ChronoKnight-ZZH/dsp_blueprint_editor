@@ -114,6 +114,12 @@ const clear = () => {
     padding: 4px;
     border: 1px solid #fff3;
     max-height: 55vh;
+    max-width: 60vw;
+    width: max-content;
+    // 小屏（modal 由 tabs 行撑开，宽于 60vw）时，强制 grid 撑满 modal 内容区；
+    // 大屏 grid 已达 60vw，min-width 不生效，max-width 仍封顶。
+    min-width: 100%;
+    box-sizing: border-box;
     overflow-y: auto;
 
     .icon-cell {
@@ -137,7 +143,7 @@ const clear = () => {
 
 .icon-picker-actions {
     margin-top: 8px;
-    text-align: end;
+    // text-align: end;
 
     .clear-btn {
         background: #c0392b;
