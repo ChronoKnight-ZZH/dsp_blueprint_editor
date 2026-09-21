@@ -357,7 +357,13 @@ onUnmounted(() => {
     }
 })
 
+// 用于判断蓝图是否被替换（而非同一份重新粘贴）：
+// 若建筑数量或末尾 33 字符（" + 32 位 MD5 校验）变化，则视为新蓝图，重置相机视角
+let prevMd5Suffix = '';
+let prevBuildingsCount = -1;
+
 const parseBp = (s: string) => {
+    const md5Suffix = s.length >= 33 ? s.slice(-33) : '';
     if (s) {
         try {
             data.value = shallowReactive(fromStr(s.trim()));
@@ -372,11 +378,28 @@ const parseBp = (s: string) => {
         } catch (e) {
             parseErrorMessage.value = String(e);
             console.error(e);
+            // 解析失败：不更新 prev 状态，也不重置相机
+            selectedBuildingIndex.value = null;
+            bpStr.value = s;
+            codeExpired.value = false;
+            return;
         }
     } else {
         data.value = null;
         parseErrorMessage.value = '';
     }
+
+    const newBuildingsCount = data.value?.buildings.length ?? 0;
+    const blueprintChanged =
+        md5Suffix !== prevMd5Suffix
+        || newBuildingsCount !== prevBuildingsCount;
+    prevMd5Suffix = md5Suffix;
+    prevBuildingsCount = newBuildingsCount;
+
+    if (blueprintChanged) {
+        renderer.value?.resetCamera();
+    }
+
     selectedBuildingIndex.value = null;
     bpStr.value = s;
     codeExpired.value = false;

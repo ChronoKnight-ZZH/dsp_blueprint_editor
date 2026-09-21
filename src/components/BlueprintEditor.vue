@@ -493,6 +493,8 @@ attachCamera(root, camera);
 
 const commandQueue = inject(commandQueueKey)!;
 
+let controls: PlanetMapControls | null = null;
+
 const b = computed(() => {
 	// 任意命令（剔除建筑 / 撤销 / 重做）后整体重建场景
 	commandQueue.value?.execVersion.value;
@@ -547,13 +549,14 @@ watchEffect(onCleanUp => {
 onMounted(() => {
 	const rootEl = root.value!;
 
-	const controls = new PlanetMapControls(camera, renderer.domElement);
-	controls.listenToKeyEvents(rootEl);
-	controls.minDistance = R * 1.04;
-	controls.maxDistance = R * 4;
-	controls.targetRadius = R;
-	onUnmounted(() => controls.dispose());
-	controls.update();
+	controls = new PlanetMapControls(camera, renderer.domElement);
+	const c = controls;
+	c.listenToKeyEvents(rootEl);
+	c.minDistance = R * 1.04;
+	c.maxDistance = R * 4;
+	c.targetRadius = R;
+	onUnmounted(() => c.dispose());
+	c.update();
 
 	const ray = new Ray();
 	const planetSphere = new Sphere(new Vector3(), R);
@@ -615,13 +618,13 @@ onMounted(() => {
 		if (!mounted)
 			return;
 		if (lastTimeStamp) {
-			controls.updateTimeDelta((time - lastTimeStamp) / 1000);
+			c.updateTimeDelta((time - lastTimeStamp) / 1000);
 		}
 		if (b.value?.buildings.cargos)
 			b.value.buildings.cargos.cargoMove = (time % 1000) / 1000;
 		lastTimeStamp = time;
 		requestAnimationFrame(animate);
-		const cameraUpdated = controls.update();
+		const cameraUpdated = c.update();
 		dirLight.position.copy(camera.position);
 		renderer.render(scene, camera);
 		if (cameraUpdated) {
@@ -641,11 +644,16 @@ const getModel = (index: number) => {
 	ref.mesh.getMatrixAt(ref.instance, m)
 	return m;
 }
+/** 重置相机视角到默认位置（星球正上方默认距离） */
+const resetCamera = () => {
+	controls?.reset(2 * R);
+};
 defineExpose({
 	selectBoxes,
 	camera,
 	cameraPosVersion,
     getModel,
+	resetCamera,
 });
 </script>
 
