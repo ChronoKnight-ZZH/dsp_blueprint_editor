@@ -104,6 +104,16 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
         return this.object.position.distanceTo(this.target);
     }
 
+    /** 重置视角：目标回到原点，相机回到正上方默认距离 */
+    reset(distance: number) {
+        this.target.set(0, 0, 0);
+        this.spherical.set(distance, Math.PI / 2, 0);
+        this.sphericalDelta.set(0, 0, 0);
+        this.panOffset.set(0, 0, 0);
+        this.scale = 1.0;
+        this.update();
+    }
+
     private keyRotate = new Vector2();
     updateTimeDelta(deltaTimeInSeconds: number) {
         for (const code of this.downKeys) {
