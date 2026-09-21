@@ -1,12 +1,19 @@
-import { BoxGeometry, InstancedBufferAttribute, InstancedMesh, MeshLambertMaterial, WebGLProgramParametersWithUniforms, WebGLRenderer } from "three";
+import { BufferGeometry, InstancedBufferAttribute, InstancedMesh, MeshLambertMaterial, WebGLProgramParametersWithUniforms, WebGLRenderer } from "three";
 
-class CargoGeometry extends BoxGeometry {
-    cargoDistance
-    constructor(count: number) {
-        super(0.3, 0.15, 0.4);
-        this.cargoDistance = new InstancedBufferAttribute(new Float32Array(count), 1);
-        this.setAttribute('cargoDistance', this.cargoDistance);
-    }
+/** 带 cargoDistance 实例属性的货物几何体 */
+export interface CargoGeometry extends BufferGeometry {
+    cargoDistance: InstancedBufferAttribute;
+}
+
+/**
+ * 为几何体附加 cargoDistance 实例属性并返回类型化的 CargoGeometry。
+ * @param geo      货物几何体（长度方向需沿局部 z 轴）
+ * @param count    实例数量上限
+ */
+export function makeCargoGeometry(geo: BufferGeometry, count: number): CargoGeometry {
+    const cargoDistance = new InstancedBufferAttribute(new Float32Array(count), 1);
+    geo.setAttribute('cargoDistance', cargoDistance);
+    return Object.assign(geo, { cargoDistance });
 }
 
 class CargoMaterial extends MeshLambertMaterial {
@@ -30,10 +37,10 @@ transformed.z -= cargoMove * cargoDistance;
 }
 
 export class Cargos extends InstancedMesh {
-    geometry;
-    material;
-    constructor(count: number) {
-        const geometry = new CargoGeometry(count);
+    geometry: CargoGeometry;
+    material: CargoMaterial;
+
+    constructor(geometry: CargoGeometry, count: number) {
         const material = new CargoMaterial();
         super(geometry, material, count);
         this.geometry = geometry;
