@@ -18,7 +18,7 @@ import { itemIconId, recipeIconId } from '@/data/icons';
 import { IconTexture } from '@/iconTexture';
 import { IconGeometry, Icons } from '@/icons';
 import { IconSubscript } from '@/iconSubscript';
-import { Cargos } from '@/cargos';
+import { Cargos, CargoGeometry, makeCargoGeometry } from '@/cargos';
 import { BVH } from '@/bvh';
 import { Updater } from '@/command';
 import { RemoveBuildingCommand } from '@/blueprint/removeBuilding';
@@ -53,7 +53,7 @@ class AllBuildings extends Object3D {
         objects: Object3D[],
         public readonly iconsMesh: Icons,
         public readonly iconTexture: IconTexture,
-        public readonly cargos: Cargos,
+        public readonly cargos: Cargos[],
         public readonly modelRef: { mesh: InstancedMesh, instance: number }[],
         public readonly subscriptMesh: IconSubscript | null = null,
         /** 建筑 → 下标文本在 subscriptMesh 中的起始字符位置与长度；belt count 变化时用于局部刷新 */
@@ -62,8 +62,8 @@ class AllBuildings extends Object3D {
         super();
         this.add(...objects);
         this.add(iconsMesh);
-        if (cargos)
-            this.add(cargos);
+        for (const c of cargos)
+            this.add(c);
         if (subscriptMesh)
             this.add(subscriptMesh);
     }
@@ -133,13 +133,26 @@ function sorterIconPos(b: BlueprintBuilding, buildingTrans: Matrix4, pos: Vector
     pos.setFromMatrixPosition(trans);
 }
 
+/** 传送带货物：正六棱柱，外接圆半径 0.15，长 0.4，轴向沿 z CylinderGeometry */
+function createBeltCargoGeometry(count: number): CargoGeometry {
+	const geo = new BoxGeometry(0.3, 0.3, 0.3);
+	geo.rotateX(Math.PI / 2); // 圆柱轴向从 y 转到 z
+	return makeCargoGeometry(geo, count);
+}
+
+/** 分拣器货物：正四棱柱，正方形截面 0.15 × 0.15，长 0.4（沿 z）BoxGeometry */
+function createInserterCargoGeometry(count: number): CargoGeometry {
+	const geo = new BoxGeometry(0.4, 0.4, 0.6);
+	return makeCargoGeometry(geo, count);
+}
+
 function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[], renderer: WebGLRenderer) {
 	const buildBelts = (belts: BlueprintBuilding[]) => {
 		const thickness = 0.1;
 		const material = new MeshLambertMaterial();
 		const objects: Object3D[] = [];
 		{
-			const geometry = new CylinderGeometry(0.32, 0.32, thickness, 8);
+			const geometry = new CylinderGeometry(0.32, 0.32, thickness, 6);
 			const mesh = new InstancedMesh(geometry, material, belts.length);
 			const offset = new Matrix4().makeRotationX(Math.PI / 2);
 			offset.premultiply(new Matrix4().makeTranslation(0, 0, thickness / 2));
@@ -179,7 +192,7 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
 				trans.premultiply(temp.makeTranslation(pos1.x, pos1.y, pos1.z));
 
 				const color = buildingMeta.get(b1.modelIndex)!.color;
-				addCargo(trans, color, len);
+				addBeltCargo(trans, color, len);
 
 				trans.multiply(temp.makeScale(1., 1., len));
 				trans.multiply(offset);
@@ -197,8 +210,7 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
 		return objects;
 	}
 	const buildInserters = (inserters: BlueprintBuilding[]) => {
-		const inserterThickness = 0.06;
-		const geometry = new BoxGeometry(0.15, inserterThickness, 1.0);
+		const geometry = new BoxGeometry(0.1, 0.1, 1.0);
 		const material = new MeshLambertMaterial();
 		const mesh = new InstancedMesh(geometry, material, inserters.length);
 		const offset = new Matrix4().makeTranslation(0, 0, -0.5);
@@ -209,7 +221,7 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
 
 			const len = inserterTrans(transforms[b.index], trans);
 			const color = buildingMeta.get(b.modelIndex)!.color;
-			addCargo(trans, color, len);
+			addInserterCargo(trans, color, len);
 
 			trans.multiply(temp.makeScale(1., 1., len));
 			trans.multiply(offset);
@@ -317,14 +329,22 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
 	const iconInsterters = inserters.filter(b => b.filterId > 0);
 
 	const modelRef = new Array<{ mesh: InstancedMesh, instance: number }>(buildings.length);
-	const cargosMesh = new Cargos(belts.length + inserters.length);
-	let numCargos = 0;
-	const addCargo = (trans: Matrix4, color: Color, distance: number) => {
-		cargosMesh.setMatrixAt(numCargos, trans);
-		cargosMesh.setColorAt(numCargos, color);
-		cargosMesh.setCargoDistanceAt(numCargos, distance);
-		numCargos++;
-	}
+	const beltCargosMesh = new Cargos(createBeltCargoGeometry(belts.length), belts.length);
+	const inserterCargosMesh = new Cargos(createInserterCargoGeometry(inserters.length), inserters.length);
+	let numBeltCargos = 0;
+	let numInserterCargos = 0;
+	const addBeltCargo = (trans: Matrix4, color: Color, distance: number) => {
+		beltCargosMesh.setMatrixAt(numBeltCargos, trans);
+		beltCargosMesh.setColorAt(numBeltCargos, color);
+		beltCargosMesh.setCargoDistanceAt(numBeltCargos, distance);
+		numBeltCargos++;
+	};
+	const addInserterCargo = (trans: Matrix4, color: Color, distance: number) => {
+		inserterCargosMesh.setMatrixAt(numInserterCargos, trans);
+		inserterCargosMesh.setColorAt(numInserterCargos, color);
+		inserterCargosMesh.setCargoDistanceAt(numInserterCargos, distance);
+		numInserterCargos++;
+	};
 
     const meshes: Object3D[] = [];
 	if (belts.length)
@@ -333,11 +353,17 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
 	if (inserters.length)
 		meshes.push(...buildInserters(inserters));
 
-	if (numCargos) {
-		cargosMesh.count = numCargos;
-		cargosMesh.instanceMatrix.needsUpdate = true;
-		cargosMesh.instanceColor!.needsUpdate = true;
-		cargosMesh.geometry.cargoDistance.needsUpdate = true;
+	if (numBeltCargos) {
+		beltCargosMesh.count = numBeltCargos;
+		beltCargosMesh.instanceMatrix.needsUpdate = true;
+		beltCargosMesh.instanceColor!.needsUpdate = true;
+		beltCargosMesh.geometry.cargoDistance.needsUpdate = true;
+	}
+	if (numInserterCargos) {
+		inserterCargosMesh.count = numInserterCargos;
+		inserterCargosMesh.instanceMatrix.needsUpdate = true;
+		inserterCargosMesh.instanceColor!.needsUpdate = true;
+		inserterCargosMesh.geometry.cargoDistance.needsUpdate = true;
 	}
 
 	if (boxes.length)
@@ -352,7 +378,7 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
     const iconMesh = new Icons(iconTexture.texture, icons);
     iconMesh.renderOrder = 10;
 
-	return new AllBuildings(meshes, iconMesh, iconTexture, cargosMesh, modelRef, subscriptsMesh, subscriptMap);
+	return new AllBuildings(meshes, iconMesh, iconTexture, [beltCargosMesh, inserterCargosMesh], modelRef, subscriptsMesh, subscriptMap);
 }
 
 function buildBVH(transforms: Matrix4[][], buildings: BlueprintBuilding[]) {
@@ -620,8 +646,11 @@ onMounted(() => {
 		if (lastTimeStamp) {
 			c.updateTimeDelta((time - lastTimeStamp) / 1000);
 		}
-		if (b.value?.buildings.cargos)
-			b.value.buildings.cargos.cargoMove = (time % 1000) / 1000;
+		if (b.value?.buildings.cargos) {
+			const move = (time % 1000) / 1000;
+			for (const c of b.value.buildings.cargos)
+				c.cargoMove = move;
+		}
 		lastTimeStamp = time;
 		requestAnimationFrame(animate);
 		const cameraUpdated = c.update();
