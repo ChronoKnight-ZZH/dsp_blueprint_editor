@@ -64,6 +64,7 @@
                 <section>
                     <div class="row">
                         <label for="bp-str" style="margin-right: auto;">{{ t('蓝图代码') }}</label>
+                        <button style="margin-left: 4px;" @click="newBlueprint" :disabled="working">{{ t('新建') }}</button>
                         <button style="margin-left: 4px;" @click="copy" :disabled="working || !bpStr">{{ t('复制')
                             }}</button>
                         <button style="margin-left: 4px;" @click="paste" :disabled="working">{{ t('粘贴') }}</button>
@@ -157,6 +158,7 @@
         <button class="expand-btn" :class="{ expanded: sidebarExpanded }" @click="toggleSidebar"></button>
         <button class="pin-btn" :class="{ active: pinned }" :title="pinned ? t('解除固定') : t('固定面板')"
             @click="togglePin"></button>
+        <BuildingPalette v-if="data" />
     </div>
 </template>
 
@@ -164,9 +166,12 @@
 import { computed, defineAsyncComponent, onMounted, onUnmounted, provide, reactive, ref, shallowReactive, shallowRef, watch, watchEffect } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { BlueprintData, fromStr, toStr } from '@/blueprint/parser';
+import { createEmptyBlueprint } from '@/blueprint/create';
 import { version, rendererKey, buildingInfoKey, commandQueueKey } from '@/define';
 import { BuildingInfo } from './blueprint/buildingInfo';
 import { RemoveBuildingsByItemCommand } from './blueprint/removeBuilding';
+import { usePlacement, resetToIdle, selectBuilding, enterDeleteMode, rotateBuilding } from './editor/placementState';
+import { buildingCategories } from './data/buildingCategories';
 
 import BuildingInfoPanel from './components/BuildingInfoPanel.vue';
 import SWStatus from '@/swStatus.vue';
@@ -176,6 +181,7 @@ import ReplaceModal from './components/ReplaceModal.vue';
 import ProductionStats from './components/ProductionStats.vue';
 import { CommandQueue } from './command';
 import BuildingOverview from './components/BuildingOverview.vue';
+import BuildingPalette from './components/BuildingPalette.vue';
 import { useLang } from './i18n';
 // 仅用于类型标注，编译时擦除，不影响 defineAsyncComponent 的异步分包
 import type BlueprintEditorImpl from './components/BlueprintEditor.vue';
@@ -369,6 +375,11 @@ onUnmounted(() => {
 let prevMd5Suffix = '';
 let prevBuildingsCount = -1;
 
+const newBlueprint = () => {
+    const s = toStr(createEmptyBlueprint());
+    parseBp(s);
+}
+
 const parseBp = (s: string) => {
     const md5Suffix = s.length >= 33 ? s.slice(-33) : '';
     if (s) {
@@ -528,9 +539,16 @@ const paste = async () => {
     working.value = false;
 }
 
+const placement = usePlacement();
+
 const hotkey = (event: KeyboardEvent) => {
     if (event.isComposing)
         return;
+    // Track Shift for free placement
+    if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
+        if (placement.mode === 'placing')
+            placement.freePlacement = true;
+    }
     if (event.ctrlKey && !event.altKey) {
         if (event.code === 'KeyZ') {
             if (event.shiftKey)
@@ -549,15 +567,64 @@ const hotkey = (event: KeyboardEvent) => {
     const tag = target?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable)
         return;
-    // O 或 0：快速打开蓝图面板
+    // Esc：退出到 idle
+    if (event.code === 'Escape') {
+        if (placement.mode !== 'idle')
+            resetToIdle();
+        return;
+    }
+    // X：进入删除模式
+    if (event.code === 'KeyX') {
+        enterDeleteMode();
+        return;
+    }
+    // R：旋转 90°（仅在放置模式）
+    if (event.code === 'KeyR' && placement.mode === 'placing') {
+        rotateBuilding();
+        return;
+    }
+    // 1-9：切换分类
+    if (event.code >= 'Digit1' && event.code <= 'Digit9') {
+        const cat = parseInt(event.code.slice(5));
+        placement.categoryIndex = cat;
+        if (placement.mode === 'deleting')
+            resetToIdle();
+        return;
+    }
+    // F1-F12：选中建筑
+    if (event.code.startsWith('F')) {
+        event.preventDefault();
+        const fn = parseInt(event.code.slice(1));
+        if (fn >= 1 && fn <= 12) {
+            const cat = buildingCategories.find(c => c.key === placement.categoryIndex);
+            if (cat && fn <= cat.buildings.length) {
+                const b = cat.buildings[fn - 1];
+                if (!b.disabled)
+                    selectBuilding(b.itemId, b.modelIndex);
+            }
+        }
+        return;
+    }
+    // O 或 0：快速打开蓝图面板（放置模式下不触发）
     if (event.code === 'KeyO' || event.code === 'Digit0') {
+        if (placement.mode === 'placing') return;
         if (pinned.value) return; // 固定状态时不响应快捷键
         expandSidebar.value = !expandSidebar.value;
         if (expandSidebar.value) activeTab.value = 'info';
     }
 }
-onMounted(() => document.body.addEventListener('keydown', hotkey));
-onUnmounted(() => document.body.removeEventListener('keydown', hotkey));
+const onKeyUp = (event: KeyboardEvent) => {
+    if (event.code === 'ShiftLeft' || event.code === 'ShiftRight')
+        placement.freePlacement = false;
+}
+onMounted(() => {
+    document.body.addEventListener('keydown', hotkey);
+    document.body.addEventListener('keyup', onKeyUp);
+});
+onUnmounted(() => {
+    document.body.removeEventListener('keydown', hotkey);
+    document.body.removeEventListener('keyup', onKeyUp);
+});
 </script>
 
 <style lang="scss">
