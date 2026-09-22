@@ -494,6 +494,9 @@ import { ref, onMounted, Ref, onUnmounted, watchEffect, computed, inject } from 
 import { Scene, PerspectiveCamera, SphereGeometry, AmbientLight } from 'three';
 import { PlanetMapControls } from '@/PlanetMapControls';
 import { attachCamera, attachRenderer } from '@/utils';
+import { usePlacement, resetToIdle } from '@/editor/placementState';
+import { planetToLocal } from '@/blueprint/area';
+import { createBuilding, CreateBuildingCommand } from '@/blueprint/create';
 
 const props = defineProps<{
   selectedBuildingIndex: number | null,
@@ -595,15 +598,22 @@ onMounted(() => {
 	const ray = new Ray();
 	const planetSphere = new Sphere(new Vector3(), R);
 	const v = new Vector3();
-	const pickBuilding = (e: MouseEvent) => {
-		if (b.value === null)
-			return null;
+	const placement = usePlacement();
+	const GRID_SIZE = 1000; // 200 segments * 5 grids/segment
+	const RAD_TO_GRID = GRID_SIZE / (2 * Math.PI);
+
+	const setupRay = (e: MouseEvent) => {
 		ray.origin.setFromMatrixPosition(camera.matrixWorld);
 		const rect = renderer.domElement.getBoundingClientRect();
 		ray.direction.x = ((e.clientX - rect.left) / rect.width ) * 2 - 1;
-		ray.direction.y = -((e.clientY - rect.top) / rect.height ) * 2 + 1;
+		ray.direction.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 		ray.direction.z = .5;
 		ray.direction.unproject(camera).sub(ray.origin).normalize();
+	}
+	const pickBuilding = (e: MouseEvent) => {
+		if (b.value === null)
+			return null;
+		setupRay(e);
 		const intersects = b.value.bvh.raycast(ray)
 		if (intersects.length === 0)
 			return null;
@@ -614,23 +624,40 @@ onMounted(() => {
 
 		return intersects.length === 0 ? null : intersects[0].index
 	}
-	const onClick = (e: MouseEvent) => {
-		emit('update:selectedBuildingIndex', pickBuilding(e));
+	/** Raycast to planet sphere, return 3D hit point or null */
+	const screenToPlanet = (e: MouseEvent): Vector3 | null => {
+		setupRay(e);
+		return ray.intersectSphere(planetSphere, v);
 	}
-	renderer.domElement.addEventListener('click', onClick);
-	onUnmounted(() => renderer.domElement.removeEventListener('click', onClick));
-
-	// 右键点击剔除建筑：记录右键按下位置，避免把右键拖拽误判为点击
-	let rightDownPos: {x: number, y: number} | null = null;
-	const onMouseDown = (e: MouseEvent) => {
-		if (e.button === 2)
-			rightDownPos = { x: e.clientX, y: e.clientY };
-	}
-	const onContextMenu = (e: MouseEvent) => {
-		e.preventDefault();
-		if (rightDownPos !== null
-			&& Math.hypot(e.clientX - rightDownPos.x, e.clientY - rightDownPos.y) > 6)
+	/** Place building at clicked planet position */
+	const placeBuilding = (e: MouseEvent) => {
+		const queue = commandQueue.value;
+		if (!queue || placement.selectedItemId === null || placement.selectedModelIndex === null)
 			return;
+		const hit = screenToPlanet(e);
+		if (hit === null)
+			return;
+		const latGrid = Math.asin(hit.y / R) * RAD_TO_GRID;
+		const lonGrid = Math.atan2(hit.x, hit.z) * RAD_TO_GRID;
+		const offset = planetToLocal(latGrid, lonGrid);
+		if (!placement.freePlacement) {
+			offset.x = Math.floor(offset.x);
+			offset.y = Math.floor(offset.y);
+		}
+		const building = createBuilding(
+			placement.selectedItemId,
+			placement.selectedModelIndex,
+			{ x: offset.x, y: offset.y },
+			placement.yaw,
+		);
+		try {
+			queue.push(new CreateBuildingCommand(building));
+		} catch {
+			// Outside equator band — ignore
+		}
+	}
+	/** Delete building at clicked position */
+	const deleteBuilding = (e: MouseEvent) => {
 		const index = pickBuilding(e);
 		if (index === null)
 			return;
@@ -640,10 +667,47 @@ onMounted(() => {
 		queue.push(new RemoveBuildingCommand(index, queue.data));
 		emit('update:selectedBuildingIndex', null);
 	}
-	renderer.domElement.addEventListener('mousedown', onMouseDown);
-	renderer.domElement.addEventListener('contextmenu', onContextMenu);
-	onUnmounted(() => renderer.domElement.removeEventListener('mousedown', onMouseDown));
-	onUnmounted(() => renderer.domElement.removeEventListener('contextmenu', onContextMenu));
+
+	// Drag threshold: distinguish click from drag.
+	// Listen on rootEl (parent div) — events bubble from canvas, unaffected by
+	// PlanetMapControls' setPointerCapture which only captures pointer events.
+	const DRAG_THRESHOLD = 4;
+	let downPos: { x: number, y: number } | null = null;
+	const onMouseDown = (e: MouseEvent) => {
+		downPos = { x: e.clientX, y: e.clientY };
+	}
+	const onClick = (e: MouseEvent) => {
+		if (downPos === null)
+			return;
+		const dx = e.clientX - downPos.x;
+		const dy = e.clientY - downPos.y;
+		downPos = null;
+		if (dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD)
+			return; // was a drag, not a click
+		// Left click: place / delete / select
+		if (placement.mode === 'placing')
+			placeBuilding(e);
+		else if (placement.mode === 'deleting')
+			deleteBuilding(e);
+		else
+			emit('update:selectedBuildingIndex', pickBuilding(e));
+	}
+	const onContextMenu = (e: MouseEvent) => {
+		// Right click: exit placement/deleting mode (PlanetMapControls already
+		// preventDefault on canvas; this fires via bubbling)
+		if (placement.mode !== 'idle') {
+			e.preventDefault();
+			resetToIdle();
+		}
+	}
+	rootEl.addEventListener('mousedown', onMouseDown);
+	rootEl.addEventListener('click', onClick);
+	rootEl.addEventListener('contextmenu', onContextMenu);
+	onUnmounted(() => {
+		rootEl.removeEventListener('mousedown', onMouseDown);
+		rootEl.removeEventListener('click', onClick);
+		rootEl.removeEventListener('contextmenu', onContextMenu);
+	});
 
 	let mounted = true;
 	onUnmounted(() => { mounted = false; });
