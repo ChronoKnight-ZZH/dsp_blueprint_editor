@@ -1,6 +1,14 @@
 <template>
     <h2>{{ t(buildingItem.name) }} <small>#{{ building.index }}</small></h2>
-    <BuildingRecipe v-if="building.recipeId > 0" :recipeId="building.recipeId" />
+    <RecipeSelect
+    v-if="showRecipeRow"
+    :recipeId="currentRecipeId > 0 ? currentRecipeId : null"
+    @update:recipeId="onRecipeSelected"
+    class="recipe-edit"
+>
+    <BuildingRecipe v-if="currentRecipeId > 0" :recipeId="currentRecipeId" />
+    <div v-else class="recipe-placeholder">{{ t('选择配方') }}</div>
+</RecipeSelect>
 
     <SplitterInfo v-if="isSplitter(building.itemId)" :building="building" />
     <StationInfo v-if="isStation(building.itemId)" :building="building" />
@@ -12,7 +20,7 @@
             <label>{{ t('过滤器') }}</label>
             <span class="v" style="align-self: center;"><BuildingIcon :icon-id="itemIconId(filterItem.id)" :alt="t(filterItem.name)" /></span>
         </div>
-        <div v-if="isLab(building.itemId)">
+        <div v-if="isLab(building.itemId)" class="editable-row" @click="onLabModeClick">
             <label>{{ t('模式') }}</label>
             <span class="v">{{ LabModeText }}</span>
         </div>
@@ -56,6 +64,15 @@
     </div>
     <DispenserInfo v-if="isDispenser(building.itemId)" :building="building" />
     <HoloBeaconInfo v-if="isHoloBeacon(building.itemId)" :building="building" />
+    <Modal v-model:open="labModeModalOpen" v-if="isLab(building.itemId)">
+        <h3>{{ t('研究模式') }}</h3>
+        <div class="mode-list">
+            <label v-for="m in labModes" :key="m" class="mode-option">
+                <input type="radio" name="labMode" :value="m" :checked="labResearchMode === m" @change="onLabModeSelected(m)" />
+                {{ t(labModeTexts.get(m)!) }}
+            </label>
+        </div>
+    </Modal>
 </template>
 
 <script lang="ts">
@@ -97,9 +114,12 @@ import {
 } from '@/data/items';
 import { recipesMap } from '@/data';
 import { commandQueueKey } from '@/define';
+import { SetBuildingRecipeCommand, SetLabResearchModeCommand } from '@/blueprint/setBuildingRecipe';
 
 import BuildingRecipe from './BuildingRecipe.vue';
 import BuildingIcon from './BuildingIcon.vue';
+import RecipeSelect from './RecipeSelect.vue';
+import Modal from './ModalDSP.vue';
 import StationInfo from './StationInfo.vue';
 import MonitorInfo from './MonitorInfo.vue';
 import BattleBaseInfo from './BattleBaseInfo.vue';
@@ -132,9 +152,49 @@ commandQueue.updater.updateSorterIcon.onMounted(b => {
         filterVersion.value++;
 });
 
+// 单体建筑数据变更（配方 / 研究模式）走 updateBuildingIcon 通道：
+// data 是 shallowRef，直接改 building.recipeId / parameters.researchMode 不触发响应式，
+// 需要通过版本号 bump 让下面的 computed 重新求值。
+const buildingVersion = ref(0);
+commandQueue.updater.updateBuildingIcon.onMounted(b => {
+    if (b === props.building)
+        buildingVersion.value++;
+});
+const currentRecipeId = computed(() => {
+    buildingVersion.value;
+    return props.building.recipeId;
+});
+const showRecipeRow = computed(() => {
+    if (isLab(props.building.itemId)) {
+        return labResearchMode.value === ResearchMode.Compose;
+    }
+    return currentRecipeId.value > 0;
+});
+const labResearchMode = computed(() => {
+    buildingVersion.value;
+    return (props.building.parameters as LabParamerters).researchMode;
+});
+const labModes = [ResearchMode.None, ResearchMode.Compose, ResearchMode.Research];
+const labModeModalOpen = ref(false);
+
+function onRecipeSelected(recipeId: number | null) {
+    // null = RecipeSelect 关闭弹窗未选择，忽略，避免清空配方
+    if (recipeId === null) return;
+    commandQueue.push(new SetBuildingRecipeCommand(props.building, recipeId));
+}
+
+function onLabModeClick() {
+    if (!props.building.parameters) return;
+    labModeModalOpen.value = true;
+}
+
+function onLabModeSelected(mode: ResearchMode) {
+    commandQueue.push(new SetLabResearchModeCommand(props.building, mode));
+    labModeModalOpen.value = false;
+}
+
 const LabModeText = computed(() => {
-    const mode = (props.building.parameters as LabParamerters).researchMode;
-    return t(labModeTexts.get(mode)!);
+    return t(labModeTexts.get(labResearchMode.value)!);
 })
 const productive = computed(() => {
     const recipeId = props.building.recipeId;
@@ -218,6 +278,82 @@ const energyExchangerMode = computed(() => {
         flex: 1 50px;
     }
 }
+
+.recipe-edit {
+    display: block;
+    cursor: pointer;
+    border-radius: 4px;
+    padding: 2px 4px;
+    margin: -2px -4px;
+    transition: background 0.12s;
+
+    &:hover {
+        background: #2a2a2a;
+    }
+
+    /* 让 RecipeSelect 的 .icon-select 触发器透传点击 */
+    .icon-select {
+        display: block;
+    }
+}
+
+.editable-row {
+    cursor: pointer;
+    border-radius: 4px;
+    padding: 0 4px;
+    margin: 0 -4px;
+    transition: background 0.12s;
+
+    &:hover {
+        background: #2a2a2a;
+    }
+}
+
+.mode-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 8px 0;
+    min-width: 180px;
+
+    .mode-option {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 4px;
+
+        &:hover {
+            background: #2a2a2a;
+        }
+
+        input[type="radio"] {
+            cursor: pointer;
+        }
+    }
+}
+.recipe-placeholder {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: #888;
+    font-style: italic;
+    padding: 2px 6px;
+    border: 1px dashed #555;
+    border-radius: 4px;
+
+    &::before {
+        content: '+';
+        font-style: normal;
+        font-weight: bold;
+    }
+}
+
+.recipe-edit:hover .recipe-placeholder {
+    color: #ccc;
+    border-color: #888;
+}
 </style>
 
 <i18n>
@@ -225,17 +361,20 @@ const energyExchangerMode = computed(() => {
     "zh": {
         "模式": "模式",
         "送入轨道": "送入轨道",
-        "增产剂效果简介": "增产剂效果简介"
+        "研究模式": "研究模式",
+        "选择配方": "选择配方"
     },
     "en": {
         "模式": "Mode",
         "送入轨道": "Orbit",
-        "增产剂效果简介": "Proliferator Effect Description"
+        "研究模式": "Research Mode",
+        "选择配方": "Select Recipe"
     },
     "fr": {
         "模式": "Mode",
         "送入轨道": "Orbit",
-        "增产剂效果简介": "Proliferator Effect Description"
+        "研究模式": "Mode de recherche",
+        "选择配方": "Sélectionner une recette"
     }
 }
 </i18n>

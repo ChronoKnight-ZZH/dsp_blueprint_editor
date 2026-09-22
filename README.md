@@ -28,4 +28,4 @@ yarn lint
 
 See [Configuration Reference](https://cli.vuejs.org/config/).
 
-版本号 1.4.1.1
+版本号 2.0.0.0

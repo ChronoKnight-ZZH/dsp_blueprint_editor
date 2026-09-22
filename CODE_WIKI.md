@@ -160,8 +160,12 @@
 │   │   ├── md5.ts                     # 纯 JS MD5（用于蓝图尾部校验）
 │   │   ├── planet.ts                  # 星球网格分区 + 建筑坐标变换
 │   │   ├── buildingInfo.ts            # 建筑邻接关系（output/input 链路）
+│   │   ├── reform.ts                  # 地基（reformData）3D 渲染层
 │   │   ├── replace.ts                 # 批量替换命令
-│   │   └── removeBuilding.ts          # 删除建筑命令（单删/同类删）
+│   │   ├── removeBuilding.ts          # 删除建筑命令（单删/同类删）
+│   │   ├── upgrade.ts                 # 建筑升降级命令
+│   │   ├── setAccelerator.ts          # 加速模式设置命令
+│   │   └── setBeaconContent.ts        # 全息信标文本修改命令（silent）
 │   ├── bvh/
 │   │   ├── bvh.ts                     # BVH 加速结构（射线拾取）
 │   │   ├── helper.ts                  # 可视化辅助
@@ -207,6 +211,8 @@
 | `replace.ts` | `ReplaceCommand`：按配方/过滤器/物流塔栏位/传送带图标/蓝图图标 5 个维度批量替换。 |
 | `upgrade.ts` | `UpgradeCommand`：建筑升降级；`upgradeEdges` 升降级有向图、`reachableTargets` 路径计算、`upgradeableItems` 候选集合。 |
 | `setAccelerator.ts` | `SetAcceleratorCommand`：批量设置"生产加速 / 额外产出"模式，支持按建筑子集与研究站过滤。 |
+| `setBeaconContent.ts` | `SetBeaconContentCommand`：修改全息信标（itemId=2401）`content` 文本字段，`silent=true` 不触发 3D 重建；`merge` 合并对同一建筑的连续编辑。 |
+| `reform.ts` | 地基（reformData）3D 渲染层：`Reforms extends Group` + `buildReforms`，把 `BlueprintReformData` 渲染为工字铺（IBEAM）/ 直铺（PLAIN）/ 网格（GRID）+ 自定义颜色（共享 CanvasTexture 与 InstancedMesh）。 |
 | `removeBuilding.ts` | `RemoveBuildingsCommand` / `RemoveBuildingCommand` / `RemoveBuildingsByItemCommand`：删除建筑并维护 index 与交叉引用。 |
 
 ### 5.2 命令与状态层 `src/`
@@ -243,13 +249,15 @@
 | `BuildingOverview.vue` | 未选中时按 itemId 聚合的建筑图标列表，右键一键剔除同类。 |
 | `BuildingRecipe.vue` | 建筑当前配方的输入/输出图标展示。 |
 | `BuildingIcon.vue` / `BlueprintIcon.vue` | 单个建筑图标 / 蓝图头部图标组合渲染。 |
-| `StationInfo.vue` | 物流塔（普通/星际/大型采矿机）库存、槽位、参数面板。 |
+| `StationInfo.vue` | 物流塔（普通/星际/大型采矿机）库存、槽位、参数面板；内部定义 `SetStationStorageItemCommand` / `SetStationParamCommand`（均为 `silent=true`）。物流状态用 `role-supply` / `role-demand` / `role-none` 着色区分本地/星际供需；大型采矿机采集速度用 0%-300%、步长 10% 的滑块；不再显示「本地/星际」文字标签。 |
 | `BattleBaseInfo.vue` | 战场分析基站（战斗机编队、自动重建等）。 |
 | `MonitorInfo.vue` | 流速监测器参数面板。 |
 | `StorageInfo.vue` | 储物仓（含过滤网格）。 |
 | `DispenserInfo.vue` | 物流配送器参数。 |
 | `SpitterInfo.vue` | 四向分流器（优先级 + v2 extra）。 |
+| `HoloBeaconInfo.vue` | 全息信标（itemId=2401）自定义文本编辑面板：`textarea` + dirty 状态检测，失焦或 `Ctrl+Enter` 时 `commit()` 推送 `SetBeaconContentCommand`（连续快速编辑会被 `merge` 合并，避免撤销栈爆炸）。 |
 | `WorkEnergyParam.vue` | 工作能耗通用参数输入。 |
+| `ParamSlider.vue` | 通用滑块控件：接收 `label / value / steps / format / disabled`，拖动时只更新本地预览索引，松手时通过 `change` 事件提交最终值（便于命令合并）。 |
 | `ItemSelect.vue` / `RecipeSelect.vue` / `IconPickerModal.vue` | 物品/配方/图标的搜索选择模态框。 |
 | `ReplaceModal.vue` | 批量替换弹窗：6 个互斥范围 Tab（配方/分拣器筛选/物流塔栏位/传送带图标/蓝图图标/升降建筑等级）；切换到"升降建筑等级"显示源/目标建筑图标网格；勾选"配方"时附加速模式单选组（不改变/额外产出/生产加速），执行后顺带推送 `SetAcceleratorCommand`。 |
 | `ModalDSP.vue` / `SwitchDSP.vue` / `ColorPreview.vue` | 通用模态框/开关/颜色预览基础控件。 |
@@ -321,14 +329,17 @@
 
 ### 6.2 `command.ts`
 
-- `EventDispatcher<TArgs>`：`on / onMounted / dispatch`，基于 `Set`。
-- `Updater`：聚合 5 个 dispatcher：`updateBuildingIcon / updateBeltIcon / updateBeltIconSubscript / updateSorterIcon / updateStationInfo`。
-- `Command` 接口：`do(data, updater) / undo(data, updater) / merge(c): boolean`。
+- `EventDispatcher<TArgs>`：`on / onMounted / dispatch`，基于 `Set`；额外 `clear()` 清空回调，防止 `registerUpdater` 在场景重建时重复注册或持有已销毁的 `AllBuildings` 引用。
+- `Updater`：聚合 5 个 dispatcher：`updateBuildingIcon / updateBeltIcon / updateBeltIconSubscript / updateSorterIcon / updateStationInfo`；`clearAll()` 一键清空全部回调（重建前调用）。
+- `Command` 接口：`do(data, updater) / undo(data, updater) / merge(c): boolean`，另含 `readonly silent?: boolean`。
+  - `silent = true`：只改图标/颜色/文字/纯数据，不改变几何/拓扑 → 仅触发 `stateVersion++`，不触发 `execVersion++`，3D 层不重建。
+  - `silent = false`（默认或省略）：改变了几何/拓扑（模型/尺寸/位置/连接关系/数组增删）→ 同时触发 `stateVersion++` 与 `execVersion++`，`BlueprintEditor` 重建整场景。
 - `CommandQueue`：
   - 容量 `_maxSize = 256`，`trim()` 从队首丢弃；
-  - `push(c)`：丢弃当前位置之后的命令 → `c.do` → 尝试与上一条 `merge` → 入栈 → 自增 `execVersion`；
-  - `undo/redo`：移动 `currentPosition`，执行对应 `do/undo`；
-  - `stateVersion`（容量/位置变化）与 `execVersion`（执行变化）两个响应式版本号。
+  - `push(c)`：丢弃当前位置之后的命令 → `c.do` → 尝试与上一条 `merge`（命中则直接返回，不再入栈也不再自增版本号）→ 入栈 → `currentPosition++` → 自增 `stateVersion`；若 `!c.silent` 再自增 `execVersion`；
+  - `undo/redo`：移动 `currentPosition`，执行对应 `do/undo`，自增 `stateVersion`；若命令非 `silent` 再自增 `execVersion`（保证 silent 命令的撤销也不会错误地触发整场景重建，同时仍能让 `codeExpired` 过期）；
+  - `stateVersion`：每次命令（无论 silent 与否）都递增，`App.vue` 用 `watchEffect` 监听它把 `codeExpired` 置 `true`（蓝图字符串需重新生成）。
+  - `execVersion`：仅非 silent 命令递增，`BlueprintEditor` 的 `computed(b)` 依赖它触发整场景重建。
 
 ### 6.3 `blueprint/replace.ts` `ReplaceCommand`
 
@@ -367,7 +378,8 @@
   - `watchEffect` 把 `b.value.buildings` 加入/移出场景并 `dispose`；
   - 选择盒 `watchEffect`：根据 `props.selectedBuildingIndex` 把 BVH 的对应盒矩阵复制到 `selectBox`；
   - `onMounted`：实例化 `PlanetMapControls`，绑定 click（拾取建筑 emit `selectedBuildingIndex`）、contextmenu（剔除单建筑并 `queue.push(new RemoveBuildingCommand(...))`）、`requestAnimationFrame(animate)` 渲染循环，并把 `controls.updateTimeDelta / cargos.cargoMove` 推进。
-  - `defineExpose({ selectBoxes, camera, cameraPosVersion, getModel })` 供父组件访问。
+  - `resetCamera()`：调用 `controls?.reset(2 * R)` 把相机重置到星球正上方默认距离（`target=(0,0,0)`、`spherical=(2R, π/2, 0)`），同时清空 `sphericalDelta / panOffset / scale`。
+  - `defineExpose({ selectBoxes, camera, cameraPosVersion, getModel, resetCamera })` 供父组件访问。`App.vue` 的 `parseBp` 在检测到蓝图内容变化（建筑数量或尾部 MD5 后 33 位变化）时调用 `renderer.value?.resetCamera()` 重置视角，覆盖 clear / 粘贴 / 选择文件 / 输入框覆盖 四条替换路径；同一蓝图重复粘贴（MD5/建筑数不变）不会触发重置。
 
 ### 6.8 `iconTexture.ts` `IconTexture`
 
@@ -423,6 +435,28 @@
 - `undo(_data, updater)`：用 `originalModes` 数组调用 `apply`，逐建筑精确恢复——混合模式场景下撤销也不会错乱。
 - `merge()` 恒返回 `false`。
 - **典型用法**：`ReplaceModal.vue` 在勾选"配方"范围并选了具体加速模式时，先 `push(new ReplaceCommand(...))`，再读取 `replaceCmd.recipeBuildings.map(b => b.index)` 作为 `buildingIndexes` 推送 `SetAcceleratorCommand`，从而只对刚被替换配方的建筑翻转加速模式，避免影响其它建筑。
+
+### 6.12 `blueprint/setBeaconContent.ts` 全息信标文本编辑
+
+#### `SetBeaconContentCommand implements Command`
+
+- `readonly silent = true`：纯文本修改，不改变几何/拓扑/3D 模型，撤销/重做只走 `stateVersion` 通道，不触发整场景重建。
+- 构造 `(building: BlueprintBuilding, newContent: string)`：缓存 `oldContent = building.content` 与 `newContent`。空字符串视为 `undefined`（即"无信标文本"），避免 v2 导出时写出 0 长度 `content` 段。
+- `do`：写入 `newContent`（空→`undefined`）；`undo`：恢复 `oldContent`（空→`undefined`）。
+- `merge(c)`：若 `c` 也是 `SetBeaconContentCommand` 且 `c.building === this.building`，则用 `c.newContent` 覆盖当前 `newContent` 并返回 `true`——把对同一信标的连续键入合并为一次撤销步，避免撤销栈爆炸。
+- **典型用法**：`HoloBeaconInfo.vue` 用 `textarea` + dirty 检测，失焦或 `Ctrl+Enter` 时 `commit()` 推送本命令；用户连续打字不会每次按键都入栈。
+
+### 6.13 物流塔参数 / 库存命令（`components/StationInfo.vue`）
+
+物流塔的标量参数与库存槽位修改走两条 `silent` 命令，避免每次微调都重建 3D 场景：
+
+- **`SetStationParamCommand implements Command`**（`silent = true`）：修改 `StationParameters` 中的标量字段（运输力 / 运输距离 / 优先级 / 任务模式 / 充能速率等）。
+  - 构造时快照 `oldValue`，`do` 写入 `newValue`，`undo` 还原 `oldValue`。
+  - `merge`：连续修改**同一建筑同一字段**的命令合并为最新值（用 `building + field` 作为合并键），便于滑块连续拖动只产生一次撤销步。
+  - 命中后通过 `updateStationInfo.dispatch(b)` 让 `StationInfo.vue` 的 `stateVersion` computed 局部刷新，不重建几何/BVH/场景。
+- **`SetStationStorageItemCommand implements Command`**（`silent = true`）：修改物流塔单个库存槽位的 `itemId / count / localDemand / remoteDemand / localSupply / remoteSupply` 等字段。
+  - 同样支持按 `(building, slot, field)` 合并连续编辑。
+- **设计约束**：`StationInfo.vue` 用 `computed` 监听 `commandQueue.stateVersion`（而非 `execVersion`）刷新面板；`BlueprintEditor.vue` 的 `registerUpdater` 中注册 `updateStationInfo` 回调，只更新 UV/颜色/下标，不触碰几何体与 BVH。
 
 ---
 
@@ -507,14 +541,16 @@ customReformColorMask(uint32)  colorLen(int32)  customReformColors[colorLen](uin
 
 ### 8.4 命令后重建
 
-- `b = computed(...)` 依赖 `commandQueue.execVersion`：任何 `push/undo/redo` 都会让 `execVersion++`，触发整场景重建（`watchEffect` 移除旧 `AllBuildings` 并 `dispose`）。
-- `Updater` 的 5 个 dispatcher 在 `registerUpdater` 中注册局部回调，允许命令在不重建场景的情况下刷新图标/物流塔面板（`ReplaceCommand` 常用）。
+- `b = computed(...)` 依赖 `commandQueue.execVersion`：非 `silent` 命令的 `push/undo/redo` 才会让 `execVersion++`，触发整场景重建（`watchEffect` 移除旧 `AllBuildings` 并 `dispose`，重建前调用 `updater.clearAll()` 清空回调以防陈旧引用）。`silent` 命令只让 `stateVersion++`，不进入这条重建路径。
+- `App.vue` 另用 `watchEffect` 监听 `commandQueue.stateVersion`，无论是 silent 还是非 silent 命令都把 `codeExpired` 置 `true`，触发蓝图字符串重新生成。
+- `Updater` 的 5 个 dispatcher 在 `registerUpdater` 中注册局部回调，允许 silent 命令在不重建场景的情况下刷新图标/物流塔面板（`SetBeaconContentCommand` / `SetStationParamCommand` / `SetStationStorageItemCommand` 常用）。回调内部只更新 UV / 颜色 / 下标，不触碰几何体与 BVH。
 
 ### 8.5 相机控件
 
 - `PlanetMapControls extends EventDispatcher`：旋转、dolly（缩放）、平移，支持鼠标 + 触摸 + 键盘。
 - `targetRadius`：旋转中心是星球表面点，dolly 限制 `[R*1.04, R*4]`。
 - `updateTimeDelta(dt)`：阻尼惯性。
+- `reset(distance)`：把 `target` 置 `(0,0,0)`、`spherical` 置 `(distance, π/2, 0)`、清空 `sphericalDelta / panOffset / scale` 并 `update()`，用于蓝图替换时重置视角；由 `BlueprintEditor.resetCamera()` 调用 `controls.reset(2 * R)`。
 
 ---
 
@@ -546,6 +582,9 @@ App.vue 的 watchEffect 把 codeExpired 置 true（蓝图字符串需重生成�
 | `RemoveBuildingsCommand` | `blueprint/removeBuilding.ts` | 批量删除建筑，维护 index 与交叉引用 |
 | `RemoveBuildingCommand` | 同上 | 单个建筑删除（3D 右键） |
 | `RemoveBuildingsByItemCommand` | 同上 | 同 itemId 全部删除（列表右键） |
+| `SetBeaconContentCommand` | `blueprint/setBeaconContent.ts` | 修改全息信标（itemId=2401）`content` 文本；`silent=true`，合并同一建筑的连续编辑 |
+| `SetStationParamCommand` | `components/StationInfo.vue` | 修改物流塔标量参数（运输力/距离/优先级/任务模式等）；`silent=true`，按 `(building, field)` 合并连续编辑 |
+| `SetStationStorageItemCommand` | `components/StationInfo.vue` | 修改物流塔单个库存槽位（itemId/count/供需等）；`silent=true`，按 `(building, slot, field)` 合并连续编辑 |
 
 ### 9.3 快捷键
 
@@ -714,8 +753,11 @@ cat blueprint.txt | yarn cli > bp.json
 | `content` | -102 记录里的信标等自定义文本，7-bit 前缀 UTF-8 字符串。 |
 | `reformData` | 星球地基（地形改造）矩形列表 + 自定义颜色表。 |
 | `parameterParsers` | itemId → ParamParser 注册表，覆盖所有已知建筑，未知用 `unknownParamParser`。 |
-| `Updater` | 5 个 `EventDispatcher`，命令修改数据后用来通知 3D 层做**增量**刷新（避免整场景重建）。 |
-| `execVersion` | `CommandQueue` 的执行版本号 ref，`BlueprintEditor` 的 `computed(b)` 依赖它触发重建。 |
+| `Updater` | 5 个 `EventDispatcher` + `clearAll()`，命令修改数据后用来通知 3D 层做**增量**刷新（避免整场景重建）。 |
+| `silent` | `Command` 接口标志位：`true`=纯数据变更（图标/颜色/文字），仅 `stateVersion++`；`false`=几何/拓扑变更，同时 `execVersion++` 触发重建。 |
+| `stateVersion` | `CommandQueue` 状态版本号 ref，每次命令（无论 silent）都递增；`App.vue` 监听它把 `codeExpired` 置 `true`。 |
+| `execVersion` | `CommandQueue` 执行版本号 ref，仅非 silent 命令递增；`BlueprintEditor` 的 `computed(b)` 依赖它触发整场景重建。 |
+| `resetCamera` | `BlueprintEditor` 通过 `defineExpose` 暴露的方法，内部调用 `controls.reset(2 * R)`；`App.vue.parseBp` 在蓝图替换（建筑数或尾部 MD5 后 33 位变化）时调用以重置视角。 |
 | `BVH` | 自实现层次包围盒，加速鼠标射线与建筑选择盒求交。 |
 | `IconTexture` | 24×24 图标图集，懒加载并 `copyTextureToTexture` 上传。 |
 | `buildingMeta` | 每个模型 ID 的颜色/单位盒/选择盒/图标位置变换。 |
@@ -731,7 +773,12 @@ cat blueprint.txt | yarn cli > bp.json
 | `SetAcceleratorCommand` | 批量设置加速模式命令：作用于含 `acceleratorMode` 字段的建筑（制造台/熔炉/精炼厂/化工厂/对撞机/研究站）；`ReplaceModal` 在替换配方后用它顺带翻转模式。 |
 | `AcceleratorMode` | 加速模式枚举：`Accelerate`=生产加速、`ExtraOutput`=额外产出；由 `assembleParamParser`/`labParamParser` 编解码。 |
 | `dispatchIconUpdate` | `UpgradeCommand` 内部的图标刷新分流函数，避免传送带/分拣器走错通道抛 `'No icon to update'`。 |
+| `reform.ts` | 地基 3D 渲染层：`Reforms extends Group` + `buildReforms`，把 `BlueprintReformData` 渲染为工字铺/直铺/网格 + 自定义颜色（共享 `CanvasTexture` + `InstancedMesh`）。 |
+| `SetBeaconContentCommand` | 修改全息信标（itemId=2401）`content` 文本的 silent 命令；`merge` 合并对同一建筑的连续编辑。 |
+| `SetStationParamCommand` / `SetStationStorageItemCommand` | 物流塔标量参数 / 库存槽位的 silent 命令，分别按 `(building, field)` 与 `(building, slot, field)` 合并连续编辑。 |
+| `HoloBeaconInfo.vue` | 全息信标文本编辑面板：`textarea` + dirty 检测，失焦或 `Ctrl+Enter` 时推送 `SetBeaconContentCommand`。 |
+| `ParamSlider.vue` | 通用滑块控件：拖动时只更新本地预览，松手时通过 `change` 提交最终值，便于命令合并。 |
 
 ---
 
-> 本 Wiki 基于当前仓库代码静态生成，若 `src/blueprint/parser.ts`、`data/` 或 `components/BlueprintEditor.vue` 发生结构性变更，请同步更新对应章节。
+> 本 Wiki 基于当前仓库代码静态生成，若 `src/blueprint/parser.ts`、`src/blueprint/reform.ts`、`src/command.ts`、`data/` 或 `components/BlueprintEditor.vue` 发生结构性变更，请同步更新对应章节。

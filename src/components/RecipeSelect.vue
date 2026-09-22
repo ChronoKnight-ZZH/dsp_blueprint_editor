@@ -1,9 +1,11 @@
 <template>
     <span @click="openModal = true" class="icon-select" ref="handler" tabindex="0" role="listbox">
-        <BuildingIcon v-if="props.recipeId !== null" :icon-id="recipeIconId(props.recipeId)" :alt="recipeName(props.recipeId)"/>
-        <span class="icon" v-else>
-            <div class="icon-placeholder"></div>
-        </span>
+        <slot>
+            <BuildingIcon v-if="props.recipeId !== null" :icon-id="recipeIconId(props.recipeId)" :alt="recipeName(props.recipeId)"/>
+            <span class="icon" v-else>
+                <div class="icon-placeholder"></div>
+            </span>
+        </slot>
     </span>
     <Modal :open="openModal" @update:open="o => { if (!o) selected(null) }">
         <div>

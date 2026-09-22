@@ -9,11 +9,9 @@ import {
 	Matrix4, DirectionalLight, Vector3, Object3D, Color, Ray, Sphere, Vector2, Mesh,
 } from 'three';
 import { SphereLatitudeGridGeometry, SphereLongitudeGridGeometry } from '@/SphereGridGeometry';
-import { BeltParameters, BlueprintBuilding } from '@/blueprint/parser';
 import { findPosForAreas, gridAreas, calcBuildingTrans, PositionedBlueprint } from '@/blueprint/planet';
 import { buildReforms } from '@/blueprint/reform';
 import { buildingMeta, noIconBuildings } from '@/data/building';
-import { isBelt, isInserter } from '@/data/items';
 import { itemIconId, recipeIconId } from '@/data/icons';
 import { IconTexture } from '@/iconTexture';
 import { IconGeometry, Icons } from '@/icons';
@@ -23,7 +21,8 @@ import { BVH } from '@/bvh';
 import { Updater } from '@/command';
 import { RemoveBuildingCommand } from '@/blueprint/removeBuilding';
 import { commandQueueKey } from '@/define';
-
+import { BeltParameters, BlueprintBuilding, LabParamerters, ResearchMode } from '@/blueprint/parser';
+import { isBelt, isInserter, isLab } from '@/data/items';
 function buildPlanetGrid(radius = 1, segment = 200) {
 	const allGrids = new Group();
 	const material = new LineBasicMaterial( { color: 0xf0f0f0, depthWrite: false } );
@@ -103,6 +102,15 @@ function inserterTrans(transforms: Matrix4[], trans: Matrix4) {
 }
 
 function buildingIconId(b: BlueprintBuilding) {
+    if (isLab(b.itemId)) {
+        const mode = (b.parameters as LabParamerters | null)?.researchMode;
+        // 矩阵合成：有配方显示配方图标，无配方退回研究站自身图标
+        if (mode === ResearchMode.Compose && b.recipeId > 0) {
+            return recipeIconId(b.recipeId);
+        }
+        // 科研模式 / 选择模式 / 合成但未选配方：显示研究站自身图标
+        return itemIconId(b.itemId);
+    }
     return b.recipeId > 0 ? recipeIconId(b.recipeId) : itemIconId(b.itemId);
 }
 
@@ -135,7 +143,7 @@ function sorterIconPos(b: BlueprintBuilding, buildingTrans: Matrix4, pos: Vector
 
 /** 传送带货物：正六棱柱，外接圆半径 0.15，长 0.4，轴向沿 z CylinderGeometry */
 function createBeltCargoGeometry(count: number): CargoGeometry {
-	const geo = new BoxGeometry(0.3, 0.3, 0.3);
+	const geo = new BoxGeometry(0.4, 0.4, 0.4);
 	geo.rotateX(Math.PI / 2); // 圆柱轴向从 y 转到 z
 	return makeCargoGeometry(geo, count);
 }
