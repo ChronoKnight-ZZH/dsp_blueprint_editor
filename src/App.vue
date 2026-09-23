@@ -382,11 +382,6 @@ onUnmounted(() => {
 let prevMd5Suffix = '';
 let prevBuildingsCount = -1;
 
-const newBlueprint = () => {
-    const s = toStr(createEmptyBlueprint());
-    parseBp(s);
-}
-
 const parseBp = (s: string) => {
     const md5Suffix = s.length >= 33 ? s.slice(-33) : '';
     if (s) {
