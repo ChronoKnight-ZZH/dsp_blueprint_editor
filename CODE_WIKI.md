@@ -49,6 +49,7 @@
 - 完整的撤销/重做（Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z）。
 - 复制 / 保存为 .txt 文件，输出与游戏格式字节级一致；支持拖拽 .txt 文件直接打开。
 - 中英双语 UI 与物品/配方名称。
+- 新建空白蓝图，在 3D 星球上放置建筑（1-9 选分类 / F1-F12 选建筑 / 左键放置 / R 旋转 / Shift 自由放置），删除模式（X + 左键）。
 
 ---
 
@@ -96,7 +97,10 @@
 │   │   ├ iconTexture.ts    │  BuildingIcon           │             │   │
 │   │   ├ icons.ts          │  BlueprintIcon          │             │   │
 │   │   ├ cargos.ts         │  ModalDSP               │             │   │
+│   │   ├ area.ts (坐标转换) │  BuildingPalette        │             │   │
+│   │   ├ create.ts (放置)  │  (底部建筑面板)          │             │   │
 │   │   └ data/building.ts  │                         │             │   │
+│   │  editor/placementState│                         │             │   │
 │   └──────────┬────────────┴───────────┬─────────────┴────────────┘   │
 │              │  编辑操作                  ▲                            │
 │              ▼                            │                            │
@@ -165,7 +169,11 @@
 │   │   ├── removeBuilding.ts          # 删除建筑命令（单删/同类删）
 │   │   ├── upgrade.ts                 # 建筑升降级命令
 │   │   ├── setAccelerator.ts          # 加速模式设置命令
-│   │   └── setBeaconContent.ts        # 全息信标文本修改命令（silent）
+│   │   ├── setBeaconContent.ts        # 全息信标文本修改命令（silent）
+│   │   ├── area.ts                    # 网格↔本地坐标转换 + 区域扩展
+│   │   └── create.ts                  # 空蓝图创建 + 建筑放置命令
+│   ├── editor/
+│   │   └── placementState.ts          # 放置状态机（idle/placing/deleting）
 │   ├── bvh/
 │   │   ├── bvh.ts                     # BVH 加速结构（射线拾取）
 │   │   ├── helper.ts                  # 可视化辅助
@@ -177,6 +185,7 @@
 │   │   ├── items.ts / itemsData.ts    # 物品表 + 分类判定
 │   │   ├── recipes.ts / recipesData.ts # 配方表
 │   │   ├── building.ts                # 建筑元数据（盒子尺寸/颜色/图标位）
+│   │   ├── buildingCategories.ts      # 9 类建筑面板映射（itemId/modelIndex/nameKey）
 │   │   ├── icons.ts                   # 图标 ID 体系与 URL
 │   │   ├── color.ts                   # 颜色相关
 │   │   ├── midi.ts                    # MIDI 信号
@@ -214,6 +223,8 @@
 | `setBeaconContent.ts` | `SetBeaconContentCommand`：修改全息信标（itemId=2401）`content` 文本字段，`silent=true` 不触发 3D 重建；`merge` 合并对同一建筑的连续编辑。 |
 | `reform.ts` | 地基（reformData）3D 渲染层：`Reforms extends Group` + `buildReforms`，把 `BlueprintReformData` 渲染为工字铺（IBEAM）/ 直铺（PLAIN）/ 网格（GRID）+ 自定义颜色（共享 CanvasTexture 与 InstancedMesh）。 |
 | `removeBuilding.ts` | `RemoveBuildingsCommand` / `RemoveBuildingCommand` / `RemoveBuildingsByItemCommand`：删除建筑并维护 index 与交叉引用。 |
+| `area.ts` | 网格坐标 ↔ 本地偏移转换（`planetToLocal` / `localToPlanet`）与区域扩展（`ensureAreaFor`）。根区域常量：`ROOT_GRID_SIZE=1000`、`ROOT_LATITUDE=-80`。 |
+| `create.ts` | `createEmptyBlueprint()`：创建含根区域（赤道带 size.y=161）的空 v2 蓝图；`createBuilding()`：构造最小合法建筑记录；`CreateBuildingCommand`：放置建筑命令，自动扩展根区域 `size.x`。 |
 
 ### 5.2 命令与状态层 `src/`
 
@@ -225,11 +236,17 @@
 | `utils.ts` | `attachRenderer/attachCamera`：把 Three 的 renderer/camera 与 Vue 容器尺寸/窗口 resize 绑定。 |
 | `cli.ts` | Node CLI：从 stdin 读蓝图字符串，输出 JSON 结构（`yarn cli`）。 |
 
+### 5.2.1 编辑器状态层 `src/editor/`
+
+| 文件 | 职责 |
+| --- | --- |
+| `placementState.ts` | 响应式放置状态机单例（`reactive<PlacementState>`）：`mode`（idle/placing/deleting）、`categoryIndex`（1-9）、`selectedItemId` / `selectedModelIndex`、`yaw`（0/90/180/270）、`freePlacement`（Shift 按住）。导出 `usePlacement()` 返回单例，以及 `resetToIdle()` / `selectBuilding()` / `enterDeleteMode()` / `rotateBuilding()` 状态转移函数。 |
+
 ### 5.3 3D 渲染层 `src/`
 
 | 文件 | 职责 |
 | --- | --- |
-| `components/BlueprintEditor.vue` | 编辑器主体：场景装配、相机/控件、BVH 拾取、点击/右键交互、命令后重建场景、`defineExpose` 暴露相机/选择盒。 |
+| `components/BlueprintEditor.vue` | 编辑器主体：场景装配、相机/控件、BVH 拾取、点击/右键交互、建筑放置/删除（放置模式 / 删除模式 / 选择）、命令后重建场景、`defineExpose` 暴露相机/选择盒/`resetCamera`。 |
 | `PlanetMapControls.ts` | 类 `OrbitControls` 但绕星球旋转、dolly、平移，支持鼠标与触摸。 |
 | `SphereGridGeometry.ts` | 经/纬度网格 `LineSegments` 几何，用于绘制星球网格。 |
 | `bvh/bvh.ts` | 自实现 BVH：对所有建筑选择盒建立层次包围盒，`raycast(ray)` 返回命中建筑 index。 |
@@ -243,8 +260,9 @@
 
 | 组件 | 职责 |
 | --- | --- |
-| `App.vue` | 根布局：3D 编辑区 + 可折叠侧栏（信息/操作两 Tab）+ 蓝图代码区（复制/粘贴/保存文件）+ 快捷键。 |
+| `App.vue` | 根布局：3D 编辑区 + 可折叠侧栏（信息/操作两 Tab）+ 蓝图代码区（复制/粘贴/保存文件/新建蓝图）+ 底部建筑面板 + 快捷键（1-9 分类 / F1-F12 选建筑 / X 删除 / R 旋转 / Esc 退出 / Shift 自由放置 / O 侧栏）。 |
 | `BlueprintEditor.vue` | 3D 渲染与交互，异步加载（`defineAsyncComponent` + `webpackChunkName: "renderer"`）。 |
+| `BuildingPalette.vue` | 底部建筑选择面板：9 个分类标签（1-9）+ 当前分类的建筑图标列表（F1-F12）。点击分类切换、点击建筑进入放置模式、再次点击退出；`disabled` 建筑灰显不可选（传送带/分拣器测试阶段暂不支持）。`position: absolute; bottom: 0; z-index: 10`。 |
 | `BuildingInfoPanel.vue` | 选中建筑后展示：配方、分流器、物流塔、监测器、战场基站、储物仓、过滤器、模式等。 |
 | `BuildingOverview.vue` | 未选中时按 itemId 聚合的建筑图标列表，右键一键剔除同类。 |
 | `BuildingRecipe.vue` | 建筑当前配方的输入/输出图标展示。 |
@@ -270,6 +288,7 @@
 | `items.ts` | 由 `itemsData.ts` 构建 `itemsMap`；提供 `isBelt/isInserter/isStation/...` 等 itemId 分类判定；`allAssemblers` 集合（用于 `parser.ts` 注册参数解析器）。 |
 | `recipes.ts` | 由 `recipesData.ts` 构建 `recipesMap`。 |
 | `building.ts` | `buildingMeta` 表：每种模型 ID 的颜色、单位盒/选择盒变换、图标位置；`noIconBuildings`、`stationSlotTrans`。 |
+| `buildingCategories.ts` | 9 类建筑面板映射表 `buildingCategories`：每类含 `key`（1-9）、`nameKey`（i18n key）、`buildings[]`（itemId/modelIndex/nameKey/可选 disabled）。传送带（2001-2003）与分拣器（2011-2014）标记 `disabled: true`（测试阶段暂不支持放置）。 |
 | `icons.ts` | 图标 ID 体系（<1000 信号、<20000 物品、<40000 配方、<60000 科技）；`iconUrl / allIconIds`。 |
 | `color.ts` | 颜色相关工具与地基颜色表。 |
 | `midi.ts` | 流速监测器音色（MIDI）数据。 |
@@ -377,7 +396,10 @@
   - `b = computed(...)`：监听 `commandQueue.execVersion`，调用 `findPosForAreas` + `calcBuildingTrans` + `buildBuildings` + `buildBVH` + `registerUpdater`；
   - `watchEffect` 把 `b.value.buildings` 加入/移出场景并 `dispose`；
   - 选择盒 `watchEffect`：根据 `props.selectedBuildingIndex` 把 BVH 的对应盒矩阵复制到 `selectBox`；
-  - `onMounted`：实例化 `PlanetMapControls`，绑定 click（拾取建筑 emit `selectedBuildingIndex`）、contextmenu（剔除单建筑并 `queue.push(new RemoveBuildingCommand(...))`）、`requestAnimationFrame(animate)` 渲染循环，并把 `controls.updateTimeDelta / cargos.cargoMove` 推进。
+  - `onMounted`：实例化 `PlanetMapControls`，绑定交互事件（`mousedown` 记录按下位置 + `click` 判断拖拽阈值后分发到放置/删除/拾取 + `contextmenu` 退出放置/删除模式）、`requestAnimationFrame(animate)` 渲染循环，并把 `controls.updateTimeDelta / cargos.cargoMove` 推进。事件监听注册在 `rootEl`（`.editor-root` 父 div）上而非 canvas，事件从 canvas 冒泡而来，避免 `PlanetMapControls.setPointerCapture` 干扰鼠标事件传递。
+  - **放置模式**（`placement.mode === 'placing'`）：`screenToPlanet(e)` 射线打到星球球面 → 转换为网格坐标 `latGrid/lonGrid` → `planetToLocal()` 映射为根区域本地偏移 → 非 `freePlacement` 时取 `floor` 网格对齐 → `createBuilding()` 构造建筑 → `queue.push(new CreateBuildingCommand(building))`；越界（赤道带外）静默忽略。
+  - **删除模式**（`placement.mode === 'deleting'`）：`pickBuilding(e)` 命中建筑 → `queue.push(new RemoveBuildingCommand(index, ...))` → emit `selectedBuildingIndex = null`。
+  - **拖拽判定**：`mousedown` 记录 `downPos`，`click` 时计算位移，超过 4px 阈值视为拖拽（相机旋转）不触发放置/删除/拾取。
   - `resetCamera()`：调用 `controls?.reset(2 * R)` 把相机重置到星球正上方默认距离（`target=(0,0,0)`、`spherical=(2R, π/2, 0)`），同时清空 `sphericalDelta / panOffset / scale`。
   - `defineExpose({ selectBoxes, camera, cameraPosVersion, getModel, resetCamera })` 供父组件访问。`App.vue` 的 `parseBp` 在检测到蓝图内容变化（建筑数量或尾部 MD5 后 33 位变化）时调用 `renderer.value?.resetCamera()` 重置视角，覆盖 clear / 粘贴 / 选择文件 / 输入框覆盖 四条替换路径；同一蓝图重复粘贴（MD5/建筑数不变）不会触发重置。
 
@@ -458,6 +480,66 @@
   - 同样支持按 `(building, slot, field)` 合并连续编辑。
 - **设计约束**：`StationInfo.vue` 用 `computed` 监听 `commandQueue.stateVersion`（而非 `execVersion`）刷新面板；`BlueprintEditor.vue` 的 `registerUpdater` 中注册 `updateStationInfo` 回调，只更新 UV/颜色/下标，不触碰几何体与 BVH。
 
+### 6.14 `blueprint/area.ts` 坐标转换与区域扩展
+
+#### 常量
+
+- `ROOT_SEGMENT = 200`：标准星球段数。
+- `GRID_PER_SEGMENT = 5`：每段 5 个网格 → `ROOT_GRID_SIZE = 1000`（整圈网格列数）。
+- `ROOT_LATITUDE = -80`：根区域起始纬度（由 `size.y=161` 经 `findPosForAreas` 反推）。
+
+#### 函数
+
+| 函数 | 作用 |
+| --- | --- |
+| `planetToLocal(latGrid, lonGrid)` | 把星球网格坐标转为根区域本地偏移：经度 `x = lonGrid % 1000`（wrap 到 [0,1000)），纬度 `y = latGrid - (-80)`。 |
+| `localToPlanet(offset)` | 逆变换：`lat = offset.y + (-80)`、`lon = offset.x`。 |
+| `ensureAreaFor(bp, offset)` | 确保根区域覆盖给定偏移：若 `offset.y` 超出 `[0, size.y)` 返回 -1（赤道带外）；若 `offset.x >= size.x` 则扩展 `size.x = floor(offset.x) + 1`；返回区域索引 0。 |
+
+### 6.15 `blueprint/create.ts` 空蓝图与建筑放置
+
+#### 函数
+
+- `createEmptyBlueprint(): BlueprintData`：创建 v2 空蓝图，含单个根区域（`parentIndex=-1, tropicAnchor=0, areaSegments=200, size={x:10, y:161}`），`gameVersion='0.10.34.28529'`，`shortDesc='新蓝图'`。
+- `createBuilding(itemId, modelIndex, offset, yaw): BlueprintBuilding`：构造最小合法 v2 建筑记录，`localOffset` 两端点相同，所有连接字段为 -1（无链接），`parameters: null`（游戏填默认值）。
+
+#### `CreateBuildingCommand implements Command`
+
+- 非 `silent` 命令（改变拓扑）→ 触发 `execVersion++` 整场景重建。
+- 构造 `(building: BlueprintBuilding)`：缓存 `building` 引用。
+- `do(data)`：快照 `prevSizeX = root.size.x` → `ensureAreaFor(data, building.localOffset[0])` 确保区域覆盖 → 若返回 -1 抛 `'Placement outside equator band'`（由调用方 try-catch 静默忽略）→ 设置 `building.areaIndex` 与 `building.index` → `data.buildings.push(building)`。
+- `undo(data)`：`data.buildings.pop()` → 恢复 `root.size.x = prevSizeX`。
+- `merge()` 恒返回 `false`。
+
+### 6.16 `editor/placementState.ts` 放置状态机
+
+- **单例模式**：模块级 `reactive<PlacementState>` 对象，`usePlacement()` 返回同一实例，所有组件共享。
+- **状态字段**：`mode`（`'idle' | 'placing' | 'deleting'`）、`categoryIndex`（1-9）、`selectedItemId` / `selectedModelIndex`（`null` 表示未选）、`yaw`（0/90/180/270 度）、`freePlacement`（Shift 按住时 `true`，允许非网格对齐的自由放置）。
+- **状态转移函数**：
+  - `resetToIdle()`：清空 mode / selectedItemId / selectedModelIndex。
+  - `selectBuilding(itemId, modelIndex)`：设置 mode='placing' 并记录 itemId / modelIndex / yaw=0。
+  - `enterDeleteMode()`：设置 mode='deleting' 并清空选择。
+  - `rotateBuilding()`：yaw += 90 mod 360。
+
+### 6.17 `data/buildingCategories.ts` 建筑分类映射
+
+- `buildingCategories: CategoryEntry[]`：9 个分类，每类含 `key`（1-9）、`nameKey`（i18n key）、`buildings[]`。
+- 每个建筑条目 `CategoryBuilding`：`itemId` / `modelIndex` / `nameKey`（i18n key）/ 可选 `disabled`（`true` = 灰显不可选）。
+- 分类内容：1=电力类、2=矿产类、3=物流类、4=仓储类、5=生产类、6=物流塔类、7=防御类、8=戴森球类、9=地基与信标。
+- 传送带（2001-2003）与分拣器（2011-2014）标记 `disabled: true`，测试阶段暂不支持放置（需要连接关系/路径逻辑）。
+- `App.vue` 的 `hotkey` 按 `Digit1-Digit9` 切换 `categoryIndex`，按 `F1-F12` 从当前分类选取建筑调用 `selectBuilding()`。
+
+### 6.18 `components/BuildingPalette.vue` 底部建筑面板
+
+- **布局**：`position: absolute; bottom: 0; left: 0; right: 0; z-index: 10`，半透明黑色背景（`#000000c0`）。
+- **上半部分** `palette-buildings`：当前分类的建筑图标列表（`BuildingIcon` 组件），水平排列可横向滚动，每个图标下标 F1-F12 序号。
+- **下半部分** `palette-categories`：9 个分类标签按钮，显示分类编号与名称。
+- **交互**：
+  - 点击分类标签 → `placement.categoryIndex = cat.key`。
+  - 点击建筑图标 → `disabled` 则忽略；已选中则退出到 idle；否则 `selectBuilding(itemId, modelIndex)`。
+  - 选中建筑有蓝色边框高亮（`.selected`），`disabled` 建筑 35% 透明度 + `cursor: not-allowed`。
+- **显示条件**：`App.vue` 中 `<BuildingPalette v-if="data" />`，仅在有蓝图数据时渲染。
+
 ---
 
 ## 7. 蓝图二进制格式与参数编解码
@@ -537,7 +619,12 @@ customReformColorMask(uint32)  colorLen(int32)  customReformColors[colorLen](uin
 
 - `buildBVH(transforms, buildings)` 为每个建筑算出选择盒（分拣器是沿 z 缩放的 Box，其它取 `selectUnitBoxTrans`），构造 `BVH`。
 - `pickBuilding(e)`：把鼠标 NDC 反投影成 `Ray`，先与星球球求交，若星球比建筑更近则视为命中星球（清空 intersects），否则取 BVH 命中第一项。
-- 左键 → emit `update:selectedBuildingIndex`；右键（区分拖拽与点击）→ `queue.push(new RemoveBuildingCommand(index, ...))`。
+- `screenToPlanet(e)`：射线与星球球求交，返回 3D 命中点（用于建筑放置）。
+- **左键点击**（拖拽阈值 4px 内）按 `placement.mode` 分发：
+  - `idle`：emit `update:selectedBuildingIndex`（拾取建筑）。
+  - `placing`：`screenToPlanet` → 网格坐标 → `planetToLocal` → `createBuilding` → `queue.push(new CreateBuildingCommand(...))`。
+  - `deleting`：`pickBuilding` 命中 → `queue.push(new RemoveBuildingCommand(index, ...))` → emit `null`。
+- **右键**（`contextmenu`，区分拖拽与点击）：若 `mode !== 'idle'` 则 `resetToIdle()` 退出放置/删除模式。
 
 ### 8.4 命令后重建
 
@@ -585,11 +672,19 @@ App.vue 的 watchEffect 把 codeExpired 置 true（蓝图字符串需重生成�
 | `SetBeaconContentCommand` | `blueprint/setBeaconContent.ts` | 修改全息信标（itemId=2401）`content` 文本；`silent=true`，合并同一建筑的连续编辑 |
 | `SetStationParamCommand` | `components/StationInfo.vue` | 修改物流塔标量参数（运输力/距离/优先级/任务模式等）；`silent=true`，按 `(building, field)` 合并连续编辑 |
 | `SetStationStorageItemCommand` | `components/StationInfo.vue` | 修改物流塔单个库存槽位（itemId/count/供需等）；`silent=true`，按 `(building, slot, field)` 合并连续编辑 |
+| `CreateBuildingCommand` | `blueprint/create.ts` | 在星球上放置单个建筑；非 `silent`（触发整场景重建）；`ensureAreaFor` 自动扩展根区域 `size.x`；赤道带外静默忽略 |
 
 ### 9.3 快捷键
 
 - `Ctrl+Z` 撤销，`Ctrl+Y` 或 `Ctrl+Shift+Z` 重做（`App.vue` 的 `hotkey`）。
-- `O` / `0`：切换侧栏（非固定状态）。
+- `1`-`9`：切换建筑分类（`placement.categoryIndex`）。
+- `F1`-`F12`：从当前分类选中建筑，进入放置模式（`selectBuilding`）；`disabled` 建筑不可选。
+- `X`：进入删除模式（`enterDeleteMode`），左键点击建筑删除。
+- `R`：旋转 90°（仅在放置模式，`rotateBuilding`）。
+- `Esc`：退出放置/删除模式回到 idle（`resetToIdle`）。
+- `Shift`（按住）：自由放置模式（`freePlacement = true`），不网格对齐。
+- `O` / `0`：切换侧栏（非固定状态，放置模式下不触发）。
+- 在 `INPUT` / `TEXTAREA` / `SELECT` 中打字时不触发快捷键。
 
 ---
 
@@ -778,7 +873,16 @@ cat blueprint.txt | yarn cli > bp.json
 | `SetStationParamCommand` / `SetStationStorageItemCommand` | 物流塔标量参数 / 库存槽位的 silent 命令，分别按 `(building, field)` 与 `(building, slot, field)` 合并连续编辑。 |
 | `HoloBeaconInfo.vue` | 全息信标文本编辑面板：`textarea` + dirty 检测，失焦或 `Ctrl+Enter` 时推送 `SetBeaconContentCommand`。 |
 | `ParamSlider.vue` | 通用滑块控件：拖动时只更新本地预览，松手时通过 `change` 提交最终值，便于命令合并。 |
+| `area.ts` | 网格↔本地坐标转换（`planetToLocal`/`localToPlanet`）与区域扩展（`ensureAreaFor`）；根区域常量 `ROOT_GRID_SIZE=1000`、`ROOT_LATITUDE=-80`。 |
+| `create.ts` | 空蓝图创建（`createEmptyBlueprint`）、建筑构造（`createBuilding`）、放置命令（`CreateBuildingCommand`，非 silent，自动扩展 `size.x`）。 |
+| `placementState.ts` | 放置状态机单例（`usePlacement()`）：`mode`（idle/placing/deleting）、`categoryIndex`（1-9）、`selectedItemId/selectedModelIndex`、`yaw`、`freePlacement`（Shift）。 |
+| `buildingCategories.ts` | 9 类建筑面板映射表：每类含 `buildings[]`（itemId/modelIndex/nameKey/disabled）；传送带与分拣器标记 `disabled`。 |
+| `BuildingPalette.vue` | 底部建筑选择面板：分类标签（1-9）+ 建筑图标（F1-F12）；点击选中进入放置模式，再点退出。 |
+| `CreateBuildingCommand` | 放置建筑命令（非 silent）：`do` 调用 `ensureAreaFor` 确保区域覆盖并 `push` 建筑；`undo` `pop` 建筑并恢复 `size.x`；赤道带外抛异常由调用方静默忽略。 |
+| `placement.mode` | 放置模式状态：`idle`（拾取建筑）、`placing`（左键放置建筑）、`deleting`（左键删除建筑）。右键/Esc 退出到 idle。 |
+| `freePlacement` | Shift 按住时 `true`，建筑放置不做 `floor` 网格对齐，允许任意位置。 |
+| 拖拽阈值 | 4px：`mousedown` 记录位置，`click` 时位移超过 4px 视为相机拖拽，不触发放置/删除/拾取。事件监听在 `rootEl` 上（非 canvas），避免 `setPointerCapture` 干扰。 |
 
 ---
 
-> 本 Wiki 基于当前仓库代码静态生成，若 `src/blueprint/parser.ts`、`src/blueprint/reform.ts`、`src/command.ts`、`data/` 或 `components/BlueprintEditor.vue` 发生结构性变更，请同步更新对应章节。
+> 本 Wiki 基于当前仓库代码静态生成，若 `src/blueprint/parser.ts`、`src/blueprint/reform.ts`、`src/blueprint/area.ts`、`src/blueprint/create.ts`、`src/command.ts`、`src/editor/placementState.ts`、`data/` 或 `components/BlueprintEditor.vue` 发生结构性变更，请同步更新对应章节。

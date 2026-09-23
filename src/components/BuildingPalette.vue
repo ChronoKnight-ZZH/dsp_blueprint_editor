@@ -1,7 +1,7 @@
 <template>
     <div class="building-palette">
         <div class="palette-buildings">
-            <button v-for="(b, i) in currentBuildings" :key="b.itemId"
+            <button v-for="(b, i) in currentBuildings" :key="b.itemId" v-show="!collapsed"
                 class="palette-building"
                 :class="{ disabled: b.disabled, selected: isSelected(b) }"
                 :title="b.disabled ? t('暂不支持') : t(b.nameKey)"
@@ -23,7 +23,7 @@
 </template>
 
 <script lang="ts" setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import BuildingIcon from './BuildingIcon.vue';
 import { buildingCategories, CategoryBuilding } from '@/data/buildingCategories';
@@ -51,6 +51,11 @@ const onSelect = (b: CategoryBuilding) => {
         selectBuilding(b.itemId, b.modelIndex);
     }
 };
+
+const collapsed = ref(true);          // 进入编辑模式即折叠
+function collapse() { collapsed.value = true; }
+function expand()   { collapsed.value = false; }
+defineExpose({ collapse, expand });
 </script>
 
 <style lang="scss" scoped>
