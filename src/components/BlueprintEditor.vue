@@ -695,10 +695,17 @@ onMounted(() => {
 	const onContextMenu = (e: MouseEvent) => {
 		// Right click: exit placement/deleting mode (PlanetMapControls already
 		// preventDefault on canvas; this fires via bubbling)
-		if (placement.mode !== 'idle') {
-			e.preventDefault();
-			resetToIdle();
-		}
+		// 预览模式：右键直接删除鼠标所指建筑
+    if (placement.appMode === 'preview') {
+        e.preventDefault();
+        deleteBuilding(e);         // 内部已 emit(selectedBuildingIndex, null)
+        return;
+    }
+    // 编辑模式：原行为 —— 退出 placing/deleting
+    if (placement.mode !== 'idle') {
+        e.preventDefault();
+        resetToIdle();
+    }
 	}
 	rootEl.addEventListener('mousedown', onMouseDown);
 	rootEl.addEventListener('click', onClick);
