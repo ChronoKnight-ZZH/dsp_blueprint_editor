@@ -62,7 +62,9 @@
                 <section>
                     <div class="row">
                         <label for="bp-str" style="margin-right: auto;">{{ t('蓝图代码') }}</label>
-                        <button style="margin-left: 4px;" @click="newBlueprint" :disabled="working">{{ t('新建') }}</button>
+                        <button style="margin-left: 4px;" @click="onModeButton" :disabled="working">
+                            {{ placement.appMode === 'edit' ? t('保存') : t('编辑') }}
+                        </button>
                         <button style="margin-left: 4px;" @click="copy" :disabled="working || !bpStr">{{ t('复制')
                             }}</button>
                         <button style="margin-left: 4px;" @click="paste" :disabled="working">{{ t('粘贴') }}</button>
@@ -152,7 +154,8 @@
         <button class="expand-btn" :class="{ expanded: sidebarExpanded }" @click="toggleSidebar"></button>
         <button class="pin-btn" :class="{ active: pinned }" :title="pinned ? t('解除固定') : t('固定面板')"
             @click="togglePin"></button>
-        <BuildingPalette v-if="data" />
+            <!-- 底部UI建筑面板 -->
+        <BuildingPalette v-if="data && placement.appMode === 'edit'" ref="palette" />
     </div>
 </template>
 
@@ -164,7 +167,8 @@ import { createEmptyBlueprint } from '@/blueprint/create';
 import { version, rendererKey, buildingInfoKey, commandQueueKey } from '@/define';
 import { BuildingInfo } from './blueprint/buildingInfo';
 import { RemoveBuildingsByItemCommand } from './blueprint/removeBuilding';
-import { usePlacement, resetToIdle, selectBuilding, enterDeleteMode, rotateBuilding } from './editor/placementState';
+import { usePlacement, resetToIdle, selectBuilding, enterDeleteMode,
+         rotateBuilding, enterEditMode, exitEditMode } from './editor/placementState';
 import { buildingCategories } from './data/buildingCategories';
 
 import BuildingInfoPanel from './components/BuildingInfoPanel.vue';
@@ -368,11 +372,6 @@ onUnmounted(() => {
 let prevMd5Suffix = '';
 let prevBuildingsCount = -1;
 
-const newBlueprint = () => {
-    const s = toStr(createEmptyBlueprint());
-    parseBp(s);
-}
-
 const parseBp = (s: string) => {
     const md5Suffix = s.length >= 33 ? s.slice(-33) : '';
     if (s) {
@@ -393,6 +392,8 @@ const parseBp = (s: string) => {
             selectedBuildingIndex.value = null;
             bpStr.value = s;
             codeExpired.value = false;
+            if (placement.appMode === 'edit')
+            exitEditMode();
             return;
         }
     } else {
@@ -535,13 +536,19 @@ const paste = async () => {
 const placement = usePlacement();
 
 const hotkey = (event: KeyboardEvent) => {
+    
+const isEdit = placement.appMode === 'edit';
+
     if (event.isComposing)
         return;
     // Track Shift for free placement
-    if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
+    // Shift：仅编辑模式
+    if ((event.code === 'ShiftLeft' || event.code === 'ShiftRight') && isEdit) {
         if (placement.mode === 'placing')
             placement.freePlacement = true;
     }
+
+    // Ctrl+Z/Y
     if (event.ctrlKey && !event.altKey) {
         if (event.code === 'KeyZ') {
             if (event.shiftKey)
@@ -553,31 +560,22 @@ const hotkey = (event: KeyboardEvent) => {
         }
         return;
     }
-    if (event.altKey || event.metaKey)
-        return;
-    // 在输入框/文本域中打字时不触发
-    const target = event.target as HTMLElement | null;
-    const tag = target?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable)
-        return;
-    // Esc：退出到 idle
+
+    // Esc：仅编辑模式，分层
     if (event.code === 'Escape') {
-        if (placement.mode !== 'idle')
-            resetToIdle();
+        if (!isEdit) return;
+        if (placement.mode !== 'idle') resetToIdle();
+        else palette.value?.collapse();
         return;
     }
+
+    // 编辑模式专属
     // X：进入删除模式
-    if (event.code === 'KeyX') {
-        enterDeleteMode();
-        return;
-    }
+    if (event.code === 'KeyX' && isEdit) { enterDeleteMode(); return; }
     // R：旋转 90°（仅在放置模式）
-    if (event.code === 'KeyR' && placement.mode === 'placing') {
-        rotateBuilding();
-        return;
-    }
+    if (event.code === 'KeyR' && isEdit && placement.mode === 'placing') { rotateBuilding(); return; }
     // 1-9：切换分类
-    if (event.code >= 'Digit1' && event.code <= 'Digit9') {
+    if (event.code >= 'Digit1' && event.code <= 'Digit9' && isEdit) {
         const cat = parseInt(event.code.slice(5));
         placement.categoryIndex = cat;
         if (placement.mode === 'deleting')
@@ -585,7 +583,7 @@ const hotkey = (event: KeyboardEvent) => {
         return;
     }
     // F1-F12：选中建筑
-    if (event.code.startsWith('F')) {
+    if (event.code.startsWith('F') && isEdit) {
         event.preventDefault();
         const fn = parseInt(event.code.slice(1));
         if (fn >= 1 && fn <= 12) {
@@ -600,24 +598,57 @@ const hotkey = (event: KeyboardEvent) => {
     }
     // O 或 0：快速打开蓝图面板（放置模式下不触发）
     if (event.code === 'KeyO' || event.code === 'Digit0') {
-        if (placement.mode === 'placing') return;
+        // if (placement.mode === 'placing') return;
         if (pinned.value) return; // 固定状态时不响应快捷键
         expandSidebar.value = !expandSidebar.value;
         if (expandSidebar.value) activeTab.value = 'info';
     }
+
+    // Alt/Meta，无默认功能，不触发
+    if (event.altKey || event.metaKey)
+        return;
+
+    // 在输入框/文本域中打字时不触发
+    const target = event.target as HTMLElement | null;
+    const tag = target?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable)
+        return;
 }
+
+// Shift
 const onKeyUp = (event: KeyboardEvent) => {
-    if (event.code === 'ShiftLeft' || event.code === 'ShiftRight')
+    if ((event.code === 'ShiftLeft' || event.code === 'ShiftRight'))
         placement.freePlacement = false;
 }
+// 添加事件监听
 onMounted(() => {
     document.body.addEventListener('keydown', hotkey);
     document.body.addEventListener('keyup', onKeyUp);
 });
+// 移除事件监听
 onUnmounted(() => {
     document.body.removeEventListener('keydown', hotkey);
     document.body.removeEventListener('keyup', onKeyUp);
 });
+// 初始化建筑面板
+const palette = ref<InstanceType<typeof BuildingPalette> | null>(null);
+
+const onModeButton = () => {
+    if (placement.appMode === 'edit') {
+        // 保存：无条件刷回代码框 → 回预览
+        if (data.value) {
+            bpStr.value = toStr(data.value);
+            codeExpired.value = false;
+        }
+        exitEditMode();
+    } else {
+        // 编辑：data 为空则自动创建空蓝图
+        if (!data.value) {
+            parseBp(toStr(createEmptyBlueprint()));   // 复用 parseBp，保证 bpStr/codeExpired 一致
+        }
+        enterEditMode();
+    }
+};
 </script>
 
 <style lang="scss">
@@ -964,7 +995,6 @@ ul.operations {
         "清空": "清空",
         "复制粘贴不支持": "不支持，请手动复制",
         "保存文件": "保存文件",
-
         "批量替换": "批量替换",
         "撤销": "撤销",
         "重做": "重做",
@@ -976,7 +1006,9 @@ ul.operations {
         "固定面板": "固定面板（固定后无法点击隐藏）",
         "右键点击剔除": "右键点击建筑可剔除",
         "仅支持 .txt 文件": "仅支持 .txt 文件",
-        "拖拽文件到此处打开": "拖拽文件到此处打开"
+        "拖拽文件到此处打开": "拖拽文件到此处打开",
+        "编辑": "编辑", 
+        "保存": "保存"
     },
     en: {
         "复制": "Copy",
@@ -997,7 +1029,9 @@ ul.operations {
         "固定面板": "Pin panel (cannot be hidden by clicking)",
         "右键点击剔除": "Right-click a building to remove it",
         "仅支持 .txt 文件": "Only .txt files are supported",
-        "拖拽文件到此处打开": "Drop file here to open"
+        "拖拽文件到此处打开": "Drop file here to open",
+        "编辑": "Edit", 
+        "保存": "Save"
     },
 }
 </i18n>

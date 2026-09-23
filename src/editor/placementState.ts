@@ -2,7 +2,10 @@ import { reactive } from 'vue';
 
 export type EditorMode = 'idle' | 'placing' | 'deleting';
 
+export type AppMode = 'preview' | 'edit';
+
 export interface PlacementState {
+    appMode: AppMode;
     mode: EditorMode;
     categoryIndex: number;        // 1-9
     selectedItemId: number | null;
@@ -12,6 +15,7 @@ export interface PlacementState {
 }
 
 const state = reactive<PlacementState>({
+    appMode: 'preview', 
     mode: 'idle',
     categoryIndex: 1,
     selectedItemId: null,
@@ -20,6 +24,21 @@ const state = reactive<PlacementState>({
     freePlacement: false,
 });
 
+export function enterEditMode() {
+    state.appMode = 'edit';
+    state.mode = 'idle';
+    state.selectedItemId = null;
+    state.selectedModelIndex = null;
+}
+
+export function exitEditMode() {
+    state.appMode = 'preview';
+    state.mode = 'idle';
+    state.selectedItemId = null;
+    state.selectedModelIndex = null;
+    state.yaw = 0;
+    state.freePlacement = false;
+}
 export function usePlacement() { return state; }
 
 export function resetToIdle() {
