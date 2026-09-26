@@ -1,5 +1,5 @@
 <template>
-    <div class="building-palette">
+    <div class="building-palette" :class="{ collapsed }">
         <div class="palette-buildings">
             <button v-for="(b, i) in currentBuildings" :key="b.itemId" v-show="!collapsed"
                 class="palette-building"
@@ -14,7 +14,7 @@
             <button v-for="cat in buildingCategories" :key="cat.key"
                 class="palette-category"
                 :class="{ active: placement.categoryIndex === cat.key }"
-                @click="placement.categoryIndex = cat.key">
+                @click="onCategory(cat.key)">
                 <span class="cat-num">{{ cat.key }}</span>
                 <span class="cat-name">{{ t(cat.nameKey) }}</span>
             </button>
@@ -55,6 +55,11 @@ const onSelect = (b: CategoryBuilding) => {
 const collapsed = ref(true);          // 进入编辑模式即折叠
 function collapse() { collapsed.value = true; }
 function expand()   { collapsed.value = false; }
+/** 点击分类：切换分类并展开 */
+const onCategory = (key: number) => {
+    placement.categoryIndex = key;
+    collapsed.value = false;
+};
 defineExpose({ collapse, expand });
 </script>
 
@@ -62,8 +67,12 @@ defineExpose({ collapse, expand });
 .building-palette {
     position: absolute;
     bottom: 0;
-    left: 0;
-    right: 0;
+    // 展开与折叠统一：内容宽 + 水平居中，展开时只是多一行建筑图标
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: max-content;
+    max-width: 100vw;
     background: #000000c0;
     color: white;
     user-select: none;
@@ -90,8 +99,8 @@ defineExpose({ collapse, expand });
     transition: border-color 0.1s, background 0.1s;
 
     .icon {
-        width: 2.5rem;
-        height: 2.5rem;
+        width: 2.25rem;
+        height: 2.25rem;
         img {
             width: 100%;
             height: 100%;

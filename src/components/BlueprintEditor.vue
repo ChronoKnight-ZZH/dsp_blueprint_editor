@@ -5,7 +5,7 @@
 <script lang="ts">
 import {
 	Group, LineSegments, InstancedMesh, WebGLRenderer,
-	LineBasicMaterial, MeshStandardMaterial, MeshLambertMaterial, CylinderGeometry, BoxGeometry,
+	LineBasicMaterial, MeshStandardMaterial, MeshLambertMaterial, MeshBasicMaterial, CylinderGeometry, BoxGeometry,
 	Matrix4, DirectionalLight, Vector3, Object3D, Color, Ray, Sphere, Vector2, Mesh,
 } from 'three';
 import { SphereLatitudeGridGeometry, SphereLongitudeGridGeometry } from '@/SphereGridGeometry';
@@ -44,7 +44,7 @@ function buildPlanetGrid(radius = 1, segment = 200) {
 		});
 		allGrids.add(new LineSegments(geometry, material));
 	}
-	return allGrids;
+	return { grids: allGrids, material };
 }
 
 class AllBuildings extends Object3D {
@@ -503,7 +503,8 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'update:selectedBuildingIndex', index: number | null): void
+  (e: 'update:selectedBuildingIndex', index: number | null): void,
+  (e: 'clickEmpty'): void,
 }>()
 
 const scene = new Scene();
@@ -516,7 +517,17 @@ scene.add(dirLight);
 	const planet = new Mesh(geometry, material);
 	scene.add(planet);
 }
-scene.add(buildPlanetGrid(R * 1.0001, SEGMENT));
+const { grids: planetGrid, material: gridMaterial } = buildPlanetGrid(R * 1.0001, SEGMENT);
+scene.add(planetGrid);
+
+const placement = usePlacement();
+// 网格线随模式变色：预览原色 / 编辑绿 / 删除红
+watchEffect(() => {
+	if (placement.appMode === 'edit')
+		gridMaterial.color.set(placement.mode === 'deleting' ? 0xff5050 : 0x50fa50);
+	else
+		gridMaterial.color.set(0xf0f0f0);
+});
 
 const root: Ref<HTMLDivElement | null> = ref(null);
 const renderer = new WebGLRenderer({ antialias: true });
@@ -544,7 +555,7 @@ const b = computed(() => {
     const bvh = buildBVH(transforms, d.buildings);
     const reforms = buildReforms(R, pos, d.reformData);
     registerUpdater(commandQueue.value.updater, buildings, pos);
-	return { buildings, bvh, reforms };
+	return { buildings, bvh, reforms, pos };
 });
 
 watchEffect(onCleanUp => {
@@ -583,6 +594,27 @@ watchEffect(onCleanUp => {
 	})
 }
 
+// 放置预览：半透明绿盒，编辑模式 placing 时跟随鼠标吸附网格（单个 Mesh 复用）
+const previewVisible = ref(false);
+const previewMesh = new Mesh(
+	new BoxGeometry(1., 1., 1.),
+	new MeshBasicMaterial({
+		color: 0x50fa50,
+		opacity: 0.4,
+		transparent: true,
+		depthWrite: false,
+	}),
+);
+previewMesh.matrixAutoUpdate = false;
+previewMesh.renderOrder = 9;
+watchEffect(() => {
+	const show = placement.appMode === 'edit' && placement.mode === 'placing' && previewVisible.value;
+	if (show)
+		scene.add(previewMesh);
+	else
+		scene.remove(previewMesh);
+});
+
 onMounted(() => {
 	const rootEl = root.value!;
 
@@ -598,7 +630,6 @@ onMounted(() => {
 	const ray = new Ray();
 	const planetSphere = new Sphere(new Vector3(), R);
 	const v = new Vector3();
-	const placement = usePlacement();
 	const GRID_SIZE = 1000; // 200 segments * 5 grids/segment
 	const RAD_TO_GRID = GRID_SIZE / (2 * Math.PI);
 
@@ -629,14 +660,11 @@ onMounted(() => {
 		setupRay(e);
 		return ray.intersectSphere(planetSphere, v);
 	}
-	/** Place building at clicked planet position */
-	const placeBuilding = (e: MouseEvent) => {
-		const queue = commandQueue.value;
-		if (!queue || placement.selectedItemId === null || placement.selectedModelIndex === null)
-			return;
+	/** 屏幕点击 → 吸附后的网格偏移（placeBuilding 与预览共用，保证坐标逻辑一致） */
+	const placementOffset = (e: MouseEvent) => {
 		const hit = screenToPlanet(e);
 		if (hit === null)
-			return;
+			return null;
 		const latGrid = Math.asin(hit.y / R) * RAD_TO_GRID;
 		const lonGrid = Math.atan2(hit.x, hit.z) * RAD_TO_GRID;
 		const offset = planetToLocal(latGrid, lonGrid);
@@ -644,10 +672,20 @@ onMounted(() => {
 			offset.x = Math.floor(offset.x);
 			offset.y = Math.floor(offset.y);
 		}
+		return { x: offset.x, y: offset.y };
+	}
+	/** Place building at clicked planet position */
+	const placeBuilding = (e: MouseEvent) => {
+		const queue = commandQueue.value;
+		if (!queue || placement.selectedItemId === null || placement.selectedModelIndex === null)
+			return;
+		const offset = placementOffset(e);
+		if (offset === null)
+			return;
 		const building = createBuilding(
 			placement.selectedItemId,
 			placement.selectedModelIndex,
-			{ x: offset.x, y: offset.y },
+			offset,
 			placement.yaw,
 		);
 		try {
@@ -656,6 +694,40 @@ onMounted(() => {
 			// Outside equator band — ignore
 		}
 	}
+	/** 鼠标跟随预览：placing 模式下更新半透明绿盒的位置与朝向 */
+	let lastMouseEvent: MouseEvent | null = null;
+	const updatePreview = (e: MouseEvent) => {
+		if (placement.appMode !== 'edit' || placement.mode !== 'placing') {
+			if (previewVisible.value)
+				previewVisible.value = false;
+			return;
+		}
+		const offset = placementOffset(e);
+		if (offset === null || b.value === null
+			|| placement.selectedItemId === null || placement.selectedModelIndex === null) {
+			previewVisible.value = false;
+			return;
+		}
+		const meta = buildingMeta.get(placement.selectedModelIndex);
+		if (!meta) {
+			previewVisible.value = false;
+			return;
+		}
+		const fake = createBuilding(placement.selectedItemId, placement.selectedModelIndex, offset, placement.yaw);
+		const trans = calcBuildingTrans(R, b.value.pos, fake)[0];
+		previewMesh.matrix.multiplyMatrices(trans, meta.unitBoxTrans);
+		previewVisible.value = true;
+	}
+	const onPointerMove = (e: MouseEvent) => {
+		lastMouseEvent = e;
+		updatePreview(e);
+	}
+	const onMouseLeave = () => { lastMouseEvent = null; previewVisible.value = false; };
+	// 鼠标静止时，键盘切换建筑 / R 旋转 / Shift 吸附变化也要刷新预览
+	watchEffect(() => {
+		if (lastMouseEvent)
+			updatePreview(lastMouseEvent);
+	});
 	/** Delete building at clicked position */
 	const deleteBuilding = (e: MouseEvent) => {
 		const index = pickBuilding(e);
@@ -689,8 +761,12 @@ onMounted(() => {
 			placeBuilding(e);
 		else if (placement.mode === 'deleting')
 			deleteBuilding(e);
-		else
-			emit('update:selectedBuildingIndex', pickBuilding(e));
+		else {
+			const index = pickBuilding(e);
+			if (index === null)
+				emit('clickEmpty');
+			emit('update:selectedBuildingIndex', index);
+		}
 	}
 	const onContextMenu = (e: MouseEvent) => {
 		// Right click: exit placement/deleting mode (PlanetMapControls already
@@ -710,10 +786,14 @@ onMounted(() => {
 	rootEl.addEventListener('mousedown', onMouseDown);
 	rootEl.addEventListener('click', onClick);
 	rootEl.addEventListener('contextmenu', onContextMenu);
+	rootEl.addEventListener('pointermove', onPointerMove);
+	rootEl.addEventListener('mouseleave', onMouseLeave);
 	onUnmounted(() => {
 		rootEl.removeEventListener('mousedown', onMouseDown);
 		rootEl.removeEventListener('click', onClick);
 		rootEl.removeEventListener('contextmenu', onContextMenu);
+		rootEl.removeEventListener('pointermove', onPointerMove);
+		rootEl.removeEventListener('mouseleave', onMouseLeave);
 	});
 
 	let mounted = true;
