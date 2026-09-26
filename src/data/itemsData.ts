@@ -385,7 +385,7 @@ export const items: Item[] = [
         name: '小型运载火箭', icon: 'rocket',
     },
     {
-        id: 1131, models: [], grid: [1, 7, 6],
+        id: 1131, models: [], grid: [1, 7, 7],
         name: '地基', icon: 'terrain-tool',
         productive: true,
     },
