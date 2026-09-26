@@ -852,7 +852,7 @@ const dispenserParamParser: ParamParser<DispenserParameters> = {
     }
 }
 
-interface UnknownParamerters {
+export interface UnknownParamerters {
     parameters: Int32Array,
 }
 
@@ -872,7 +872,7 @@ const unknownParamParser: ParamParser<UnknownParamerters> = {
     },
 }
 
-type AllParameters = AssembleParamerters | StationParameters | AdvancedMiningMachineParameters |
+export type AllParameters = AssembleParamerters | StationParameters | AdvancedMiningMachineParameters |
     SplitterParameters | LabParamerters | BeltParameters | InserterParameters |
     TankParameters | StorageParameters | EjectorParameters |
     PowerGeneratorParameters | ArtifacialStarParameters | EnergyExchangerParameters |
