@@ -1,6 +1,7 @@
 import { BlueprintBuilding, BlueprintData } from "./parser";
 import { Command } from "@/command";
 import { ensureAreaFor } from "./area";
+import { defaultParamsFor } from "./defaultParams";
 
 /**
  * Create an empty v2 blueprint with a single root area anchored at the equator (latitude -80).
@@ -70,7 +71,7 @@ export function createBuilding(
         inputOffset: 0,
         recipeId: 0,
         filterId: 0,
-        parameters: null,
+        parameters: defaultParamsFor(itemId, modelIndex),
     };
 }
 

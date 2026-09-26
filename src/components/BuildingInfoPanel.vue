@@ -73,7 +73,9 @@
             </label>
         </div>
     </Modal>
+    <DefaultInfo v-if="showDefaultInfo" :building="building" />
 </template>
+
 
 <script lang="ts">
 import { ResearchMode, AcceleratorMode, EnergyExchangerMode } from '@/blueprint/parser';
@@ -94,6 +96,8 @@ const energyExchangerModeTexts = new Map([
     [EnergyExchangerMode.StandBy, '待机'],
     [EnergyExchangerMode.Charge, '充电'],
 ]);
+
+
 </script>
 
 <script lang="ts" setup>
@@ -107,11 +111,6 @@ import {
     EnergyExchangerParameters, PowerGeneratorParameters, ArtifacialStarParameters,
 } from '@/blueprint/parser';
 import { itemIconId } from '@/data/icons';
-import {
-    isLab, allAssemblers, isBelt, isStation, itemsMap, isInserter, isStorage, isTank,
-    isEjector, isEnergyExchanger, isArtificialStar, isRayReciver, isMonitor, isSplitter,
-    isBattleBase, isDispenser, isHoloBeacon,
-} from '@/data/items';
 import { recipesMap } from '@/data';
 import { commandQueueKey } from '@/define';
 import { SetBuildingRecipeCommand, SetLabResearchModeCommand } from '@/blueprint/setBuildingRecipe';
@@ -127,6 +126,33 @@ import StorageInfo from './StorageInfo.vue';
 import DispenserInfo from './DispenserInfo.vue';
 import HoloBeaconInfo from './HoloBeaconInfo.vue';
 import SwitchDSP from './SwitchDSP.vue';
+import DefaultInfo from './DefaultInfo.vue';
+import {
+    isLab, allAssemblers, isBelt, isStation, itemsMap, isInserter, isStorage, isTank,
+    isEjector, isEnergyExchanger, isArtificialStar, isRayReciver, isMonitor, isSplitter,
+    isBattleBase, isDispenser, isHoloBeacon,
+} from '@/data/items';
+
+const showDefaultInfo = computed(() => {
+    const id = props.building.itemId;
+    // 专属面板
+    if (isSplitter(id) || isStation(id) || isMonitor(id) || isBattleBase(id)
+        || isStorage(id) || isDispenser(id) || isHoloBeacon(id))
+        return false;
+    // 内联字段
+    if (showRecipeRow.value) return false;
+    if (isLab(id)) return false;
+    if (accModeText.value !== undefined) return false;
+    if (isInserter(id)) return false;
+    if (isEjector(id)) return false;
+    if (isEnergyExchanger(id)) return false;
+    if (isRayReciver(id)) return false;
+    if (isArtificialStar(id)) return false;
+    if (isBelt(id)) return false;
+    if (isTank(id)) return false;
+    return true;
+});
+
 const SplitterInfo = defineAsyncComponent(() => import(/* webpackChunkName: "renderer" */'./SpitterInfo.vue'));
 
 const { t } = useI18n();
@@ -167,6 +193,9 @@ const currentRecipeId = computed(() => {
 const showRecipeRow = computed(() => {
     if (isLab(props.building.itemId)) {
         return labResearchMode.value === ResearchMode.Compose;
+    }
+    if (allAssemblers.has(props.building.itemId)) {
+        return true;
     }
     return currentRecipeId.value > 0;
 });
