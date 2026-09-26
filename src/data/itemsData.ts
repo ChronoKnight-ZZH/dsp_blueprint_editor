@@ -328,6 +328,11 @@ export const items: Item[] = [
         name: '引力透镜', icon: 'gravity-lens',
         productive: true,
     },
+        {
+        id: 1211, models: [], grid: [1, 7, 6],
+        name: '黑雾引力透镜', icon: 'darkfog-lens',
+        productive: true,
+    },
     {
         id: 1210, models: [], grid: [1, 7, 4],
         name: '空间翘曲器', icon: 'space-warper',
@@ -466,28 +471,28 @@ export const items: Item[] = [
     },
     {
         id: 5101, models: [448], grid: [1, 6, 7],
-        name: '地面战斗机-E型', icon: 'fighter-shield',
+        name: '原型机', icon: 'fighter-shield',
         productive: true,
     },
     {
         id: 5102, models: [449], grid: [1, 6, 8],
-        name: '地面战斗机-A型', icon: 'fighter-plasma',
+        name: '精准无人机', icon: 'fighter-plasma',
     },
     {
         id: 5103, models: [450], grid: [1, 6, 9],
-        name: '地面战斗机-F型', icon: 'fighter-laser',
+        name: '攻击无人机', icon: 'fighter-laser',
     },
     {
         id: 5111, models: [451], grid: [1, 6, 10],
-        name: '太空战斗机-A型', icon: 'warship-plasma',
+        name: '护卫舰', icon: 'warship-plasma',
     },
     {
         id: 5112, models: [452], grid: [1, 6, 11],
-        name: '太空战斗机-F型', icon: 'warship-laser',
+        name: '驱逐舰', icon: 'warship-laser',
     },
     {
         id: 5201, models: [], grid: [1, 8, 7],
-        name: '存储单元', icon: 'memory',
+        name: '黑雾矩阵', icon: 'memory',
         productive: true,
     },
     {
@@ -761,7 +766,7 @@ export const items: Item[] = [
     },
     {
         id: 2401, models: [664], grid: [2, 6, 1],
-        name: '全息信标', icon: 'holographic_beacon',
+        name: '全息信标', icon: 'lighthouse',
     },
     {
         id: 6001, models: [], grid: [1, 8, 1],

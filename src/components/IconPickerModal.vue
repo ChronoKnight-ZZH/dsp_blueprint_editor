@@ -43,26 +43,35 @@ const emit = defineEmits<{
     (event: 'select', iconId: number): void,
 }>();
 
-type Category = 'item' | 'recipe' | 'signal' | 'tech';
+type Category = 'item' | 'building' | 'recipe' | 'signal' | 'tech' | 'upgrade1' | 'upgrade2';
 const category = ref<Category>('item');
 
 const tabs: { id: Category, label: string }[] = [
-    { id: 'item',   label: '物品' },
-    { id: 'recipe', label: '配方' },
-    { id: 'signal', label: '信号' },
-    { id: 'tech',   label: '科技' },
+    { id: 'item',     label: '物品' },
+    { id: 'building', label: '建筑' },
+    { id: 'recipe',   label: '配方' },
+    { id: 'signal',   label: '信号' },
+    { id: 'tech',     label: '科技' },
+    { id: 'upgrade1', label: '升级I' },
+    { id: 'upgrade2', label: '升级II' },
 ];
 
-const itemIds = [...itemsMap.values()].map(i => itemIconId(i.id));
+const itemIds = [...itemsMap.values()].filter(i => i.productive).map(i => itemIconId(i.id));
+const buildingIds = [...itemsMap.values()].filter(i => !i.productive).map(i => itemIconId(i.id));
 const recipeIds = [...recipesMap.values()].filter(r => r.icon).map(r => recipeIconId(r.id));
 const signalIds = signal.map(s => signalIconId(s.id));
-const techIds = tech.map(x => techIconId(x.id));
+const techIds = tech.filter(x => x.id < 2000).map(x => techIconId(x.id));
+const upgrade1Ids = tech.filter(x => x.id >= 2000 && x.id < 3000).map(x => techIconId(x.id));
+const upgrade2Ids = tech.filter(x => x.id >= 3000).map(x => techIconId(x.id));
 
 const iconsByCategory: Record<Category, number[]> = {
     item: itemIds,
+    building: buildingIds,
     recipe: recipeIds,
     signal: signalIds,
     tech: techIds,
+    upgrade1: upgrade1Ids,
+    upgrade2: upgrade2Ids,
 };
 const iconIds = computed(() => iconsByCategory[category.value]);
 
@@ -156,17 +165,23 @@ const clear = () => {
     "zh": {
         "选择图标": "选择图标",
         "物品": "物品",
+        "建筑": "建筑",
         "配方": "配方",
         "信号": "信号",
         "科技": "科技",
+        "升级I": "升级I",
+        "升级II": "升级II",
         "清除图标": "清除图标"
     },
     "en": {
         "选择图标": "Select Icon",
         "物品": "Items",
+        "建筑": "Buildings",
         "配方": "Recipes",
         "信号": "Signals",
         "科技": "Tech",
+        "升级I": "Upgrade I",
+        "升级II": "Upgrade II",
         "清除图标": "Clear Icon"
     }
 }
