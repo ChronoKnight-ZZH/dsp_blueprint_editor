@@ -6,6 +6,7 @@ import { defaultParamsFor } from "./defaultParams";
 /**
  * Create an empty v2 blueprint with a single root area anchored at the equator (latitude -80).
  * The root area covers the full equator band (size.y=161) with a small initial width (size.x=10).
+ * 编辑过程中的区域是临时画布；导出时由 normalizeBlueprintAreas 收缩到实际建筑区间。
  */
 export function createEmptyBlueprint(): BlueprintData {
     return {
