@@ -1,7 +1,8 @@
 <template>
     <div class="container">
         <BlueprintEditor ref="renderer" v-model:selectedBuildingIndex="selectedBuildingIndex"
-            @update:selectedBuildingIndex="i => buildingFocused(i !== null)" />
+            @update:selectedBuildingIndex="i => buildingFocused(i !== null)"
+            @click-empty="palette?.collapse()" />
         <div class="sidebar" :class="{ expanded: sidebarExpanded }">
             <div>
                 <div class="info-tab tab" :class="{ active: activeTab === 'info' }" @click="activeTab = 'info'"></div>
@@ -156,6 +157,7 @@
             @click="togglePin"></button>
             <!-- 底部UI建筑面板 -->
         <BuildingPalette v-if="data && placement.appMode === 'edit'" ref="palette" />
+        <ShortcutHint />
     </div>
 </template>
 
@@ -179,6 +181,7 @@ import ReplaceModal from './components/ReplaceModal.vue';
 import { CommandQueue } from './command';
 import BuildingOverview from './components/BuildingOverview.vue';
 import BuildingPalette from './components/BuildingPalette.vue';
+import ShortcutHint from './components/ShortcutHint.vue';
 import { useLang } from './i18n';
 // 仅用于类型标注，编译时擦除，不影响 defineAsyncComponent 的异步分包
 import type BlueprintEditorImpl from './components/BlueprintEditor.vue';
@@ -574,16 +577,17 @@ const isEdit = placement.appMode === 'edit';
     if (event.code === 'KeyX' && isEdit) { enterDeleteMode(); return; }
     // R：旋转 90°（仅在放置模式）
     if (event.code === 'KeyR' && isEdit && placement.mode === 'placing') { rotateBuilding(); return; }
-    // 1-9：切换分类
+    // 1-9：切换分类并展开建筑列表
     if (event.code >= 'Digit1' && event.code <= 'Digit9' && isEdit) {
         const cat = parseInt(event.code.slice(5));
         placement.categoryIndex = cat;
+        palette.value?.expand();
         if (placement.mode === 'deleting')
             resetToIdle();
         return;
     }
-    // F1-F12：选中建筑
-    if (event.code.startsWith('F') && isEdit) {
+    // F1-F12：选中建筑（删除模式下忽略，避免静默切回放置模式）
+    if (event.code.startsWith('F') && isEdit && placement.mode !== 'deleting') {
         event.preventDefault();
         const fn = parseInt(event.code.slice(1));
         if (fn >= 1 && fn <= 12) {
