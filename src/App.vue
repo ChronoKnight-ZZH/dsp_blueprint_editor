@@ -66,9 +66,6 @@
                         <button style="margin-left: 4px;" @click="onModeButton" :disabled="working">
                             {{ placement.appMode === 'edit' ? t('保存') : t('编辑') }}
                         </button>
-                        <button style="margin-left: 4px;" @click="onModeButton" :disabled="working">
-                            {{ placement.appMode === 'edit' ? t('保存') : t('编辑') }}
-                        </button>
                         <button style="margin-left: 4px;" @click="copy" :disabled="working || !bpStr">{{ t('复制')
                             }}</button>
                         <button style="margin-left: 4px;" @click="paste" :disabled="working">{{ t('粘贴') }}</button>
@@ -169,13 +166,9 @@ import { computed, defineAsyncComponent, onMounted, onUnmounted, provide, reacti
 import { useI18n } from 'vue-i18n';
 import { BlueprintData, fromStr, toStr } from '@/blueprint/parser';
 import { createEmptyBlueprint } from '@/blueprint/create';
-import { createEmptyBlueprint } from '@/blueprint/create';
 import { version, rendererKey, buildingInfoKey, commandQueueKey } from '@/define';
 import { BuildingInfo } from './blueprint/buildingInfo';
 import { RemoveBuildingsByItemCommand } from './blueprint/removeBuilding';
-import { usePlacement, resetToIdle, selectBuilding, enterDeleteMode,
-         rotateBuilding, enterEditMode, exitEditMode } from './editor/placementState';
-import { buildingCategories } from './data/buildingCategories';
 import { usePlacement, resetToIdle, selectBuilding, enterDeleteMode,
          rotateBuilding, enterEditMode, exitEditMode } from './editor/placementState';
 import { buildingCategories } from './data/buildingCategories';
@@ -404,8 +397,6 @@ const parseBp = (s: string) => {
             codeExpired.value = false;
             if (placement.appMode === 'edit')
             exitEditMode();
-            if (placement.appMode === 'edit')
-            exitEditMode();
             return;
         }
     } else {
@@ -547,25 +538,12 @@ const paste = async () => {
 
 const placement = usePlacement();
 
-const placement = usePlacement();
-
 const hotkey = (event: KeyboardEvent) => {
-    
-const isEdit = placement.appMode === 'edit';
-
     
 const isEdit = placement.appMode === 'edit';
 
     if (event.isComposing)
         return;
-    // Track Shift for free placement
-    // Shift：仅编辑模式
-    if ((event.code === 'ShiftLeft' || event.code === 'ShiftRight') && isEdit) {
-        if (placement.mode === 'placing')
-            placement.freePlacement = true;
-    }
-
-    // Ctrl+Z/Y
     // Track Shift for free placement
     // Shift：仅编辑模式
     if ((event.code === 'ShiftLeft' || event.code === 'ShiftRight') && isEdit) {
@@ -634,48 +612,11 @@ const isEdit = placement.appMode === 'edit';
     if (event.altKey || event.metaKey)
         return;
 
-
     // 在输入框/文本域中打字时不触发
     const target = event.target as HTMLElement | null;
     const tag = target?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable)
         return;
-}
-
-// Shift
-const onKeyUp = (event: KeyboardEvent) => {
-    if ((event.code === 'ShiftLeft' || event.code === 'ShiftRight'))
-        placement.freePlacement = false;
-}
-// 添加事件监听
-onMounted(() => {
-    document.body.addEventListener('keydown', hotkey);
-    document.body.addEventListener('keyup', onKeyUp);
-});
-// 移除事件监听
-onUnmounted(() => {
-    document.body.removeEventListener('keydown', hotkey);
-    document.body.removeEventListener('keyup', onKeyUp);
-});
-// 初始化建筑面板
-const palette = ref<InstanceType<typeof BuildingPalette> | null>(null);
-
-const onModeButton = () => {
-    if (placement.appMode === 'edit') {
-        // 保存：无条件刷回代码框 → 回预览
-        if (data.value) {
-            bpStr.value = toStr(data.value);
-            codeExpired.value = false;
-        }
-        exitEditMode();
-    } else {
-        // 编辑：data 为空则自动创建空蓝图
-        if (!data.value) {
-            parseBp(toStr(createEmptyBlueprint()));   // 复用 parseBp，保证 bpStr/codeExpired 一致
-        }
-        enterEditMode();
-    }
-};
 }
 
 // Shift
@@ -1072,9 +1013,6 @@ ul.operations {
         "拖拽文件到此处打开": "拖拽文件到此处打开",
         "编辑": "编辑", 
         "保存": "保存"
-        "拖拽文件到此处打开": "拖拽文件到此处打开",
-        "编辑": "编辑", 
-        "保存": "保存"
     },
     en: {
         "复制": "Copy",
@@ -1095,9 +1033,6 @@ ul.operations {
         "固定面板": "Pin panel (cannot be hidden by clicking)",
         "右键点击剔除": "Right-click a building to remove it",
         "仅支持 .txt 文件": "Only .txt files are supported",
-        "拖拽文件到此处打开": "Drop file here to open",
-        "编辑": "Edit", 
-        "保存": "Save"
         "拖拽文件到此处打开": "Drop file here to open",
         "编辑": "Edit", 
         "保存": "Save"

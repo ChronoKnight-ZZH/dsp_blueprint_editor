@@ -9,15 +9,6 @@
     <BuildingRecipe v-if="currentRecipeId > 0" :recipeId="currentRecipeId" />
     <div v-else class="recipe-placeholder">{{ t('选择配方') }}</div>
 </RecipeSelect>
-    <RecipeSelect
-    v-if="showRecipeRow"
-    :recipeId="currentRecipeId > 0 ? currentRecipeId : null"
-    @update:recipeId="onRecipeSelected"
-    class="recipe-edit"
->
-    <BuildingRecipe v-if="currentRecipeId > 0" :recipeId="currentRecipeId" />
-    <div v-else class="recipe-placeholder">{{ t('选择配方') }}</div>
-</RecipeSelect>
 
     <SplitterInfo v-if="isSplitter(building.itemId)" :building="building" />
     <StationInfo v-if="isStation(building.itemId)" :building="building" />
@@ -29,7 +20,6 @@
             <label>{{ t('过滤器') }}</label>
             <span class="v" style="align-self: center;"><BuildingIcon :icon-id="itemIconId(filterItem.id)" :alt="t(filterItem.name)" /></span>
         </div>
-        <div v-if="isLab(building.itemId)" class="editable-row" @click="onLabModeClick">
         <div v-if="isLab(building.itemId)" class="editable-row" @click="onLabModeClick">
             <label>{{ t('模式') }}</label>
             <span class="v">{{ LabModeText }}</span>
@@ -124,12 +114,9 @@ import { itemIconId } from '@/data/icons';
 import { recipesMap } from '@/data';
 import { commandQueueKey } from '@/define';
 import { SetBuildingRecipeCommand, SetLabResearchModeCommand } from '@/blueprint/setBuildingRecipe';
-import { SetBuildingRecipeCommand, SetLabResearchModeCommand } from '@/blueprint/setBuildingRecipe';
 
 import BuildingRecipe from './BuildingRecipe.vue';
 import BuildingIcon from './BuildingIcon.vue';
-import RecipeSelect from './RecipeSelect.vue';
-import Modal from './ModalDSP.vue';
 import RecipeSelect from './RecipeSelect.vue';
 import Modal from './ModalDSP.vue';
 import StationInfo from './StationInfo.vue';
@@ -236,7 +223,6 @@ function onLabModeSelected(mode: ResearchMode) {
 }
 
 const LabModeText = computed(() => {
-    return t(labModeTexts.get(labResearchMode.value)!);
     return t(labModeTexts.get(labResearchMode.value)!);
 })
 const productive = computed(() => {
@@ -397,82 +383,6 @@ const energyExchangerMode = computed(() => {
     color: #ccc;
     border-color: #888;
 }
-
-.recipe-edit {
-    display: block;
-    cursor: pointer;
-    border-radius: 4px;
-    padding: 2px 4px;
-    margin: -2px -4px;
-    transition: background 0.12s;
-
-    &:hover {
-        background: #2a2a2a;
-    }
-
-    /* 让 RecipeSelect 的 .icon-select 触发器透传点击 */
-    .icon-select {
-        display: block;
-    }
-}
-
-.editable-row {
-    cursor: pointer;
-    border-radius: 4px;
-    padding: 0 4px;
-    margin: 0 -4px;
-    transition: background 0.12s;
-
-    &:hover {
-        background: #2a2a2a;
-    }
-}
-
-.mode-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin: 8px 0;
-    min-width: 180px;
-
-    .mode-option {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        cursor: pointer;
-        padding: 4px 8px;
-        border-radius: 4px;
-
-        &:hover {
-            background: #2a2a2a;
-        }
-
-        input[type="radio"] {
-            cursor: pointer;
-        }
-    }
-}
-.recipe-placeholder {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    color: #888;
-    font-style: italic;
-    padding: 2px 6px;
-    border: 1px dashed #555;
-    border-radius: 4px;
-
-    &::before {
-        content: '+';
-        font-style: normal;
-        font-weight: bold;
-    }
-}
-
-.recipe-edit:hover .recipe-placeholder {
-    color: #ccc;
-    border-color: #888;
-}
 </style>
 
 <i18n>
@@ -482,24 +392,15 @@ const energyExchangerMode = computed(() => {
         "送入轨道": "送入轨道",
         "研究模式": "研究模式",
         "选择配方": "选择配方"
-        "送入轨道": "送入轨道",
-        "研究模式": "研究模式",
-        "选择配方": "选择配方"
     },
     "en": {
         "模式": "Mode",
         "送入轨道": "Orbit",
         "研究模式": "Research Mode",
         "选择配方": "Select Recipe"
-        "送入轨道": "Orbit",
-        "研究模式": "Research Mode",
-        "选择配方": "Select Recipe"
     },
     "fr": {
         "模式": "Mode",
-        "送入轨道": "Orbit",
-        "研究模式": "Mode de recherche",
-        "选择配方": "Sélectionner une recette"
         "送入轨道": "Orbit",
         "研究模式": "Mode de recherche",
         "选择配方": "Sélectionner une recette"

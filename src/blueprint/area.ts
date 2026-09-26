@@ -42,3 +42,85 @@ export function ensureAreaFor(bp: BlueprintData, offset: { x: number, y: number 
         root.size.x = Math.floor(offset.x) + 1;
     return 0;
 }
+
+/** 与 planet.ts findRootLatitude 一致：无子区域的根区域始终居中于赤道带 */
+function rootAreaLatitude(sizeY: number): number {
+    return -Math.floor(sizeY / 2);
+}
+
+/**
+ * 导出时归一化：根区域收缩为覆盖所有建筑的最小区间（由距离最远的两建筑决定），
+ * 所有建筑坐标平移到新原点，dragBoxSize 与 cursorOffset 同步为游戏惯例
+ * （与游戏生成蓝图一致：anchorLocalOffset={0,0}、size=dragBoxSize=紧贴边界框）。
+ * 经向为环形坐标，自动取最小覆盖弧（处理跨越 0 经线的情况）。
+ * 仅对编辑器新建蓝图（dragBoxSize 为 0，游戏蓝图的 dragBoxSize 恒非 0）生效，
+ * 导入的蓝图保持字节级不变；不修改入参。
+ */
+export function normalizeBlueprintAreas(bp: BlueprintData): BlueprintData {
+    if (bp.areas.length !== 1 || bp.buildings.length === 0)
+        return bp;
+    if (bp.dragBoxSize.x !== 0 || bp.dragBoxSize.y !== 0)
+        return bp;
+    if (bp.reformData != null && bp.reformData.rects.length > 0)
+        return bp;
+    const root = bp.areas[0];
+    if (root.parentIndex !== -1 || root.areaSegments !== ROOT_SEGMENT)
+        return bp;
+
+    const liveLat = rootAreaLatitude(root.size.y);
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (const b of bp.buildings) {
+        for (const p of b.localOffset) {
+            xs.push(((p.x % ROOT_GRID_SIZE) + ROOT_GRID_SIZE) % ROOT_GRID_SIZE);
+            ys.push(p.y + liveLat); // 绝对纬向格
+        }
+    }
+    xs.sort((a, b) => a - b);
+    ys.sort((a, b) => a - b);
+
+    // x：环形最小覆盖弧 = 最大间隙的补集
+    let maxGap = -1, gapStart = 0;
+    for (let i = 0; i < xs.length; i++) {
+        const next = i + 1 < xs.length ? xs[i + 1] : xs[0] + ROOT_GRID_SIZE;
+        if (next - xs[i] > maxGap) {
+            maxGap = next - xs[i];
+            gapStart = xs[i];
+        }
+    }
+    const arcStart = gapStart + maxGap;              // 覆盖弧起点（未取模）
+    const originX = Math.floor(arcStart);
+    // 最远端点映射到 originX + (sizeX - 1) 之内，端点取整坐标时仍需独占一格
+    const sizeX = Math.max(1, Math.floor(arcStart + (ROOT_GRID_SIZE - maxGap)) - originX + 1);
+
+    // y：赤道居中约束下的最小高度
+    const needLo = Math.max(0, -Math.floor(ys[0]));
+    const needHi = Math.max(0, Math.floor(ys[ys.length - 1]) + 1);
+    const sizeY = Math.max(1, 2 * needLo, 2 * needHi - 1);
+    // 新原点纬度 rootAreaLatitude(sizeY)，y' = 绝对纬度 - 新原点纬度 = y + liveLat - newLat
+    const dy = liveLat - rootAreaLatitude(sizeY);
+
+    const shiftX = (x: number) => ((x - originX) % ROOT_GRID_SIZE + ROOT_GRID_SIZE) % ROOT_GRID_SIZE;
+    const buildings = bp.buildings.map(b => ({
+        ...b,
+        localOffset: b.localOffset.map(p => ({
+            x: shiftX(p.x), y: p.y + dy, z: p.z,
+        })) as BlueprintData['buildings'][number]['localOffset'],
+        // 导出时由 localOffset[1]/yaw[1] 重新生成，避免残留平移前的旧值
+        v2ExtraPose: undefined,
+    }));
+
+    return {
+        ...bp,
+        cursorOffset: { x: Math.floor(sizeX / 2), y: Math.floor(sizeY / 2) },
+        cursorTargetArea: 0,
+        dragBoxSize: { x: sizeX, y: sizeY },
+        primaryAreaIdx: 0,
+        areas: [{
+            ...root,
+            anchorLocalOffset: { x: 0, y: 0 },
+            size: { x: sizeX, y: sizeY },
+        }],
+        buildings,
+    };
+}

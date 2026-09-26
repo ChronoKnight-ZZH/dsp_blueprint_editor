@@ -1,6 +1,7 @@
 import { allAssemblers } from '@/data/items';
 import pako from 'pako';
 import { digest } from './md5';
+import { normalizeBlueprintAreas } from './area';
 
 export interface BlueprintArea {
     index: number;
@@ -1369,6 +1370,8 @@ function encodedSize(bp: BlueprintData): number {
 }
 
 export function toStr(bp: BlueprintData): string {
+    // 导出前归一化根区域：收缩到距离最远的两建筑区间（游戏惯例的紧凑边界框）
+    bp = normalizeBlueprintAreas(bp);
     const headerFormatV2 = bp.version >= 2;
     let result = START;
     result += headerFormatV2 ? '1,' : '0,';
