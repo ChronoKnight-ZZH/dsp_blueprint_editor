@@ -75,6 +75,8 @@ const buildingMetaRaw: [number, { color: number | null, box: [number, number, nu
 ])
 
 export const buildingMeta = new Map<number, BuildingMeta>();
+/** modelIndex → 选择盒尺寸（格单位，[x, 高, z]）；分拣器端点吸附建筑边缘时使用 */
+export const buildingBoxes = new Map<number, [number, number, number]>();
 
 for (const [id, d] of buildingMetaRaw) {
     const unitBoxTrans = new Matrix4();
@@ -97,6 +99,7 @@ for (const [id, d] of buildingMetaRaw) {
         selectUnitBoxTrans,
         iconTrans,
     });
+    buildingBoxes.set(id, d.box);
 }
 
 export const noIconBuildings = new Set<number>([

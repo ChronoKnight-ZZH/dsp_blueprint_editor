@@ -70,10 +70,20 @@ export class BVH {
     constructor(public boxes: Matrix4[], { maxDepth = 32, leafBoxes = 1 }: BVHOptions = {}) {
         const v = new Vector3();
 
+        const isFiniteBox = (b: Box3) =>
+            Number.isFinite(b.min.x) && Number.isFinite(b.min.y) && Number.isFinite(b.min.z) &&
+            Number.isFinite(b.max.x) && Number.isFinite(b.max.y) && Number.isFinite(b.max.z);
+
         const newNode = (idx: Int32Array): BVHNode => {
             const bounding = new Box3();
-            for (const i of idx)
-                bounding.union(boundings[i]);
+            for (const i of idx) {
+                const b = boundings[i];
+                // 跳过空盒或含 NaN 的盒（例如建筑引用了未定位的 area，导致变换矩阵含 NaN），
+                // 避免单个坏盒污染整个节点的包围盒，进而触发 longestAxis 返回 null。
+                if (b.isEmpty() || !isFiniteBox(b))
+                    continue;
+                bounding.union(b);
+            }
             return { idx, bounding, children: [] };
         }
 
@@ -81,15 +91,24 @@ export class BVH {
             if (node.idx.length <= leafBoxes || depth == 0)
                 return;
             const axis = longestAxis(node.bounding);
+            // 包围盒退化（所有维度 ≤ 0，或全部为无效盒）时无法切分，
+            // 直接将该节点作为叶子节点，由 raycast 遍历其中的盒。
             if (axis === null)
-                throw new Error('Unexpected empty box');
+                return;
 
             let splitValue = 0.;
+            let finiteCount = 0;
             const c = centers[axis];
             for (const i of node.idx) {
-                splitValue += c[i];
+                if (Number.isFinite(c[i])) {
+                    splitValue += c[i];
+                    finiteCount++;
+                }
             }
-            splitValue /= node.idx.length;
+            // 若没有任何有限中心（全部为 NaN/空盒），无法切分，退化为叶子节点
+            if (finiteCount === 0)
+                return;
+            splitValue /= finiteCount;
 
             const splitPos = partition(node.idx, i => c[i] < splitValue);
             if (splitPos == 0 || splitPos == node.idx.length)

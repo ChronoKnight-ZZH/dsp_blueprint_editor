@@ -497,6 +497,8 @@ import { attachCamera, attachRenderer } from '@/utils';
 import { usePlacement, resetToIdle } from '@/editor/placementState';
 import { planetToLocal } from '@/blueprint/area';
 import { createBuilding, CreateBuildingCommand } from '@/blueprint/create';
+import { buildBeltLine, CreateBeltLineCommand, rasterizeLine } from '@/blueprint/beltLine';
+import { createSorterBetween } from '@/blueprint/sorter';
 
 const props = defineProps<{
   selectedBuildingIndex: number | null,
@@ -615,6 +617,63 @@ watchEffect(() => {
 		scene.remove(previewMesh);
 });
 
+// ---- 传送带拖拽铺线 / 分拣器两点架接 ----
+const isPlacingBelt = () => placement.appMode === 'edit' && placement.mode === 'placing'
+    && placement.selectedItemId !== null && isBelt(placement.selectedItemId);
+const isPlacingSorter = () => placement.appMode === 'edit' && placement.mode === 'placing'
+    && placement.selectedItemId !== null && isInserter(placement.selectedItemId);
+
+let beltStart: { x: number, y: number } | null = null;
+const sorterSource = ref<number | null>(null);
+
+// 整条传送带的拖拽预览（复用实例网格，count 随路径变化）
+const BELT_PREVIEW_CAP = 1024;
+const beltPreviewMesh = new InstancedMesh(
+    new BoxGeometry(0.6, 0.6, 0.1),
+    new MeshBasicMaterial({ color: 0x50fa50, opacity: 0.45, transparent: true, depthWrite: false }),
+    BELT_PREVIEW_CAP,
+);
+beltPreviewMesh.matrixAutoUpdate = false;
+beltPreviewMesh.count = 0;
+beltPreviewMesh.renderOrder = 9;
+const beltPreviewVisible = ref(false);
+watchEffect(() => {
+    if (isPlacingBelt() && beltPreviewVisible.value)
+        scene.add(beltPreviewMesh);
+    else
+        scene.remove(beltPreviewMesh);
+});
+function hideBeltPreview() {
+    beltPreviewMesh.count = 0;
+    beltPreviewVisible.value = false;
+}
+
+// 分拣器第一点（源建筑）高亮
+const sorterSrcBox = new Mesh(
+    new BoxGeometry(1, 1, 1),
+    new MeshBasicMaterial({ color: 0x50fa50, opacity: 0.3, transparent: true, depthWrite: false }),
+);
+sorterSrcBox.matrixAutoUpdate = false;
+watchEffect(() => {
+    if (b.value !== null && isPlacingSorter() && sorterSource.value !== null) {
+        sorterSrcBox.matrix.copy(b.value.bvh.boxes[sorterSource.value]);
+        scene.add(sorterSrcBox);
+    } else {
+        scene.remove(sorterSrcBox);
+    }
+});
+
+// 退出 placing / 切换建筑时清理中途状态
+watchEffect(() => {
+    placement.mode; placement.selectedItemId;
+    if (!isPlacingBelt()) {
+        beltStart = null;
+        hideBeltPreview();
+    }
+    if (!isPlacingSorter())
+        sorterSource.value = null;
+});
+
 onMounted(() => {
 	const rootEl = root.value!;
 
@@ -718,9 +777,79 @@ onMounted(() => {
 		previewMesh.matrix.multiplyMatrices(trans, meta.unitBoxTrans);
 		previewVisible.value = true;
 	}
+	// 传送带拖拽预览：把起点到当前点的栅格化路径写入实例网格
+	const beltPreviewM = new Matrix4();
+	const beltLift = new Matrix4().makeTranslation(0, 0, 0.05);
+	const updateBeltPreview = (p0: { x: number, y: number }, e: MouseEvent) => {
+		if (b.value === null || placement.selectedItemId === null || placement.selectedModelIndex === null)
+			return;
+		const cur = placementOffset(e);
+		if (cur === null)
+			return;
+		const pts = rasterizeLine(p0.x, p0.y, cur.x, cur.y);
+		const n = Math.min(pts.length, BELT_PREVIEW_CAP);
+		for (let i = 0; i < n; i++) {
+			const fake = createBuilding(placement.selectedItemId, placement.selectedModelIndex, pts[i], 0);
+			const t = calcBuildingTrans(R, b.value.pos, fake)[0];
+			beltPreviewM.multiplyMatrices(t, beltLift);
+			beltPreviewMesh.setMatrixAt(i, beltPreviewM);
+		}
+		beltPreviewMesh.count = n;
+		beltPreviewMesh.instanceMatrix.needsUpdate = true;
+		beltPreviewVisible.value = n > 0;
+	}
+	/** 松开鼠标：提交整条传送带（一次撤销） */
+	const commitBeltLine = (e: MouseEvent) => {
+		const queue = commandQueue.value;
+		const start = beltStart;
+		beltStart = null;
+		hideBeltPreview();
+		if (!queue || !start || placement.selectedItemId === null || placement.selectedModelIndex === null)
+			return;
+		const end = placementOffset(e);
+		if (end === null)
+			return;
+		const belts = buildBeltLine(placement.selectedItemId, placement.selectedModelIndex, start, end, placement.yaw);
+		if (belts.length === 0)
+			return;
+		try {
+			queue.push(new CreateBeltLineCommand(belts));
+		} catch {
+			// Outside equator band — ignore
+		}
+	}
+	/** 分拣器两点架接 */
+	const pickSorterPoint = (e: MouseEvent) => {
+		const queue = commandQueue.value;
+		if (!queue)
+			return;
+		const index = pickBuilding(e);
+		if (sorterSource.value === null) {
+			if (index !== null)
+				sorterSource.value = index;
+			return;
+		}
+		const src = sorterSource.value;
+		sorterSource.value = null;
+		if (index === null || index === src || placement.selectedItemId === null || placement.selectedModelIndex === null)
+			return;
+		const sorter = createSorterBetween(
+			queue.data.buildings[src], queue.data.buildings[index],
+			placement.selectedItemId, placement.selectedModelIndex,
+		);
+		if (sorter)
+			queue.push(new CreateBuildingCommand(sorter));
+	}
+	const onMouseUp = (e: MouseEvent) => {
+		if (isPlacingBelt() && beltStart !== null)
+			commitBeltLine(e);
+	}
 	const onPointerMove = (e: MouseEvent) => {
 		lastMouseEvent = e;
-		updatePreview(e);
+		if (isPlacingBelt() && beltStart !== null)
+			updateBeltPreview(beltStart, e);
+		else
+			updatePreview(e);
 	}
 	const onMouseLeave = () => { lastMouseEvent = null; previewVisible.value = false; };
 	// 鼠标静止时，键盘切换建筑 / R 旋转 / Shift 吸附变化也要刷新预览
@@ -747,6 +876,8 @@ onMounted(() => {
 	let downPos: { x: number, y: number } | null = null;
 	const onMouseDown = (e: MouseEvent) => {
 		downPos = { x: e.clientX, y: e.clientY };
+		if (isPlacingBelt())
+			beltStart = placementOffset(e);
 	}
 	const onClick = (e: MouseEvent) => {
 		if (downPos === null)
@@ -754,11 +885,18 @@ onMounted(() => {
 		const dx = e.clientX - downPos.x;
 		const dy = e.clientY - downPos.y;
 		downPos = null;
+		// 传送带在 mouseup 已整条提交，click 忽略（拖拽位移也合法）
+		if (isPlacingBelt())
+			return;
 		if (dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD)
 			return; // was a drag, not a click
 		// Left click: place / delete / select
-		if (placement.mode === 'placing')
-			placeBuilding(e);
+		if (placement.mode === 'placing') {
+			if (isPlacingSorter())
+				pickSorterPoint(e);
+			else
+				placeBuilding(e);
+		}
 		else if (placement.mode === 'deleting')
 			deleteBuilding(e);
 		else {
@@ -784,12 +922,14 @@ onMounted(() => {
     }
 	}
 	rootEl.addEventListener('mousedown', onMouseDown);
+	rootEl.addEventListener('mouseup', onMouseUp);
 	rootEl.addEventListener('click', onClick);
 	rootEl.addEventListener('contextmenu', onContextMenu);
 	rootEl.addEventListener('pointermove', onPointerMove);
 	rootEl.addEventListener('mouseleave', onMouseLeave);
 	onUnmounted(() => {
 		rootEl.removeEventListener('mousedown', onMouseDown);
+		rootEl.removeEventListener('mouseup', onMouseUp);
 		rootEl.removeEventListener('click', onClick);
 		rootEl.removeEventListener('contextmenu', onContextMenu);
 		rootEl.removeEventListener('pointermove', onPointerMove);
