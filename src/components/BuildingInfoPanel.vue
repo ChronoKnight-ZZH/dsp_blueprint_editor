@@ -16,9 +16,10 @@
     <BattleBaseInfo v-if="isBattleBase(building.itemId)" :building="building" />
     <StorageInfo v-if="isStorage(building.itemId)" :building="building" />
     <div class="building-params">
-        <div v-if="filterItem">
+        <div v-if="isInserter(building.itemId)" class="filter-row">
             <label>{{ t('过滤器') }}</label>
-            <span class="v" style="align-self: center;"><BuildingIcon :icon-id="itemIconId(filterItem.id)" :alt="t(filterItem.name)" /></span>
+            <ItemSelect :itemId="filterItem ? filterItem.id : null" @update:itemId="onFilter" />
+            <button v-if="filterItem" class="clear-btn" type="button" @click="clearFilter">×</button>
         </div>
         <div v-if="isLab(building.itemId)" class="editable-row" @click="onLabModeClick">
             <label>{{ t('模式') }}</label>
@@ -55,8 +56,16 @@
             <span class="v">{{ truth((bParams as ArtifacialStarParameters).boost) }}</span>
         </div>
     </div>
-    <div v-if="beltParams">
-        <BuildingIcon :icon-id="beltParams.iconId" />{{ beltParams.count }}
+    <div v-if="beltParams" class="belt-edit">
+        <div class="belt-row">
+            <label>{{ t('图标') }}</label>
+            <ItemSelect :itemId="beltParams.iconId > 0 ? beltParams.iconId : null" @update:itemId="onBeltIcon" />
+            <button v-if="beltParams.iconId > 0" class="clear-btn" type="button" @click="clearBeltIcon">×</button>
+        </div>
+        <div class="belt-row">
+            <label>{{ t('数量') }}</label>
+            <input type="number" min="0" class="count-input" :value="beltParams.count" @change="onBeltCount" />
+        </div>
     </div>
     <div class="tank-io" v-if="isTank(building.itemId)">
         <SwitchDSP :opened="(bParams as TankParameters).output">{{ t('储液罐输出') }}</SwitchDSP>
@@ -110,13 +119,13 @@ import {
     BeltParameters, InserterParameters, EjectorParameters,
     EnergyExchangerParameters, PowerGeneratorParameters, ArtifacialStarParameters,
 } from '@/blueprint/parser';
-import { itemIconId } from '@/data/icons';
 import { recipesMap } from '@/data';
 import { commandQueueKey } from '@/define';
 import { SetBuildingRecipeCommand, SetLabResearchModeCommand } from '@/blueprint/setBuildingRecipe';
+import { SetBeltParamsCommand } from '@/blueprint/setBeltParams';
+import { SetSorterFilterCommand } from '@/blueprint/setSorterFilter';
 
 import BuildingRecipe from './BuildingRecipe.vue';
-import BuildingIcon from './BuildingIcon.vue';
 import RecipeSelect from './RecipeSelect.vue';
 import Modal from './ModalDSP.vue';
 import StationInfo from './StationInfo.vue';
@@ -127,6 +136,7 @@ import DispenserInfo from './DispenserInfo.vue';
 import HoloBeaconInfo from './HoloBeaconInfo.vue';
 import SwitchDSP from './SwitchDSP.vue';
 import DefaultInfo from './DefaultInfo.vue';
+import ItemSelect from './ItemSelect.vue';
 import {
     isLab, allAssemblers, isBelt, isStation, itemsMap, isInserter, isStorage, isTank,
     isEjector, isEnergyExchanger, isArtificialStar, isRayReciver, isMonitor, isSplitter,
@@ -262,6 +272,28 @@ commandQueue.updater.updateBeltIcon.onMounted(b => {
         beltVersion.value++;
 });
 
+// 传送带图标：选择物品（null = 关闭弹窗未选，忽略）；× 按钮清零
+function onBeltIcon(id: number | null) {
+    if (id === null) return;
+    commandQueue.push(new SetBeltParamsCommand(props.building, "iconId", id));
+}
+function clearBeltIcon() {
+    commandQueue.push(new SetBeltParamsCommand(props.building, "iconId", 0));
+}
+function onBeltCount(e: Event) {
+    const v = parseInt((e.target as HTMLInputElement).value, 10);
+    if (Number.isNaN(v) || v < 0) return;
+    commandQueue.push(new SetBeltParamsCommand(props.building, "count", v));
+}
+// 分拣器过滤器：选择物品（null 忽略）；× 清零（0 = 不过滤）
+function onFilter(id: number | null) {
+    if (id === null) return;
+    commandQueue.push(new SetSorterFilterCommand(props.building, id));
+}
+function clearFilter() {
+    commandQueue.push(new SetSorterFilterCommand(props.building, 0));
+}
+
 const bParams = computed(() => props.building.parameters);
 const energyExchangerMode = computed(() => {
     const mode = (props.building.parameters as EnergyExchangerParameters).mode;
@@ -295,6 +327,57 @@ const energyExchangerMode = computed(() => {
         display: inline-block;
         text-align: right;
         flex: auto;
+    }
+}
+
+/* 分拣器过滤器行（位于 .building-params 内） */
+.filter-row {
+    align-items: center;
+    gap: 8px;
+}
+
+/* 传送带图标 / 数量编辑 */
+.belt-edit {
+    margin-bottom: 14px;
+
+    .belt-row {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+        margin-top: 6px;
+
+        label {
+            font-weight: bold;
+            min-width: 48px;
+        }
+    }
+
+    .count-input {
+        width: 84px;
+        padding: 2px 6px;
+        color: #eee;
+        background: #1f1f1f;
+        border: 1px solid #444;
+        border-radius: 3px;
+    }
+}
+
+.clear-btn {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    line-height: 1;
+    color: #ccc;
+    cursor: pointer;
+    background: transparent;
+    border: 1px solid #666;
+    border-radius: 3px;
+
+    &:hover {
+        color: #f88;
+        background: #3a2222;
+        border-color: #aa5555;
     }
 }
 
@@ -391,19 +474,28 @@ const energyExchangerMode = computed(() => {
         "模式": "模式",
         "送入轨道": "送入轨道",
         "研究模式": "研究模式",
-        "选择配方": "选择配方"
+        "选择配方": "选择配方",
+        "过滤器": "过滤器",
+        "图标": "图标",
+        "数量": "数量"
     },
     "en": {
         "模式": "Mode",
         "送入轨道": "Orbit",
         "研究模式": "Research Mode",
-        "选择配方": "Select Recipe"
+        "选择配方": "Select Recipe",
+        "过滤器": "Filter",
+        "图标": "Icon",
+        "数量": "Count"
     },
     "fr": {
         "模式": "Mode",
         "送入轨道": "Orbit",
         "研究模式": "Mode de recherche",
-        "选择配方": "Sélectionner une recette"
+        "选择配方": "Sélectionner une recette",
+        "过滤器": "Filtre",
+        "图标": "Icône",
+        "数量": "Quantité"
     }
 }
 </i18n>
