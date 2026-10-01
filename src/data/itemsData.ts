@@ -259,6 +259,7 @@ export const items: Item[] = [
     {
         id: 1208, models: [], grid: [1, 1, 13],
         name: '临界光子', icon: 'photon-capacitor-full',
+        productive: true,
     },
     {
         id: 1801, models: [], grid: [1, 2, 9],
@@ -273,10 +274,12 @@ export const items: Item[] = [
     {
         id: 1803, models: [], grid: [1, 2, 11],
         name: '反物质燃料棒', icon: 'antimatter-energy-fuel',
+        productive: true,
     },
     {
         id: 1804, models: [], grid: [1, 2, 12],
-        name: '金色燃料棒', icon: 'virtual-energy-fuel',
+        name: '奇异湮灭燃料棒', icon: 'virtual-energy-fuel',
+        productive: true,
     },
     {
         id: 1115, models: [], grid: [1, 3, 8],
@@ -361,14 +364,17 @@ export const items: Item[] = [
     {
         id: 5003, models: [372], grid: [1, 7, 1],
         name: '配送运输机', icon: 'delivery-drone',
+        productive: true,
     },
     {
         id: 5001, models: [47], grid: [1, 7, 2],
         name: '物流运输机', icon: 'logistic-drone',
+        productive: true,
     },
     {
         id: 5002, models: [48], grid: [1, 7, 3],
         name: '星际物流运输船', icon: 'logistic-vessel',
+        productive: true,
     },
     {
         id: 1125, models: [], grid: [1, 7, 9],
@@ -383,6 +389,7 @@ export const items: Item[] = [
     {
         id: 1503, models: [], grid: [1, 7, 11],
         name: '小型运载火箭', icon: 'rocket',
+        productive: true,
     },
     {
         id: 1131, models: [], grid: [1, 7, 7],
@@ -477,18 +484,22 @@ export const items: Item[] = [
     {
         id: 5102, models: [449], grid: [1, 6, 8],
         name: '精准无人机', icon: 'fighter-plasma',
+        productive: true,
     },
     {
         id: 5103, models: [450], grid: [1, 6, 9],
         name: '攻击无人机', icon: 'fighter-laser',
+        productive: true,
     },
     {
         id: 5111, models: [451], grid: [1, 6, 10],
         name: '护卫舰', icon: 'warship-plasma',
+        productive: true,
     },
     {
         id: 5112, models: [452], grid: [1, 6, 11],
         name: '驱逐舰', icon: 'warship-laser',
+        productive: true,
     },
     {
         id: 5201, models: [], grid: [1, 8, 7],
@@ -681,7 +692,7 @@ export const items: Item[] = [
         name: '蓄电器（满）', icon: 'accumulator-full',
     },
     {
-        id: 2311, models: [72], grid: [2, 4, 10],
+        id: 2311, models: [72], grid: [2, 4, 11],
         name: '电磁轨道弹射器', icon: 'em-rail-ejector',
     },
     {
@@ -689,7 +700,7 @@ export const items: Item[] = [
         name: '射线接收站', icon: 'ray-receiver',
     },
     {
-        id: 2312, models: [74], grid: [2, 4, 11],
+        id: 2312, models: [74], grid: [2, 4, 12],
         name: '垂直发射井', icon: 'vertical-launching-silo',
     },
     {
@@ -765,7 +776,7 @@ export const items: Item[] = [
         name: '地面电浆炮', icon: 'turret-plasma-ground',
     },
     {
-        id: 2401, models: [664], grid: [2, 6, 1],
+        id: 2401, models: [664], grid: [2, 4, 10],
         name: '全息信标', icon: 'lighthouse',
     },
     {

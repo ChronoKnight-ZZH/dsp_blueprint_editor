@@ -921,7 +921,7 @@ export const recipes: Recipe[] = [
         nonProductive: true,
     },
     {
-        id: 156, name: '金色燃料棒', time: 1920,
+        id: 156, name: '奇异湮灭燃料棒', time: 1920,
         from: [
             {item: itemsMap.get(1803)!, count: 8},
             {item: itemsMap.get(5205)!, count: 1},
