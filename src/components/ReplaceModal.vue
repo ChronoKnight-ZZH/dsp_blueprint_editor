@@ -45,9 +45,9 @@
             <div>{{t('搜索：')}} <RecipeSelect v-model:recipeId="r.searchRecipe"/></div>
             <div>{{t('替换：')}} <RecipeSelect v-model:recipeId="r.replaceRecipe"/></div>
         </template>
-                    <!-- 加速模式（仅配方范围勾选时显示） -->
+                    <!-- 生产模式（仅配方范围勾选时显示） -->
             <section v-if="r.scope.recipe" class="modal-section">
-                <div class="section-label">{{ t('加速模式：') }}</div>
+                <div class="section-label">{{ t('生产模式：') }}</div>
                 <div class="radio-group">
                     <label class="radio-option">
                         <input type="radio" :value="null" v-model="r.acceleratorMode" />
@@ -125,7 +125,7 @@ const r = reactive({
     },
 });
 
-// ③ 取消勾选“配方”时清空加速模式选择
+// ③ 取消勾选“配方”时清空生产模式选择
 watch(() => r.scope.recipe, (on) => {
     if (!on)
         r.acceleratorMode = null;
@@ -173,7 +173,7 @@ watch(() => r.scope.buildingLevel, (lv) => {
     }
 });
 
-// 取消勾选“配方”时，同时关闭“切换加速模式”，避免残留状态
+// 取消勾选“配方”时，同时关闭“切换生产模式”，避免残留状态
 watch(() => r.scope.recipe, (on) => {
     if (!on)
         r.acceleratorMode = null;
@@ -182,32 +182,62 @@ watch(() => r.scope.recipe, (on) => {
 const canExecute = computed(() => {
     if (r.scope.buildingLevel)
         return r.sourceItemId !== null && r.targetItemId !== null;
-    return r.searchRecipe !== null && r.replaceRecipe !== null
-        && Object.values(r.scope).some(s => s);
-})
+
+    const hasReplaceScope = r.scope.recipe || r.scope.filter || r.scope.station || r.scope.beltIcon || r.scope.blueprintIcon;
+    const hasValidRecipe = r.searchRecipe !== null && r.replaceRecipe !== null;
+
+    // 有替换范围且配方有效 → 可以执行替换
+    if (hasReplaceScope && hasValidRecipe)
+        return true;
+
+    // 勾选了配方范围但配方无效（为空），只要选了加速模式 → 仅执行加速模式
+    if (r.scope.recipe && r.acceleratorMode !== null)
+        return true;
+
+    return false;
+});
 
 const execute = () => {
     if (!canExecute.value)
         return;
+
     if (r.scope.buildingLevel) {
         commandQueue.push(new UpgradeCommand(props.blueprint, r.sourceItemId!, r.targetItemId!));
     } else {
-        const replaceCmd = new ReplaceCommand(props.blueprint, r as ReplaceParams);
-        commandQueue.push(replaceCmd);
+        const hasReplaceScope = r.scope.recipe || r.scope.filter || r.scope.station || r.scope.beltIcon || r.scope.blueprintIcon;
+        const hasValidRecipe = r.searchRecipe !== null && r.replaceRecipe !== null;
 
-        // 选择了具体模式时，只对被替换到的建筑设置
+        let replaceCmd: ReplaceCommand | null = null;
+
+        // 仅当有替换范围且配方完整时，才执行替换
+        if (hasReplaceScope && hasValidRecipe) {
+            replaceCmd = new ReplaceCommand(props.blueprint, r as ReplaceParams);
+            commandQueue.push(replaceCmd);
+        }
+
+        // 处理加速模式
         if (r.acceleratorMode !== null) {
-            const indexes = replaceCmd.recipeBuildings.map(b => b.index);
-            if (indexes.length > 0) {
+            if (r.scope.recipe && replaceCmd) {
+                // 勾选了配方且执行了替换：只作用于被替换的建筑
+                const indexes = replaceCmd.recipeBuildings.map(b => b.index);
+                if (indexes.length > 0) {
+                    commandQueue.push(new SetAcceleratorCommand(props.blueprint, {
+                        mode: r.acceleratorMode,
+                        buildingIndexes: indexes,
+                    }));
+                }
+                // 若 indexes 为空，则不推送加速命令（与原逻辑一致）
+            } else {
+                // 未执行替换，或未勾选配方：作用于全部建筑
                 commandQueue.push(new SetAcceleratorCommand(props.blueprint, {
                     mode: r.acceleratorMode,
-                    buildingIndexes: indexes,
                 }));
             }
         }
     }
+
     open.value = false;
-}
+};
 </script>
 
 <style lang="scss">
@@ -241,7 +271,10 @@ const execute = () => {
         "全部替换": "全部替换",
         "生产加速": "生产加速",
         "额外产出": "额外产出",
-        "生产加速 / 额外产出": "生产加速 / 额外产出"
+        "生产加速 / 额外产出": "生产加速 / 额外产出",
+        "不改变": "不改变",
+        "生产模式：": "Production Mode:",
+
     },
     "en": {
         "批量替换": "Batch Replace",
@@ -261,7 +294,9 @@ const execute = () => {
         "全部替换": "Replace All",
         "生产加速": "Proliferate",
         "额外产出": "Accelerate",
-        "生产加速 / 额外产出": "Proliferate / Accelerate"
+        "生产加速 / 额外产出": "Proliferate / Accelerate",
+        "不改变": "No Change",
+        "生产模式：": "Production Mode:",
     },
     "fr": {
         "批量替换": "Remplacer en vrac",
@@ -281,7 +316,9 @@ const execute = () => {
         "全部替换": "Tout remplacer",
         "生产加速": "Prolifération",
         "额外产出": "Accélération",
-        "生产加速 / 额外产出": "Prolifération / Accélération"
+        "生产加速 / 额外产出": "Prolifération / Accélération",
+        "不改变": "Pas de changement",
+        "生产模式：": "Mode de production:",
     }
 }
 </i18n>

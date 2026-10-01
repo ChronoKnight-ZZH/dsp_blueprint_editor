@@ -7,6 +7,8 @@
                 <div class="info-tab tab" :class="{ active: activeTab === 'info' }" @click="activeTab = 'info'"></div>
                 <div class="operations-tab tab" :class="{ active: activeTab === 'operations' }"
                     @click="activeTab = 'operations'"></div>
+                <div class="stats-tab tab" :class="{ active: activeTab === 'stats' }"
+                    @click="activeTab = 'stats'"></div>
             </div>
             <div v-if="activeTab === 'info'">
                 <section style="display: flex; flex-direction: row; gap: 5px;">
@@ -141,6 +143,10 @@
                     </div>
                 </li>
             </ul>
+            <div v-else-if="activeTab === 'stats'">
+                <ProductionStats v-if="data" />
+                <div v-else class="empty-hint">{{ t('请先打开蓝图') }}</div>
+            </div>
             <footer>
                 {{ version }}
                 <SWStatus />
@@ -167,6 +173,7 @@ import SWStatus from '@/swStatus.vue';
 import BlueprintIcon from './components/BlueprintIcon.vue';
 import IconPickerModal from './components/IconPickerModal.vue';
 import ReplaceModal from './components/ReplaceModal.vue';
+import ProductionStats from './components/ProductionStats.vue';
 import { CommandQueue } from './command';
 import BuildingOverview from './components/BuildingOverview.vue';
 import { useLang } from './i18n';
@@ -204,7 +211,7 @@ const togglePin = () => {
         expandSidebar.value = true;
     }
 }
-const activeTab = ref<'info' | 'operations'>('info')
+const activeTab = ref<'info' | 'operations' | 'stats'>('info')
 const working = ref(false);
 const codeExpired = ref(false);
 const parseErrorMessage = ref('');
@@ -605,7 +612,7 @@ body {
 
 .tab {
     height: 60px;
-    width: 60px;
+    width: 50px;
     opacity: 0.5;
     display: inline-block;
 
@@ -622,6 +629,15 @@ body {
     background: url(@/assets/icons/settings.svg) center no-repeat;
 }
 
+.stats-tab {
+    background: url(@/assets/icons/stats-tab-icon.png) center / 32px no-repeat;
+}
+
+.empty-hint {
+    color: gray;
+    font-size: 0.85rem;
+}
+
 .row {
     display: flex;
     flex-direction: row;
@@ -633,7 +649,7 @@ body {
     right: 0;
     top: 0;
     bottom: 0;
-    width: 300px;
+    width: 420px;
     overflow-y: auto;
     box-sizing: border-box;
     background: #000000b0;
@@ -909,7 +925,8 @@ ul.operations {
         "固定面板": "固定面板（固定后无法点击隐藏）",
         "右键点击剔除": "右键点击建筑可剔除",
         "仅支持 .txt 文件": "仅支持 .txt 文件",
-        "拖拽文件到此处打开": "拖拽文件到此处打开"
+        "拖拽文件到此处打开": "拖拽文件到此处打开",
+        "请先打开蓝图": "请先打开蓝图"
     },
     en: {
         "复制": "Copy",
@@ -930,7 +947,8 @@ ul.operations {
         "固定面板": "Pin panel (cannot be hidden by clicking)",
         "右键点击剔除": "Right-click a building to remove it",
         "仅支持 .txt 文件": "Only .txt files are supported",
-        "拖拽文件到此处打开": "Drop file here to open"
+        "拖拽文件到此处打开": "Drop file here to open",
+        "请先打开蓝图": "Please open a blueprint first"
     },
 }
 </i18n>

@@ -17,7 +17,7 @@
             <span class="v">{{ LabModeText }}</span>
         </div>
         <div v-if="accModeText !== undefined">
-            <label>{{ t('增产剂效果简') }}</label>
+            <label>{{ t('增产剂效果简介') }}</label>
             <span class="v">{{ accModeText }}</span>
         </div>
         <div v-if="isInserter(building.itemId)">
@@ -224,15 +224,18 @@ const energyExchangerMode = computed(() => {
 {
     "zh": {
         "模式": "模式",
-        "送入轨道": "送入轨道"
+        "送入轨道": "送入轨道",
+        "增产剂效果简介": "增产剂效果简介"
     },
     "en": {
         "模式": "Mode",
-        "送入轨道": "Orbit"
+        "送入轨道": "Orbit",
+        "增产剂效果简介": "Proliferator Effect Description"
     },
     "fr": {
         "模式": "Mode",
-        "送入轨道": "Orbit"
+        "送入轨道": "Orbit",
+        "增产剂效果简介": "Proliferator Effect Description"
     }
 }
 </i18n>
