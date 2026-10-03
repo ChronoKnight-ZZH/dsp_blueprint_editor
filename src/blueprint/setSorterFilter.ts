@@ -7,7 +7,7 @@ import { Command, Updater } from "@/command";
  * 连续对同一分拣器设置过滤器时合并。
  */
 export class SetSorterFilterCommand implements Command {
-    readonly silent = true;
+    readonly silent = false;
 
     private readonly oldFilterId: number;
 

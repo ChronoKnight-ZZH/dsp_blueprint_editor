@@ -383,6 +383,9 @@ let prevMd5Suffix = '';
 let prevBuildingsCount = -1;
 
 const parseBp = (s: string) => {
+    // 加载新蓝图或清空时退出编辑模式，恢复预览
+    if (placement.appMode === 'edit')
+        exitEditMode();
     const md5Suffix = s.length >= 33 ? s.slice(-33) : '';
     if (s) {
         try {
@@ -402,8 +405,6 @@ const parseBp = (s: string) => {
             selectedBuildingIndex.value = null;
             bpStr.value = s;
             codeExpired.value = false;
-            if (placement.appMode === 'edit')
-            exitEditMode();
             return;
         }
     } else {
@@ -605,6 +606,11 @@ const isEdit = placement.appMode === 'edit';
                     selectBuilding(b.itemId, b.modelIndex);
             }
         }
+        return;
+    }
+    // N：重置镜头到初始状态（预览/编辑模式均可用）
+    if (event.code === 'KeyN') {
+        renderer.value?.resetCamera();
         return;
     }
     // O 或 0：快速打开蓝图面板（放置模式下不触发）
@@ -1028,7 +1034,8 @@ ul.operations {
         "仅支持 .txt 文件": "仅支持 .txt 文件",
         "拖拽文件到此处打开": "拖拽文件到此处打开",
         "编辑": "编辑", 
-        "保存": "保存"
+        "保存": "保存",
+        "请先打开蓝图": "请先打开蓝图"
     },
     en: {
         "复制": "Copy",

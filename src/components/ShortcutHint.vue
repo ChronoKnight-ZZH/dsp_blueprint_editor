@@ -6,7 +6,7 @@
         </div>
         <div v-if="!collapsed" class="hint-rows">
             <div v-for="row of rows" :key="row[0]" class="hint-row">
-                <span class="hint-key">{{ row[0] }}</span>
+                <span class="hint-key">{{ t(row[0]) }}</span>
                 <span class="hint-action">{{ t(row[1]) }}</span>
             </div>
         </div>
@@ -39,11 +39,13 @@ const rows = computed<[string, string][]>(() => {
             ['拖拽', '旋转'],
             ['0 / O', '显示/隐藏列表'],
             ['WASD', '上下左右滚动'],
+            ['N', '重置镜头'],
         ];
     if (placement.mode === 'deleting')
         return [
             ['左键', '删除建筑'],
             ['右键 / Esc', '退出删除'],
+            ['N', '重置镜头'],
         ];
     return [
         ['1-9', '切换分类'],
@@ -53,6 +55,7 @@ const rows = computed<[string, string][]>(() => {
         ['X', '删除模式'],
         ['Esc', '取消/收起'],
         ['Shift', '自由放置'],
+        ['N', '重置镜头'],
     ];
 });
 </script>
@@ -129,6 +132,7 @@ const rows = computed<[string, string][]>(() => {
         "旋转": "旋转",
         "显示/隐藏列表": "显示/隐藏列表",
         "上下左右滚动": "上下左右滚动",
+        "重置镜头": "重置镜头",
         "切换分类": "切换分类",
         "选建筑": "选建筑",
         "放置建筑": "放置建筑",
@@ -136,7 +140,15 @@ const rows = computed<[string, string][]>(() => {
         "删除模式": "删除模式",
         "取消/收起": "取消/收起",
         "退出删除": "退出删除",
-        "自由放置": "自由放置"
+        "自由放置": "自由放置",
+        "左键": "左键",
+        "右键": "右键",
+        "滚轮": "滚轮",
+        "拖拽": "拖拽",
+        "0 / O": "0 / O",
+        "WASD": "WASD",
+        "N": "N",
+        "右键 / Esc": "右键 / Esc"
     },
     "en": {
         "当前模式": "Mode",
@@ -149,13 +161,22 @@ const rows = computed<[string, string][]>(() => {
         "旋转": "Rotate",
         "显示/隐藏列表": "Show/hide list",
         "上下左右滚动": "Pan view",
+        "重置镜头": "Reset view",
         "切换分类": "Switch category",
         "选建筑": "Pick building",
         "放置建筑": "Place building",
         "旋转 90°": "Rotate 90°",
         "取消/收起": "Cancel/collapse",
         "退出删除": "Exit delete",
-        "自由放置": "Free placement"
+        "自由放置": "Free placement",
+        "左键": "Left click",
+        "右键": "Right click",
+        "滚轮": "Scroll wheel",
+        "拖拽": "Drag",
+        "0 / O": "0 / O",
+        "WASD": "WASD",
+        "N": "N",
+        "右键 / Esc": "Right click / Esc"
     }
 }
 </i18n>

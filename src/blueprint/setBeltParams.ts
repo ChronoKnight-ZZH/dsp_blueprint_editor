@@ -5,11 +5,11 @@ export type BeltParamField = "iconId" | "count";
 
 /**
  * 修改传送带预览物品图标 iconId / 数量 count 的撤销命令。
- * 只改参数，不影响几何/拓扑 → silent=true。
+ * 只改参数，不影响几何/拓扑 → silent=true。关闭后，撤销时会更新预览。
  * 连续快速调节同一建筑的同一字段时合并，避免撤销栈膨胀。
  */
 export class SetBeltParamsCommand implements Command {
-    readonly silent = true;
+    readonly silent = false;
 
     private oldIconId: number;
     private oldCount: number;

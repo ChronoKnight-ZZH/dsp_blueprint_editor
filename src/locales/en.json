@@ -310,5 +310,16 @@
     "风琴-1": "Organ 1",
     "风琴-2": "Organ 2",
     "鼓": "Drumpad",
-    "全息信标": "Holo Beacon"
+    "全息信标": "Holo Beacon",
+    "电力类": "Power",
+    "矿产类": "Mining",
+    "物流类": "Transport",
+    "仓储类": "Storage",
+    "生产类": "Production",
+    "物流塔类": "Transport Tower",
+    "防御类": "Defense",
+    "戴森球类": "Dense Sphere",
+    "地基与信标": "Foundation and Beacon",
+    "暂不支持": "Not supported",
+    "新建": "New"
 }

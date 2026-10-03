@@ -49,7 +49,10 @@
 - 完整的撤销/重做（Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z）。
 - 复制 / 保存为 .txt 文件，输出与游戏格式字节级一致；支持拖拽 .txt 文件直接打开。
 - 中英双语 UI 与物品/配方名称。
-- 新建空白蓝图，在 3D 星球上放置建筑（1-9 选分类 / F1-F12 选建筑 / 左键放置 / R 旋转 / Shift 自由放置），删除模式（X + 左键）。
+- **预览 / 编辑双模式**：默认预览模式（左键选中、右键删除建筑）；点击「编辑」进入编辑模式（无蓝图时自动新建空白蓝图），底部出现建筑面板，点「保存」写回代码框并回到预览。
+- 编辑模式下在 3D 星球上放置建筑（1-9 选分类 / F1-F12 选建筑 / R 旋转 / Shift 自由放置）：普通建筑左键放置；**传送带按住左键拖拽铺设**（Bresenham 栅格化、自动拐角、自动串联，整条为一次撤销）；**分拣器依次点选两个已有建筑架接**（自动按建筑连接面计算端点与长度 1-3）；删除模式（X + 左键）。
+- 信息面板内联编辑：单体建筑配方（含研究站研究模式）、传送带预览图标/数量、分拣器过滤器，全部走 `silent` 命令（不重建 3D）。
+- 侧栏第三个 Tab 为**生产统计**：按理论满速汇总各物品每分钟产出/消耗/净产出与总电力需求，可选增产剂 Mk.I/II/III 等级，随编辑自动刷新。
 
 ---
 
@@ -89,16 +92,18 @@
 │                              │                                      │
 │                          App.vue (根)                               │
 │   ┌──────────────────────┬────┴───────────────────┬────────────┐   │
-│   │ 3D 渲染层             │  侧栏信息/操作面板       │  Provide    │   │
+│   │ 3D 渲染层             │  侧栏信息/操作/统计面板   │  Provide    │   │
 │   │ BlueprintEditor.vue   │  BuildingInfoPanel      │  rendererKey│   │
 │   │  (Three.js Scene)     │  BuildingOverview        │  building.. │   │
 │   │   ├ planet.ts         │  ReplaceModal           │  commandQue.│   │
 │   │   ├ bvh/ (射线拾取)    │  IconPickerModal        │             │   │
 │   │   ├ iconTexture.ts    │  BuildingIcon           │             │   │
 │   │   ├ icons.ts          │  BlueprintIcon          │             │   │
-│   │   ├ cargos.ts         │  ModalDSP               │             │   │
-│   │   ├ area.ts (坐标转换) │  BuildingPalette        │             │   │
-│   │   ├ create.ts (放置)  │  (底部建筑面板)          │             │   │
+│   │   ├ cargos.ts         │  ProductionStats        │             │   │
+│   │   ├ area.ts (坐标转换) │  ShortcutHint (悬浮)    │             │   │
+│   │   ├ create.ts (放置)  │  ModalDSP               │             │   │
+│   │   ├ beltLine.ts(拖拽) │  BuildingPalette        │             │   │
+│   │   ├ sorter.ts (架接)  │  (底部建筑面板,仅编辑态) │             │   │
 │   │   └ data/building.ts  │                         │             │   │
 │   │  editor/placementState│                         │             │   │
 │   └──────────┬────────────┴───────────┬─────────────┴────────────┘   │
@@ -153,7 +158,7 @@
 │   ├── cli.ts                         # Node 端蓝图字符串 → JSON CLI
 │   ├── PlanetMapControls.ts           # 类 OrbitControls 的星球相机控制
 │   ├── SphereGridGeometry.ts          # 球面经纬网格几何体
-│   ├── iconTexture.ts                 # 图标图集（24x80 纹理）
+│   ├── iconTexture.ts                 # 图标图集（24×24 槽位，每槽 80px）
 │   ├── icons.ts                       # 建筑图标 InstancedMesh + Shader
 │   ├── iconSubscript.ts               # 传送带数字下标渲染
 │   ├── cargos.ts                      # 传送带/分拣器上的货物动画
@@ -170,15 +175,26 @@
 │   │   ├── upgrade.ts                 # 建筑升降级命令
 │   │   ├── setAccelerator.ts          # 加速模式设置命令
 │   │   ├── setBeaconContent.ts        # 全息信标文本修改命令（silent）
-│   │   ├── area.ts                    # 网格↔本地坐标转换 + 区域扩展
+│   │   ├── setBuildingRecipe.ts       # 单体配方/研究模式修改命令（silent）
+│   │   ├── setBeltParams.ts           # 传送带图标/数量修改命令（silent）
+│   │   ├── setSorterFilter.ts         # 分拣器过滤器修改命令（silent）
+│   │   ├── beltLine.ts                # Bresenham 栅格化 + 传送带拖拽铺设命令
+│   │   ├── sorter.ts                  # 两建筑间分拣器架接几何
+│   │   ├── stats.ts                   # 生产统计（产出/消耗/电力）
+│   │   ├── defaultParams.ts           # 新建建筑的默认参数模板
+│   │   ├── area.ts                    # 网格↔本地坐标转换 + 区域扩展/导出归一化
 │   │   └── create.ts                  # 空蓝图创建 + 建筑放置命令
 │   ├── editor/
-│   │   └── placementState.ts          # 放置状态机（idle/placing/deleting）
+│   │   └── placementState.ts          # 放置状态机（appMode + idle/placing/deleting）
 │   ├── bvh/
 │   │   ├── bvh.ts                     # BVH 加速结构（射线拾取）
 │   │   ├── helper.ts                  # 可视化辅助
 │   │   └── index.ts
 │   ├── components/                    # Vue UI 组件（见 §5.4）
+│   │   ├── ShortcutHint.vue           # 左侧悬浮快捷键提示（随模式切换）
+│   │   ├── ProductionStats.vue        # 生产统计面板
+│   │   ├── DefaultInfo.vue            # 无专属面板建筑的兜底信息
+│   │   └── _icon-select.scss          # ItemSelect/RecipeSelect 共享样式
 │   ├── data/
 │   │   ├── index.ts                   # 汇总导出
 │   │   ├── types.ts                   # Item/Recipe/Tech/Signal/MIDI
@@ -186,6 +202,8 @@
 │   │   ├── recipes.ts / recipesData.ts # 配方表
 │   │   ├── building.ts                # 建筑元数据（盒子尺寸/颜色/图标位）
 │   │   ├── buildingCategories.ts      # 9 类建筑面板映射（itemId/modelIndex/nameKey）
+│   │   ├── buildingPowerData.ts       # 建筑功耗/速度倍率表（统计用）
+│   │   ├── acceleratorData.ts         # 增产剂等级与加成数值
 │   │   ├── icons.ts                   # 图标 ID 体系与 URL
 │   │   ├── color.ts                   # 颜色相关
 │   │   ├── midi.ts                    # MIDI 信号
@@ -196,7 +214,7 @@
 │   └── locales/
 │       ├── zh.json
 │       └── en.json
-├── tests/unit/blueprint/              # Jest 单元测试
+├── tests/unit/blueprint/              # Jest 单元测试（10 个 *.spec.ts + fixtures/）
 ├── package.json
 ├── vue.config.js
 ├── tsconfig.json
@@ -223,8 +241,15 @@
 | `setBeaconContent.ts` | `SetBeaconContentCommand`：修改全息信标（itemId=2401）`content` 文本字段，`silent=true` 不触发 3D 重建；`merge` 合并对同一建筑的连续编辑。 |
 | `reform.ts` | 地基（reformData）3D 渲染层：`Reforms extends Group` + `buildReforms`，把 `BlueprintReformData` 渲染为工字铺（IBEAM）/ 直铺（PLAIN）/ 网格（GRID）+ 自定义颜色（共享 CanvasTexture 与 InstancedMesh）。 |
 | `removeBuilding.ts` | `RemoveBuildingsCommand` / `RemoveBuildingCommand` / `RemoveBuildingsByItemCommand`：删除建筑并维护 index 与交叉引用。 |
-| `area.ts` | 网格坐标 ↔ 本地偏移转换（`planetToLocal` / `localToPlanet`）与区域扩展（`ensureAreaFor`）。根区域常量：`ROOT_GRID_SIZE=1000`、`ROOT_LATITUDE=-80`。 |
-| `create.ts` | `createEmptyBlueprint()`：创建含根区域（赤道带 size.y=161）的空 v2 蓝图；`createBuilding()`：构造最小合法建筑记录；`CreateBuildingCommand`：放置建筑命令，自动扩展根区域 `size.x`。 |
+| `area.ts` | 网格坐标 ↔ 本地偏移转换（`planetToLocal` / `localToPlanet`）、区域扩展（`ensureAreaFor`）与导出归一化（`normalizeBlueprintAreas`，见 §6.14）。根区域常量：`ROOT_GRID_SIZE=1000`、`ROOT_LATITUDE=-80`。 |
+| `create.ts` | `createEmptyBlueprint()`：创建含根区域（赤道带 size.y=161）的空 v2 蓝图；`createBuilding()`：构造建筑记录（参数由 `defaultParamsFor` 填充）；`CreateBuildingCommand`：放置建筑命令，自动扩展根区域 `size.x`。 |
+| `defaultParams.ts` | `defaultParamsFor(itemId, modelIndex)`：返回各类建筑的最小合法 `parameters` 模板（物流塔/储物仓/战场基站等含完整空槽结构）；未注册建筑返回 `null`。 |
+| `beltLine.ts` | `rasterizeLine`（整数网格 Bresenham）+ `buildBeltLine`（按下游方向标定每格 yaw）+ `CreateBeltLineCommand`（整条传送带一次撤销，执行时分配 index 并串联 output/input）。 |
+| `sorter.ts` | `createSorterBetween(src, dst, itemId, modelIndex)`：按两建筑连接面（大建筑半径封顶 0.9、端点内缩 0.2）计算分拣器端点、长度（1-3，否则拒绝）与 yaw。 |
+| `setBuildingRecipe.ts` | `SetBuildingRecipeCommand`：修改单体建筑 `recipeId`；`SetLabResearchModeCommand`：修改研究站研究模式。均 `silent=true`，按建筑合并连续编辑。 |
+| `setBeltParams.ts` | `SetBeltParamsCommand`：修改传送带 `iconId / count`，`silent=true`，派发 `updateBeltIcon`（count 还派发 `updateBeltIconSubscript`），按 `(建筑, 字段)` 合并。 |
+| `setSorterFilter.ts` | `SetSorterFilterCommand`：修改分拣器 `filterId`，`silent=true`，派发 `updateSorterIcon`，按建筑合并。 |
+| `stats.ts` | `calculateProductionStats(bp, options)`：理论满速下各物品每分钟产出/消耗/净产出 + 总功耗；支持增产剂等级、分馏塔特例、研究站科研模式（见 §6.21）。 |
 
 ### 5.2 命令与状态层 `src/`
 
@@ -240,7 +265,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `placementState.ts` | 响应式放置状态机单例（`reactive<PlacementState>`）：`mode`（idle/placing/deleting）、`categoryIndex`（1-9）、`selectedItemId` / `selectedModelIndex`、`yaw`（0/90/180/270）、`freePlacement`（Shift 按住）。导出 `usePlacement()` 返回单例，以及 `resetToIdle()` / `selectBuilding()` / `enterDeleteMode()` / `rotateBuilding()` 状态转移函数。 |
+| `placementState.ts` | 响应式放置状态机单例（`reactive<PlacementState>`）：`appMode`（preview/edit）、`mode`（idle/placing/deleting）、`categoryIndex`（1-9）、`selectedItemId` / `selectedModelIndex`、`yaw`（0/90/180/270）、`freePlacement`（Shift 按住）。导出 `usePlacement()` 返回单例，以及 `enterEditMode()` / `exitEditMode()` / `resetToIdle()` / `selectBuilding()` / `enterDeleteMode()` / `rotateBuilding()` 状态转移函数。 |
 
 ### 5.3 3D 渲染层 `src/`
 
@@ -260,10 +285,13 @@
 
 | 组件 | 职责 |
 | --- | --- |
-| `App.vue` | 根布局：3D 编辑区 + 可折叠侧栏（信息/操作两 Tab）+ 蓝图代码区（复制/粘贴/保存文件/新建蓝图）+ 底部建筑面板 + 快捷键（1-9 分类 / F1-F12 选建筑 / X 删除 / R 旋转 / Esc 退出 / Shift 自由放置 / O 侧栏）。 |
+| `App.vue` | 根布局：3D 编辑区 + 可折叠侧栏（**信息/操作/统计三个 Tab**）+ 蓝图代码区（复制/粘贴/保存文件/清空/选择文件 + **「编辑」「保存」模式切换按钮**）+ 底部建筑面板（仅编辑模式）+ 快捷键（编辑模式专属：1-9 分类 / F1-F12 选建筑 / X 删除 / R 旋转 / Esc 分层退出 / Shift 自由放置；全局：Ctrl+Z/Y、O/0 侧栏）。 |
 | `BlueprintEditor.vue` | 3D 渲染与交互，异步加载（`defineAsyncComponent` + `webpackChunkName: "renderer"`）。 |
-| `BuildingPalette.vue` | 底部建筑选择面板：9 个分类标签（1-9）+ 当前分类的建筑图标列表（F1-F12）。点击分类切换、点击建筑进入放置模式、再次点击退出；`disabled` 建筑灰显不可选（传送带/分拣器测试阶段暂不支持）。`position: absolute; bottom: 0; z-index: 10`。 |
-| `BuildingInfoPanel.vue` | 选中建筑后展示：配方、分流器、物流塔、监测器、战场基站、储物仓、过滤器、模式等。 |
+| `BuildingPalette.vue` | 底部建筑选择面板：9 个分类标签（1-9）+ 当前分类的建筑图标列表（F1-F12），可展开/收起（Esc 收起）。点击分类切换、点击建筑进入放置模式、再次点击退出；`disabled` 建筑灰显不可选（字段保留，当前无建筑使用——传送带/分拣器均已支持放置）。`position: absolute; bottom: 0; z-index: 10`。 |
+| `BuildingInfoPanel.vue` | 选中建筑后展示：配方（`RecipeSelect` 内联改单体配方）、研究站研究模式、传送带预览图标/数量、分拣器过滤器、分流器、物流塔、监测器、战场基站、储物仓、加速模式等；无任何可配置项的建筑回落到 `DefaultInfo`。 |
+| `DefaultInfo.vue` | 兜底面板：仅显示 itemId / modelIndex / 坐标 / 朝向与「无更多可配置参数」提示。 |
+| `ShortcutHint.vue` | 左侧垂直居中悬浮的快捷键提示卡片（可折叠）：根据 `appMode`（预览模式）与 `mode`（编辑/删除模式）列出当前已实现的按键；全部文案走 `t()` 并在 `<i18n>` 块内中英对照。 |
+| `ProductionStats.vue` | 侧栏「统计」Tab：增产剂等级选择（无/Mk.I-III，模块级 ref 跨重挂载保持）+ 总电力需求 + 物品产出/消耗/净产出表（表头点击排序）；`computed` 读取 `stateVersion` 自动重算。 |
 | `BuildingOverview.vue` | 未选中时按 itemId 聚合的建筑图标列表，右键一键剔除同类。 |
 | `BuildingRecipe.vue` | 建筑当前配方的输入/输出图标展示。 |
 | `BuildingIcon.vue` / `BlueprintIcon.vue` | 单个建筑图标 / 蓝图头部图标组合渲染。 |
@@ -288,12 +316,14 @@
 | `items.ts` | 由 `itemsData.ts` 构建 `itemsMap`；提供 `isBelt/isInserter/isStation/...` 等 itemId 分类判定；`allAssemblers` 集合（用于 `parser.ts` 注册参数解析器）。 |
 | `recipes.ts` | 由 `recipesData.ts` 构建 `recipesMap`。 |
 | `building.ts` | `buildingMeta` 表：每种模型 ID 的颜色、单位盒/选择盒变换、图标位置；`noIconBuildings`、`stationSlotTrans`。 |
-| `buildingCategories.ts` | 9 类建筑面板映射表 `buildingCategories`：每类含 `key`（1-9）、`nameKey`（i18n key）、`buildings[]`（itemId/modelIndex/nameKey/可选 disabled）。传送带（2001-2003）与分拣器（2011-2014）标记 `disabled: true`（测试阶段暂不支持放置）。 |
+| `buildingCategories.ts` | 9 类建筑面板映射表 `buildingCategories`：每类含 `key`（1-9）、`nameKey`（i18n key）、`buildings[]`（itemId/modelIndex/nameKey/可选 disabled）。当前全部建筑可选——传送带拖拽铺设、分拣器两点架接均已实现。 |
+| `buildingPowerData.ts` | `buildingPowerData` 表 + `buildingPowerMap`：登记建筑的基础功耗（kW）、生产速度倍率、是否可被增产剂加速；统计模块的数据源（未登记建筑不计入统计）。 |
+| `acceleratorData.ts` | `AcceleratorItem` 枚举（None/MkI/MkII/MkIII）与 `acceleratorBonuses`：额外产出倍率、加速倍率、耗电加成、每瓶喷涂容量（如 Mk.III = +25% 产出 / +100% 速度 / +150% 耗电 / 75 喷涂量）。 |
 | `icons.ts` | 图标 ID 体系（<1000 信号、<20000 物品、<40000 配方、<60000 科技）；`iconUrl / allIconIds`。 |
 | `color.ts` | 颜色相关工具与地基颜色表。 |
 | `midi.ts` | 流速监测器音色（MIDI）数据。 |
 | `techIconsData.ts` / `signalIconsData.ts` | 从游戏 Asset 生成的科技/信号图标索引。 |
-| `gen.sh` + `gen_*.py` | 从游戏导出的 `ItemProtoSet/RecipeProtoSet/...` JSON 生成对应 `*Data.ts`，并把贴图拷贝到 `assets/icons/`。 |
+| `gen.sh` + `gen_*.py` | 从游戏导出的 `ItemProtoSet/RecipeProtoSet/...` JSON 生成对应 `*Data.ts`（含 `gen_color_palette.py`），并把贴图拷贝到 `assets/icons/`。 |
 
 ### 5.6 国际化 `src/locales/`
 
@@ -325,7 +355,7 @@
 | 函数 | 作用 |
 | --- | --- |
 | `fromStr(strData): BlueprintData` | 入口：校验 `BLUEPRINT:` 前缀 → 解析头部 cells → MD5 校验尾部 → base64 解码 → `pako.ungzip` → `BufferReader` 读 meta/areas/buildings（v2 走 `importBuildingV2`，v1 走 `importBuilding`）→ 读 `importTailV2` 的 patch/reformData。 |
-| `toStr(bp): string` | 入口：写头部 → `BufferWriter` 写 meta/areas/buildings → v2 写 patch + reformDataFlag + reformData + tailExtraBytes → `pako.gzip` → base64 → 拼 MD5 校验。 |
+| `toStr(bp): string` | 入口：先调 `normalizeBlueprintAreas` 做导出归一化（编辑器新建蓝图才生效）→ 写头部 → `BufferWriter` 写 meta/areas/buildings → v2 写 patch + reformDataFlag + reformData + tailExtraBytes → `pako.gzip` → base64 → 拼 MD5 校验。 |
 | `encodedSize(bp)` | 预计算二进制体字节数，分配 `Uint8Array`。 |
 | `importArea / exportArea` | 14 字节分区的读写。 |
 | `importBuilding / exportBuilding` | v1 61 字节固定布局建筑记录的读写。 |
@@ -397,9 +427,12 @@
   - `watchEffect` 把 `b.value.buildings` 加入/移出场景并 `dispose`；
   - 选择盒 `watchEffect`：根据 `props.selectedBuildingIndex` 把 BVH 的对应盒矩阵复制到 `selectBox`；
   - `onMounted`：实例化 `PlanetMapControls`，绑定交互事件（`mousedown` 记录按下位置 + `click` 判断拖拽阈值后分发到放置/删除/拾取 + `contextmenu` 退出放置/删除模式）、`requestAnimationFrame(animate)` 渲染循环，并把 `controls.updateTimeDelta / cargos.cargoMove` 推进。事件监听注册在 `rootEl`（`.editor-root` 父 div）上而非 canvas，事件从 canvas 冒泡而来，避免 `PlanetMapControls.setPointerCapture` 干扰鼠标事件传递。
-  - **放置模式**（`placement.mode === 'placing'`）：`screenToPlanet(e)` 射线打到星球球面 → 转换为网格坐标 `latGrid/lonGrid` → `planetToLocal()` 映射为根区域本地偏移 → 非 `freePlacement` 时取 `floor` 网格对齐 → `createBuilding()` 构造建筑 → `queue.push(new CreateBuildingCommand(building))`；越界（赤道带外）静默忽略。
+  - **放置模式 · 普通建筑**（`placement.mode === 'placing'`）：`screenToPlanet(e)` 射线打到星球球面 → 转换为网格坐标 `latGrid/lonGrid` → `planetToLocal()` 映射为根区域本地偏移 → 非 `freePlacement` 时取 `floor` 网格对齐 → `createBuilding()` 构造建筑 → `queue.push(new CreateBuildingCommand(building))`；越界（赤道带外）静默忽略。
+  - **放置模式 · 传送带**：`mousedown` 记录起点格，按住移动时 `updateBeltPreview` 把 Bresenham 栅格化路径写入预览 `InstancedMesh`（有长度上限），`mouseup` 时 `commitBeltLine` 调 `buildBeltLine` 生成整段并推送一次 `CreateBeltLineCommand`（整段一次撤销）。
+  - **放置模式 · 分拣器**：`pickSorterPoint` 依次拾取两个**已有建筑**（第一点高亮记录、第二点架接），`createSorterBetween` 返回非 null 才推送 `CreateBuildingCommand`；端点过近/过远（长度不在 1-3）自动拒绝。
+  - **预览**：鼠标悬停时半透明 `previewMesh` 显示待放置建筑的单位盒；静止状态下键盘切换建筑 / R / Shift 也会刷新预览。
   - **删除模式**（`placement.mode === 'deleting'`）：`pickBuilding(e)` 命中建筑 → `queue.push(new RemoveBuildingCommand(index, ...))` → emit `selectedBuildingIndex = null`。
-  - **拖拽判定**：`mousedown` 记录 `downPos`，`click` 时计算位移，超过 4px 阈值视为拖拽（相机旋转）不触发放置/删除/拾取。
+  - **拖拽判定**：`mousedown` 记录 `downPos`，`click` 时计算位移，超过 4px 阈值视为拖拽（相机旋转）不触发普通建筑的放置/删除/拾取（传送带铺设走独立的 mousedown/mouseup 通道，不受该阈值限制）。
   - `resetCamera()`：调用 `controls?.reset(2 * R)` 把相机重置到星球正上方默认距离（`target=(0,0,0)`、`spherical=(2R, π/2, 0)`），同时清空 `sphericalDelta / panOffset / scale`。
   - `defineExpose({ selectBoxes, camera, cameraPosVersion, getModel, resetCamera })` 供父组件访问。`App.vue` 的 `parseBp` 在检测到蓝图内容变化（建筑数量或尾部 MD5 后 33 位变化）时调用 `renderer.value?.resetCamera()` 重置视角，覆盖 clear / 粘贴 / 选择文件 / 输入框覆盖 四条替换路径；同一蓝图重复粘贴（MD5/建筑数不变）不会触发重置。
 
@@ -495,13 +528,22 @@
 | `planetToLocal(latGrid, lonGrid)` | 把星球网格坐标转为根区域本地偏移：经度 `x = lonGrid % 1000`（wrap 到 [0,1000)），纬度 `y = latGrid - (-80)`。 |
 | `localToPlanet(offset)` | 逆变换：`lat = offset.y + (-80)`、`lon = offset.x`。 |
 | `ensureAreaFor(bp, offset)` | 确保根区域覆盖给定偏移：若 `offset.y` 超出 `[0, size.y)` 返回 -1（赤道带外）；若 `offset.x >= size.x` 则扩展 `size.x = floor(offset.x) + 1`；返回区域索引 0。 |
+| `normalizeBlueprintAreas(bp)` | **导出时归一化**：编辑期根区域是覆盖整个赤道带的临时画布，导出前收缩为紧贴所有建筑的最小区间，平移建筑坐标到新原点；不修改入参，返回新对象。见下。 |
+
+#### `normalizeBlueprintAreas` 规则
+
+- **生效条件**（任一不满足直接原样返回，保证导入的游戏蓝图字节级不变）：仅 1 个根区域且有建筑；`dragBoxSize` 为 0（游戏蓝图恒非 0，编辑器空蓝图初始为 0）；无地基矩形；`parentIndex=-1` 且 `areaSegments=200`。
+- **经向（x）**：把所有端点 wrap 到 [0,1000) 后排序，找最大间隙，取其补集作为环形最小覆盖弧（自动处理跨越 0 经线的蓝图）；`sizeX` 为弧长 +1。
+- **纬向（y）**：无子区域的根区域必须居中于赤道（纬度 = `-floor(sizeY/2)`），按建筑的绝对纬向格计算 `sizeY = max(1, 2*needLo, 2*needHi-1)`，建筑坐标随新原点平移。
+- **同步字段**：`anchorLocalOffset={0,0}`、`dragBoxSize=size`、`cursorOffset=size/2`、`cursorTargetArea=primaryAreaIdx=0`，与游戏自身生成蓝图的惯例一致；平移后建筑的 `v2ExtraPose` 清空（导出时由 `localOffset[1]/yaw[1]` 重新生成）。
+- 在 `toStr()` 内部调用，对用户透明。
 
 ### 6.15 `blueprint/create.ts` 空蓝图与建筑放置
 
 #### 函数
 
-- `createEmptyBlueprint(): BlueprintData`：创建 v2 空蓝图，含单个根区域（`parentIndex=-1, tropicAnchor=0, areaSegments=200, size={x:10, y:161}`），`gameVersion='0.10.34.28529'`，`shortDesc='新蓝图'`。
-- `createBuilding(itemId, modelIndex, offset, yaw): BlueprintBuilding`：构造最小合法 v2 建筑记录，`localOffset` 两端点相同，所有连接字段为 -1（无链接），`parameters: null`（游戏填默认值）。
+- `createEmptyBlueprint(): BlueprintData`：创建 v2 空蓝图，含单个根区域（`parentIndex=-1, tropicAnchor=0, areaSegments=200, size={x:10, y:161}`），`gameVersion='0.10.34.28529'`，`shortDesc='新蓝图'`，`dragBoxSize={0,0}`（作为"编辑器新建蓝图"标记，供 `normalizeBlueprintAreas` 识别），`patch=1`。
+- `createBuilding(itemId, modelIndex, offset, yaw): BlueprintBuilding`：构造最小合法 v2 建筑记录，`localOffset` 两端点相同，所有连接字段为 -1（无链接），`parameters` 由 `defaultParamsFor()` 填充最小合法模板（未注册建筑为 `null`，游戏填默认值）。
 
 #### `CreateBuildingCommand implements Command`
 
@@ -514,8 +556,10 @@
 ### 6.16 `editor/placementState.ts` 放置状态机
 
 - **单例模式**：模块级 `reactive<PlacementState>` 对象，`usePlacement()` 返回同一实例，所有组件共享。
-- **状态字段**：`mode`（`'idle' | 'placing' | 'deleting'`）、`categoryIndex`（1-9）、`selectedItemId` / `selectedModelIndex`（`null` 表示未选）、`yaw`（0/90/180/270 度）、`freePlacement`（Shift 按住时 `true`，允许非网格对齐的自由放置）。
+- **状态字段**：`appMode`（`'preview'` 预览 / `'edit'` 编辑，初始为 preview）、`mode`（`'idle' | 'placing' | 'deleting'`）、`categoryIndex`（1-9）、`selectedItemId` / `selectedModelIndex`（`null` 表示未选）、`yaw`（0/90/180/270 度）、`freePlacement`（Shift 按住时 `true`，允许非网格对齐的自由放置）。
 - **状态转移函数**：
+  - `enterEditMode()`：appMode='edit'，mode 回 idle 并清空选择。
+  - `exitEditMode()`：appMode='preview'，清空 mode/选择/yaw/freePlacement。
   - `resetToIdle()`：清空 mode / selectedItemId / selectedModelIndex。
   - `selectBuilding(itemId, modelIndex)`：设置 mode='placing' 并记录 itemId / modelIndex / yaw=0。
   - `enterDeleteMode()`：设置 mode='deleting' 并清空选择。
@@ -526,8 +570,8 @@
 - `buildingCategories: CategoryEntry[]`：9 个分类，每类含 `key`（1-9）、`nameKey`（i18n key）、`buildings[]`。
 - 每个建筑条目 `CategoryBuilding`：`itemId` / `modelIndex` / `nameKey`（i18n key）/ 可选 `disabled`（`true` = 灰显不可选）。
 - 分类内容：1=电力类、2=矿产类、3=物流类、4=仓储类、5=生产类、6=物流塔类、7=防御类、8=戴森球类、9=地基与信标。
-- 传送带（2001-2003）与分拣器（2011-2014）标记 `disabled: true`，测试阶段暂不支持放置（需要连接关系/路径逻辑）。
-- `App.vue` 的 `hotkey` 按 `Digit1-Digit9` 切换 `categoryIndex`，按 `F1-F12` 从当前分类选取建筑调用 `selectBuilding()`。
+- 传送带（2001-2003）与分拣器（2011-2014，含集装分拣器 2014）当前均可选：传送带拖拽铺设、分拣器两点架接；`disabled` 字段保留给后续测试阶段建筑。
+- `App.vue` 的 `hotkey` 仅在编辑模式响应：按 `Digit1-Digit9` 切换 `categoryIndex` 并展开面板，按 `F1-F12` 从当前分类选取建筑调用 `selectBuilding()`（删除模式下忽略）。
 
 ### 6.18 `components/BuildingPalette.vue` 底部建筑面板
 
@@ -538,7 +582,51 @@
   - 点击分类标签 → `placement.categoryIndex = cat.key`。
   - 点击建筑图标 → `disabled` 则忽略；已选中则退出到 idle；否则 `selectBuilding(itemId, modelIndex)`。
   - 选中建筑有蓝色边框高亮（`.selected`），`disabled` 建筑 35% 透明度 + `cursor: not-allowed`。
-- **显示条件**：`App.vue` 中 `<BuildingPalette v-if="data" />`，仅在有蓝图数据时渲染。
+- **显示条件**：`App.vue` 中 `<BuildingPalette v-if="data && placement.appMode === 'edit'" />`，仅编辑模式下渲染；组件支持 `expand()/collapse()`（1-9 数字键展开、空白时 Esc 收起）。
+
+### 6.19 `blueprint/beltLine.ts` 传送带拖拽铺设
+
+- `rasterizeLine(x0,y0,x1,y1)`：整数网格 Bresenham，每步只沿 x 或 y 走一格，路径天然只含 cardinal 段与自然拐角。
+- `buildBeltLine(itemId, modelIndex, p0, p1, fallbackYaw)`：对栅格点逐格 `createBuilding`；每格 yaw 指向其下游（方向→yaw 表：+y=0、+x=90、-y=180、-x=270，由真实蓝图标定）；末格延续最后一段方向，单点退回 `fallbackYaw`。此时尚未建立格间连接。
+- **`CreateBeltLineCommand implements Command`**（非 silent）：
+  - `do`：逐格 `ensureAreaFor`（越界抛错由调用方忽略）→ 按入栈顺序分配 `index` 并 push → 再串联相邻格：`belts[i].outputObjIdx = belts[i+1].index`、`next.inputObjIdx = belts[i].index`（传送带单通道，slot/offset 全 0）；快照 `prevSizeX`。
+  - `undo`：按长度逐格 `pop`，恢复 `size.x`。
+  - `merge()` 恒 false。整条拖拽只产生一次撤销步。
+
+### 6.20 `blueprint/sorter.ts` 分拣器两点架接
+
+- `createSorterBetween(src, dst, itemId, modelIndex)`：
+  1. 取两建筑中心连线方向 `(dux,duy)`，从 `buildingBoxes`（`data/building.ts` 导出）读连接面半尺寸，大建筑用 `FACE_CAP=0.9` 封顶（项目无游戏 SlotConfig，制造台选择盒半宽 2.1 但皮带接口实际约 0.9）。
+  2. 端点 = 中心射线与连接面交点再内缩 `ENDPOINT_INSET=0.2`（保证端点埋在建筑内，游戏粘贴时能"抓"到）。
+  3. `length = round(端点间距)`，不在 1-3 返回 `null`（拒绝放置）。
+  4. `yaw[0]` 沿运动主轴（朝向表与传送带一致），`yaw[1]=0`（DSP 固定特征），参数 `length` 写入；`localOffset[1]` 为第二端点。
+- 配合 §6.7 的 `pickSorterPoint` 交互；构造成的分拣器走通用 `CreateBuildingCommand` 入库。
+
+### 6.21 `blueprint/stats.ts` 生产统计
+
+- 类型：`StatsOptions`（`useAccelerator`、`acceleratorItem`）、`ItemStats`（itemId/produced/consumed/net）、`ProductionStats`（items + totalPower）。
+- `calculateProductionStats(bp, options)`：遍历建筑，仅处理 `buildingPowerMap` 中登记的 itemId：
+  1. **功耗**：`basePower × (1 + bonus.power)`（仅启用增产剂、建筑可加速且有加速模式字段时）。
+  2. **分馏塔（2314）特例**：无配方，按 72/分（×速度倍率）计氢消耗/重氢产出，喷涂固定等效"生产加速"。
+  3. **普通配方建筑**：`recipeId<=0` 跳过；每分钟次数 = `speedMultiplier × 3600 / recipe.time`（帧）；研究站科研模式下不产矩阵、改为按同节拍消耗矩阵产物，且不应用增产倍率；否则分别累加输入消耗与输出产出。
+  4. 被喷涂物品总流量按增产剂 `sprayCapacity` 折算增产剂本身消耗（1141/1142/1143）。
+  5. 结果按净产出降序。
+- `ProductionStats.vue` 通过 inject 拿 queue，在 `computed` 中读取 `stateVersion`（任何命令后都重算）；增产剂选择存模块级 ref，Tab 切换卸载后不丢失。
+
+### 6.22 `blueprint/setBuildingRecipe.ts` 单体配方与研究模式
+
+- **`SetBuildingRecipeCommand`**（`silent=true`）：快照 `oldRecipeId`，do/undo 改写建筑顶层 `recipeId` 并派发 `updateBuildingIcon`（制造台图标随配方变，同时 bump 信息面板）；`merge` 对同一建筑用新 recipeId 覆盖。
+- **`SetLabResearchModeCommand`**（`silent=true`）：改写 `LabParamerters.researchMode`；派发 `updateBuildingIcon` 仅为让信息面板重渲染模式文本（3D 图标无变化，由 hasIcon 守卫跳过，no-op 无害）；同样按建筑 merge。
+
+### 6.23 `blueprint/setBeltParams.ts` / `setSorterFilter.ts`
+
+- **`SetBeltParamsCommand`**（`silent=true`）：按字段（`iconId | count`）改 `BeltParameters`，do 派发 `updateBeltIcon`（count 改动额外派发 `updateBeltIconSubscript`），undo 两通道全刷；构造时快照整组 iconId/count；按 `(建筑, 字段)` merge。
+- **`SetSorterFilterCommand`**（`silent=true`）：改建筑顶层 `filterId`（0=无过滤），派发 `updateSorterIcon`；按建筑 merge。
+
+### 6.24 `blueprint/defaultParams.ts` 默认参数模板
+
+- `defaultParamsFor(itemId, modelIndex)`：返回与 `parameterParsers` 注册表对齐的最小合法参数：物流站（2103=4 种/2104=5 种、12 槽位）、大型采矿机（含 miningSpeed=0）、分流器（priority×4 + extra×2）、研究站、传送带、分拣器、储物仓、储液罐、弹射器、射线接收、人造恒星、能量枢纽、监测器、战场基站（含 12 战斗机空槽）、配送器；`allAssemblers` 中其余制造类返回 `{ acceleratorMode: Accelerate }`；未注册返回 `null`。
+- 由 `createBuilding()` 调用，保证编辑器放置的建筑在未经过游戏的情况下也能通过各 `ParamParser.encode` 合法序列化。
 
 ---
 
@@ -620,11 +708,15 @@ customReformColorMask(uint32)  colorLen(int32)  customReformColors[colorLen](uin
 - `buildBVH(transforms, buildings)` 为每个建筑算出选择盒（分拣器是沿 z 缩放的 Box，其它取 `selectUnitBoxTrans`），构造 `BVH`。
 - `pickBuilding(e)`：把鼠标 NDC 反投影成 `Ray`，先与星球球求交，若星球比建筑更近则视为命中星球（清空 intersects），否则取 BVH 命中第一项。
 - `screenToPlanet(e)`：射线与星球球求交，返回 3D 命中点（用于建筑放置）。
-- **左键点击**（拖拽阈值 4px 内）按 `placement.mode` 分发：
-  - `idle`：emit `update:selectedBuildingIndex`（拾取建筑）。
-  - `placing`：`screenToPlanet` → 网格坐标 → `planetToLocal` → `createBuilding` → `queue.push(new CreateBuildingCommand(...))`。
-  - `deleting`：`pickBuilding` 命中 → `queue.push(new RemoveBuildingCommand(index, ...))` → emit `null`。
-- **右键**（`contextmenu`，区分拖拽与点击）：若 `mode !== 'idle'` 则 `resetToIdle()` 退出放置/删除模式。
+- **左键点击**（拖拽阈值 4px 内）按 `appMode` 与 `placement.mode` 分发：
+  - 预览模式：emit `update:selectedBuildingIndex`（拾取建筑）。
+  - 编辑模式 `idle`：同样拾取建筑。
+  - 编辑模式 `placing`：
+    - 普通建筑：`screenToPlanet` → 网格坐标 → `planetToLocal` → `createBuilding` → `queue.push(new CreateBuildingCommand(...))`。
+    - 传送带：不走 click——改为 `mousedown` 记起点 + 拖拽实时栅格化预览 + `mouseup` 推送整段 `CreateBeltLineCommand`。
+    - 分拣器：连续两次左键分别 `pickBuilding` 选源/目标建筑，架接成功推送 `CreateBuildingCommand`。
+  - 编辑模式 `deleting`：`pickBuilding` 命中 → `queue.push(new RemoveBuildingCommand(index, ...))` → emit `null`。
+- **右键**（`contextmenu`，区分拖拽与点击）：预览模式下删除点击命中的建筑；编辑模式下若 `mode !== 'idle'` 则 `resetToIdle()` 退出放置/删除模式。
 
 ### 8.4 命令后重建
 
@@ -667,24 +759,32 @@ App.vue 的 watchEffect 把 codeExpired 置 true（蓝图字符串需重生成�
 | `UpgradeCommand` | `blueprint/upgrade.ts` | 建筑升降级：把所有 `itemId === fromItemId` 的建筑改写为 `toItemId` 并同步 `modelIndex`，按类型分流图标刷新通道 |
 | `SetAcceleratorCommand` | `blueprint/setAccelerator.ts` | 批量设置"生产加速 / 额外产出"模式；支持按 `buildingIndexes` 子集与 `labOnly` 过滤，撤销时逐建筑恢复原始模式 |
 | `RemoveBuildingsCommand` | `blueprint/removeBuilding.ts` | 批量删除建筑，维护 index 与交叉引用 |
-| `RemoveBuildingCommand` | 同上 | 单个建筑删除（3D 右键） |
+| `RemoveBuildingCommand` | 同上 | 单个建筑删除（预览模式 3D 右键 / 删除模式左键） |
 | `RemoveBuildingsByItemCommand` | 同上 | 同 itemId 全部删除（列表右键） |
 | `SetBeaconContentCommand` | `blueprint/setBeaconContent.ts` | 修改全息信标（itemId=2401）`content` 文本；`silent=true`，合并同一建筑的连续编辑 |
+| `SetBuildingRecipeCommand` | `blueprint/setBuildingRecipe.ts` | 修改单体建筑配方 `recipeId`；`silent=true`，合并同一建筑的连续改写 |
+| `SetLabResearchModeCommand` | 同上 | 修改研究站研究模式；`silent=true`，按建筑合并 |
+| `SetBeltParamsCommand` | `blueprint/setBeltParams.ts` | 修改传送带预览图标/数量；`silent=true`，按 `(建筑, 字段)` 合并 |
+| `SetSorterFilterCommand` | `blueprint/setSorterFilter.ts` | 修改分拣器过滤器 `filterId`；`silent=true`，按建筑合并 |
 | `SetStationParamCommand` | `components/StationInfo.vue` | 修改物流塔标量参数（运输力/距离/优先级/任务模式等）；`silent=true`，按 `(building, field)` 合并连续编辑 |
 | `SetStationStorageItemCommand` | `components/StationInfo.vue` | 修改物流塔单个库存槽位（itemId/count/供需等）；`silent=true`，按 `(building, slot, field)` 合并连续编辑 |
-| `CreateBuildingCommand` | `blueprint/create.ts` | 在星球上放置单个建筑；非 `silent`（触发整场景重建）；`ensureAreaFor` 自动扩展根区域 `size.x`；赤道带外静默忽略 |
+| `CreateBuildingCommand` | `blueprint/create.ts` | 在星球上放置单个建筑（含两点架接的分拣器）；非 `silent`（触发整场景重建）；`ensureAreaFor` 自动扩展根区域 `size.x`；赤道带外抛错由调用方静默忽略 |
+| `CreateBeltLineCommand` | `blueprint/beltLine.ts` | 拖拽铺设的整条传送带一次入库并串联格间连接；非 `silent`；一次撤销移除整段 |
 
 ### 9.3 快捷键
 
-- `Ctrl+Z` 撤销，`Ctrl+Y` 或 `Ctrl+Shift+Z` 重做（`App.vue` 的 `hotkey`）。
-- `1`-`9`：切换建筑分类（`placement.categoryIndex`）。
-- `F1`-`F12`：从当前分类选中建筑，进入放置模式（`selectBuilding`）；`disabled` 建筑不可选。
-- `X`：进入删除模式（`enterDeleteMode`），左键点击建筑删除。
-- `R`：旋转 90°（仅在放置模式，`rotateBuilding`）。
-- `Esc`：退出放置/删除模式回到 idle（`resetToIdle`）。
-- `Shift`（按住）：自由放置模式（`freePlacement = true`），不网格对齐。
-- `O` / `0`：切换侧栏（非固定状态，放置模式下不触发）。
-- 在 `INPUT` / `TEXTAREA` / `SELECT` 中打字时不触发快捷键。
+- `Ctrl+Z` 撤销，`Ctrl+Y` 或 `Ctrl+Shift+Z` 重做（全局，`App.vue` 的 `hotkey`）。
+- 以下按键**仅编辑模式**生效（预览模式不响应）：
+  - `1`-`9`：切换建筑分类（`placement.categoryIndex`）并展开底部面板。
+  - `F1`-`F12`：从当前分类选中建筑进入放置模式（`selectBuilding`）；`disabled` 建筑不可选；删除模式下忽略。
+  - `X`：进入删除模式（`enterDeleteMode`），左键点击建筑删除。
+  - `R`：旋转 90°（仅在放置模式，`rotateBuilding`）。
+  - `Shift`（按住）：自由放置模式（`freePlacement = true`），不网格对齐。
+  - `Esc`（分层）：放置/删除模式下回 idle；idle 时收起底部建筑面板。
+- `O` / `0`：切换侧栏展开/收起（侧栏固定 pin 时不响应，展开时回到信息 Tab）；任意模式可用。
+- `W`/`A`/`S`/`D`：`PlanetMapControls` 键盘平移视角（旋转视角球）。
+- 在 `INPUT` / `TEXTAREA` / `SELECT` / `contenteditable` 中打字，或输入法 composition 期间不触发快捷键。
+- 3D 场景左侧有 [ShortcutHint.vue](file:///d:/aksa/aska/github/dsp_blueprint_editor/src/components/ShortcutHint.vue) 悬浮卡片，按当前模式（预览/编辑/删除）实时列出已实现按键。
 
 ---
 
@@ -754,7 +854,13 @@ python3 i18n.py ... -o ../locales     # 生成 zh/en locale
 | `planet.spec.ts` | `findPosForAreas` 与 `calcBuildingTrans` 的位置计算。 |
 | `removeBuilding.spec.ts` | 删除建筑后 index/交叉引用的正确性 + 撤销恢复。 |
 | `dense_splitters.spec.ts` | 密集分流器的 v2 解析。 |
-| `foundation.spec.ts` | 地基（reformData）的解析与回写。 |
+| `foundation.spec.ts` | 地基（reformData）的解析与回写（含 `foundation_only_99`、`facilities_with_foundation_320` fixture）。 |
+| `command.spec.ts` | CommandQueue 版本分流：silent 命令（Replace/SetAccelerator 等）只增 `stateVersion` 不增 `execVersion`，含 push 与 undo 路径。 |
+| `setBuildingRecipe.spec.ts` | 单体配方/研究模式命令的 do/undo 与 silent 性质、merge 行为。 |
+| `normalizeArea.spec.ts` | `normalizeBlueprintAreas`：远处成簇收缩、跨 0 经线取最小弧、北半球赤道居中、单建筑 1×1；校验入参不被修改。 |
+| `stats.spec.ts` | `calculateProductionStats`：分馏塔特例、普通配方建筑、增产剂各等级倍率与自身消耗、研究站科研模式。 |
+
+fixtures 位于 `tests/unit/blueprint/fixtures/`：除原有蓝图外新增 `starting_base_01029.txt`（0.10.29 老版本基地）、`foundation_only_99.txt`、`facilities_with_foundation_320.txt`。
 
 ### 12.3 运行
 
@@ -873,16 +979,29 @@ cat blueprint.txt | yarn cli > bp.json
 | `SetStationParamCommand` / `SetStationStorageItemCommand` | 物流塔标量参数 / 库存槽位的 silent 命令，分别按 `(building, field)` 与 `(building, slot, field)` 合并连续编辑。 |
 | `HoloBeaconInfo.vue` | 全息信标文本编辑面板：`textarea` + dirty 检测，失焦或 `Ctrl+Enter` 时推送 `SetBeaconContentCommand`。 |
 | `ParamSlider.vue` | 通用滑块控件：拖动时只更新本地预览，松手时通过 `change` 提交最终值，便于命令合并。 |
-| `area.ts` | 网格↔本地坐标转换（`planetToLocal`/`localToPlanet`）与区域扩展（`ensureAreaFor`）；根区域常量 `ROOT_GRID_SIZE=1000`、`ROOT_LATITUDE=-80`。 |
-| `create.ts` | 空蓝图创建（`createEmptyBlueprint`）、建筑构造（`createBuilding`）、放置命令（`CreateBuildingCommand`，非 silent，自动扩展 `size.x`）。 |
-| `placementState.ts` | 放置状态机单例（`usePlacement()`）：`mode`（idle/placing/deleting）、`categoryIndex`（1-9）、`selectedItemId/selectedModelIndex`、`yaw`、`freePlacement`（Shift）。 |
-| `buildingCategories.ts` | 9 类建筑面板映射表：每类含 `buildings[]`（itemId/modelIndex/nameKey/disabled）；传送带与分拣器标记 `disabled`。 |
-| `BuildingPalette.vue` | 底部建筑选择面板：分类标签（1-9）+ 建筑图标（F1-F12）；点击选中进入放置模式，再点退出。 |
+| `area.ts` | 网格↔本地坐标转换（`planetToLocal`/`localToPlanet`）、区域扩展（`ensureAreaFor`）与导出归一化（`normalizeBlueprintAreas`）；根区域常量 `ROOT_GRID_SIZE=1000`、`ROOT_LATITUDE=-80`。 |
+| `create.ts` | 空蓝图创建（`createEmptyBlueprint`）、建筑构造（`createBuilding`，参数取 `defaultParamsFor`）、放置命令（`CreateBuildingCommand`，非 silent，自动扩展 `size.x`）。 |
+| `placementState.ts` | 放置状态机单例（`usePlacement()`）：`appMode`（preview/edit）、`mode`（idle/placing/deleting）、`categoryIndex`（1-9）、`selectedItemId/selectedModelIndex`、`yaw`、`freePlacement`（Shift）。 |
+| `appMode` | 应用级模式：`preview`（默认；左键选中、右键删除建筑）与 `edit`（底部面板与放置快捷键可用）；由 `enterEditMode()`/`exitEditMode()` 切换，蓝图代码区的「编辑/保存」按钮触发。 |
+| `buildingCategories.ts` | 9 类建筑面板映射表：每类含 `buildings[]`（itemId/modelIndex/nameKey/disabled）；当前无禁用项，传送带与分拣器均已支持。 |
+| `BuildingPalette.vue` | 底部建筑选择面板（仅编辑模式）：分类标签（1-9）+ 建筑图标（F1-F12），可展开/收起；点击选中进入放置模式，再点退出。 |
 | `CreateBuildingCommand` | 放置建筑命令（非 silent）：`do` 调用 `ensureAreaFor` 确保区域覆盖并 `push` 建筑；`undo` `pop` 建筑并恢复 `size.x`；赤道带外抛异常由调用方静默忽略。 |
-| `placement.mode` | 放置模式状态：`idle`（拾取建筑）、`placing`（左键放置建筑）、`deleting`（左键删除建筑）。右键/Esc 退出到 idle。 |
+| `beltLine.ts` | 传送带拖拽铺设：`rasterizeLine`（Bresenham）、`buildBeltLine`（逐格标定 yaw）、`CreateBeltLineCommand`（整条一次撤销，执行时串联格间 output/input）。 |
+| `CreateBeltLineCommand` | 整条传送带入库命令（非 silent）：逐格分配 index、push 后串联相邻格连接；undo 整段 pop 并恢复 `size.x`。 |
+| `sorter.ts` / `createSorterBetween` | 两建筑间分拣器构造：连接面交点内缩 0.2 为端点，长度 1-3（否则拒绝），yaw[0] 沿主轴、yaw[1]=0。 |
+| `defaultParams.ts` | `defaultParamsFor(itemId)`：新建建筑的最小合法参数模板，与参数解析器注册表对齐，未注册返回 null。 |
+| `setBuildingRecipe.ts` | `SetBuildingRecipeCommand`（单体配方）与 `SetLabResearchModeCommand`（研究模式），均 silent，按建筑 merge。 |
+| `SetBeltParamsCommand` / `SetSorterFilterCommand` | 传送带图标/数量、分拣器过滤器的 silent 命令，分别按 `(建筑,字段)` 与建筑 merge。 |
+| `stats.ts` / `calculateProductionStats` | 理论满速生产统计：物品每分钟产出/消耗/净产出 + 总功耗；处理增产剂倍率、分馏塔特例、研究站科研模式、增产剂自身消耗。 |
+| `ProductionStats.vue` | 侧栏统计 Tab：增产剂等级选择（模块级 ref 保持）+ 电力 + 可排序物品表；读 `stateVersion` 随编辑自动刷新。 |
+| `ShortcutHint.vue` | 左侧悬浮快捷键提示（可折叠）：按 appMode/mode 列出已实现按键；`t(row[0])/t(row[1])` 全量翻译。 |
+| `DefaultInfo.vue` | 无可配置项建筑的兜底面板：itemId/modelIndex/坐标/朝向。 |
+| `buildingPowerData.ts` | 建筑功耗/速度倍率/可否加速登记表 + Map，统计模块数据源。 |
+| `acceleratorData.ts` | `AcceleratorItem` 枚举与各等级增产剂的产出/速度/耗电加成、喷涂容量。 |
+| `placement.mode` | 编辑模式下的子状态：`idle`（拾取建筑）、`placing`（普通建筑左键放置 / 传送带拖拽 / 分拣器两点架接）、`deleting`（左键删除建筑）。右键/Esc 退出到 idle。 |
 | `freePlacement` | Shift 按住时 `true`，建筑放置不做 `floor` 网格对齐，允许任意位置。 |
-| 拖拽阈值 | 4px：`mousedown` 记录位置，`click` 时位移超过 4px 视为相机拖拽，不触发放置/删除/拾取。事件监听在 `rootEl` 上（非 canvas），避免 `setPointerCapture` 干扰。 |
+| 拖拽阈值 | 4px：`mousedown` 记录位置，`click` 时位移超过 4px 视为相机拖拽，不触发普通建筑放置/删除/拾取（传送带拖拽走独立 mousedown/mouseup 通道）。事件监听在 `rootEl` 上（非 canvas），避免 `setPointerCapture` 干扰。 |
 
 ---
 
-> 本 Wiki 基于当前仓库代码静态生成，若 `src/blueprint/parser.ts`、`src/blueprint/reform.ts`、`src/blueprint/area.ts`、`src/blueprint/create.ts`、`src/command.ts`、`src/editor/placementState.ts`、`data/` 或 `components/BlueprintEditor.vue` 发生结构性变更，请同步更新对应章节。
+> 本 Wiki 基于当前仓库代码静态生成，若 `src/blueprint/parser.ts`、`src/blueprint/reform.ts`、`src/blueprint/area.ts`、`src/blueprint/create.ts`、`src/blueprint/beltLine.ts`、`src/blueprint/sorter.ts`、`src/blueprint/stats.ts`、`src/blueprint/defaultParams.ts`、`src/command.ts`、`src/editor/placementState.ts`、`data/` 或 `components/BlueprintEditor.vue` 发生结构性变更，请同步更新对应章节。

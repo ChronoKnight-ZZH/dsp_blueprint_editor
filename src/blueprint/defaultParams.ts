@@ -2,12 +2,14 @@ import {
     AllParameters,
     StationParameters,
     SplitterParameters, LabParamerters, AssembleParamerters,
-    BeltParameters, InserterParameters, TankParameters,
+    InserterParameters, TankParameters,
     StorageParameters, StorageType,
     EjectorParameters, PowerGeneratorParameters,
     ArtifacialStarParameters, EnergyExchangerParameters,
     MonitorParameters, BattleBaseParameters, DispenserParameters,
+    UnknownParamerters, LogisticRole,
     ResearchMode, AcceleratorMode,
+    BeltParameters,
 } from './parser';
 import { allAssemblers } from '@/data/items';
 
@@ -17,38 +19,42 @@ export function defaultParamsFor(itemId: number, _modelIndex: number): AllParame
     switch (itemId) {
         // 物流运输站 / 星际物流运输站
         case 2103:
-            return emptyStation(4, 12);
+            return emptyStation(4, 12, 200000);
         case 2104:
-            return emptyStation(5, 12);
+            return emptyStation(5, 12, 1000000);
         // 大型采矿机
         case 2316:
-            return { ...emptyStation(1, 12), miningSpeed: 0 };
+            return {
+                ...emptyStation(1, 12, 49000),
+                storage: [{ itemId: 1001, max: 10000, localLogic: LogisticRole.Supply, remoteLogic: LogisticRole.None, keepMode: 0 }],
+                miningSpeed: 10000,
+            };
         // 四向分流器
         case 2020:
             return { priority: [false, false, false, false], extra: [0, 0] } as SplitterParameters;
         // 研究站
         case 2901:
         case 2902:
-            return { researchMode: ResearchMode.None, acceleratorMode: AcceleratorMode.Accelerate } as LabParamerters;
-        // 传送带
+            return { researchMode: ResearchMode.None, acceleratorMode: AcceleratorMode.ExtraOutput } as LabParamerters;
+        // 传送带：新放置的传送带无参数（与游戏一致），由 setBeltParams 按需初始化
         case 2001:
         case 2002:
         case 2003:
             return { iconId: 0, count: 0 } as BeltParameters;
+            // return null;
         // 分拣器
         case 2011:
         case 2012:
         case 2013:
         case 2014:
-            return { length: 0 } as InserterParameters;
+            return { length: 1 } as InserterParameters;
         // 储物仓
         case 2101:
-            return emptyStorage();
         case 2102:
             return emptyStorage();
         // 储液罐
         case 2106:
-            return { input: false, output: false } as TankParameters;
+            return { output: true, input: true } as TankParameters;
         // 电磁轨道弹射器
         case 2311:
             return { orbitId: 0, boost: false } as EjectorParameters;
@@ -63,25 +69,49 @@ export function defaultParamsFor(itemId: number, _modelIndex: number): AllParame
             return { mode: 0 } as EnergyExchangerParameters;
         // 流速监测器
         case 2030:
-            return emptyMonitor();
+            return defaultMonitor();
         // 战场分析基站
         case 3009:
-            return emptyBattleBase();
+            return defaultBattleBase();
         // 物流配送器
         case 2107:
-            return { playerMode: 0, storageMode: 0, workEnergyPerTick: 0, courierAutoReplenish: false } as DispenserParameters;
+            return { playerMode: 2, storageMode: 0, workEnergyPerTick: 30000, courierAutoReplenish: false } as DispenserParameters;
+        // 地热发电站（单参数槽）
+        case 2213:
+            return { parameters: new Int32Array([0]) } as UnknownParamerters;
+        // 垂直发射井（单参数槽）
+        case 2312:
+            return { parameters: new Int32Array([0]) } as UnknownParamerters;
+        // 全息信标（2048 参数槽）
+        case 2401: {
+            const a = new Int32Array(2048);
+            a[0] = 83; a[1] = 1250; a[2] = 150; a[3] = 2; a[4] = 2;
+            return { parameters: a } as UnknownParamerters;
+        }
+        // 防御塔（128 参数槽，索引 2 为默认开火优先级/分组）
+        case 3001:
+        case 3002:
+        case 3006:
+            return turretParams(15);
+        case 3003:
+        case 3010:
+            return turretParams(11);
+        case 3004:
+            return turretParams(192);
+        case 3005:
+            return turretParams(207);
     }
     // 制造台 / 熔炉 / 精炼厂 / 化工厂 / 对撞机（allAssemblers 中除研究站外）
     if (allAssemblers.has(itemId)) {
-        return { acceleratorMode: AcceleratorMode.Accelerate } as AssembleParamerters;
+        return { acceleratorMode: AcceleratorMode.ExtraOutput } as AssembleParamerters;
     }
     return null;
 }
 
-function emptyStation(maxItemKind: number, numSlots: number): StationParameters {
+function emptyStation(maxItemKind: number, numSlots: number, workEnergyPerTick: number): StationParameters {
     const storage = [];
     for (let i = 0; i < maxItemKind; i++) {
-        storage.push({ itemId: 0, max: 0, localLogic: 0, remoteLogic: 0, keepMode: 0 });
+        storage.push({ itemId: 0, max: 0, localLogic: LogisticRole.None, remoteLogic: LogisticRole.None, keepMode: 0 });
     }
     const slots = [];
     for (let i = 0; i < numSlots; i++) {
@@ -89,14 +119,14 @@ function emptyStation(maxItemKind: number, numSlots: number): StationParameters 
     }
     return {
         storage, slots,
-        workEnergyPerTick: 0,
-        tripRangeOfDrones: 0,
-        tripRangeOfShips: 0,
-        includeOrbitCollector: false,
-        warpEnableDistance: 0,
-        warperNecessary: false,
-        deliveryAmountOfDrones: 0,
-        deliveryAmountOfShips: 0,
+        workEnergyPerTick,
+        tripRangeOfDrones: -1,
+        tripRangeOfShips: 24000000000,
+        includeOrbitCollector: true,
+        warpEnableDistance: 480000,
+        warperNecessary: true,
+        deliveryAmountOfDrones: 10,
+        deliveryAmountOfShips: 100,
         pilerCount: 0,
         droneAutoReplenish: false,
         shipAutoReplenish: false,
@@ -107,29 +137,36 @@ function emptyStorage(): StorageParameters {
     return { automationLimit: 0, type: StorageType.DEFAULT, grids: [] };
 }
 
-function emptyBattleBase(): BattleBaseParameters {
+function defaultBattleBase(): BattleBaseParameters {
     const fighters = [];
     for (let i = 0; i < 12; i++)
-        fighters.push({ itemId: 0 });
+        fighters.push({ itemId: 5101 });
     return {
         ...emptyStorage(),
-        workEnergyPerTick: 0,
-        autoPickEnabled: false,
-        autoReplenishFleet: false,
-        combatEnabled: false,
-        autoReconstruct: false,
-        constructionDroneEnabled: false,
+        automationLimit: 10,
+        workEnergyPerTick: 40000,
+        autoPickEnabled: true,
+        autoReplenishFleet: true,
+        combatEnabled: true,
+        autoReconstruct: true,
+        constructionDroneEnabled: true,
         droneConstructPriority: 0,
         fighters,
     };
 }
 
-function emptyMonitor(): MonitorParameters {
+function defaultMonitor(): MonitorParameters {
     return {
-        targetBeltId: 0, offset: 0, targetCargoAmount: 0, periodTicksCount: 0,
-        passColorId: 0, failColorId: 0, passOperator: 0, alarmMode: 0,
-        cargoFilter: 0, systemWarningMode: 0, systemWarningIconId: 0,
-        tone: 0, volume: 0, pitch: 0, repeat: false, length: 0,
-        falloffRadius: [0, 0], spawnItemOperator: 0,
+        targetBeltId: 0, offset: 0, targetCargoAmount: 0, periodTicksCount: 360,
+        passColorId: 113, failColorId: 13, passOperator: 5, alarmMode: 0,
+        cargoFilter: 0, systemWarningMode: 0, systemWarningIconId: 402,
+        tone: 20, volume: 80, pitch: 35, repeat: true, length: 4,
+        falloffRadius: [24, 72], spawnItemOperator: 0,
     };
+}
+
+function turretParams(priority: number): UnknownParamerters {
+    const a = new Int32Array(128);
+    a[2] = priority;
+    return { parameters: a };
 }

@@ -498,7 +498,8 @@ import { usePlacement, resetToIdle } from '@/editor/placementState';
 import { planetToLocal } from '@/blueprint/area';
 import { createBuilding, CreateBuildingCommand } from '@/blueprint/create';
 import { buildBeltLine, CreateBeltLineCommand, rasterizeLine } from '@/blueprint/beltLine';
-import { createSorterBetween } from '@/blueprint/sorter';
+import { createSorterBetween, collectOccupiedSlots } from '@/blueprint/sorter';
+import { getBuildingSlots } from '@/data/buildingSlots';
 
 const props = defineProps<{
   selectedBuildingIndex: number | null,
@@ -663,6 +664,158 @@ watchEffect(() => {
     }
 });
 
+// ---- 分拣器架接可视化：slot 标记 / 皮带 segIndex 范围 / 预览连线 ----
+/** 鼠标悬停的建筑下标（pointermove 时更新；驱动覆盖层 watchEffect） */
+const sorterHover = ref<number | null>(null);
+
+const SLOT_MARKER_CAP = 12; // 建筑 slot 数上限
+const slotMarkers = new InstancedMesh(
+    new SphereGeometry(0.09, 12, 8),
+    // 白底乘 instanceColor；depthTest:false 透过建筑可见，模拟游戏内 slot 指示
+    new MeshBasicMaterial({ transparent: true, opacity: 0.9, depthTest: false }),
+    SLOT_MARKER_CAP,
+);
+slotMarkers.matrixAutoUpdate = false;
+slotMarkers.count = 0;
+slotMarkers.renderOrder = 10;
+const slotMarkersVisible = ref(false);
+const SLOT_COLORS = {
+    free: new Color(0x50fa50),   // 空闲
+    used: new Color(0xff4040),   // 已被其他分拣器占用
+    target: new Color(0xffd700), // 本次将连接（含被占后切换到的平行 slot）
+};
+
+// 皮带可连接范围（沿主轴 ±0.5 格，与 computeBeltOffset 的 mainOffset 区间对应）
+const beltRangeMesh = new Mesh(
+    new BoxGeometry(0.1, 1.0, 0.1),
+    new MeshBasicMaterial({ color: 0x40c8ff, transparent: true, opacity: 0.7, depthTest: false }),
+);
+beltRangeMesh.matrixAutoUpdate = false;
+beltRangeMesh.renderOrder = 10;
+const beltRangeVisible = ref(false);
+
+// 源→悬停目标的预览连线（细长盒，z 轴沿连线拉伸）
+const sorterPreviewMesh = new Mesh(
+    new BoxGeometry(0.14, 0.14, 1),
+    new MeshBasicMaterial({ color: 0x50fa50, transparent: true, opacity: 0.6, depthTest: false }),
+);
+sorterPreviewMesh.matrixAutoUpdate = false;
+sorterPreviewMesh.renderOrder = 10;
+const sorterPreviewVisible = ref(false);
+
+watchEffect(() => {
+    if (slotMarkersVisible.value) scene.add(slotMarkers); else scene.remove(slotMarkers);
+    if (beltRangeVisible.value) scene.add(beltRangeMesh); else scene.remove(beltRangeMesh);
+    if (sorterPreviewVisible.value) scene.add(sorterPreviewMesh); else scene.remove(sorterPreviewMesh);
+});
+
+// 覆盖层刷新用的临时对象（复用避免每帧分配）
+const overlayM = new Matrix4();
+const overlayLift = new Matrix4();
+const overlayP0 = new Vector3();
+const overlayP1 = new Vector3();
+const overlayZ = new Vector3();
+const overlayX = new Vector3();
+const overlayY = new Vector3();
+
+/**
+ * 刷新分拣器架接覆盖层。
+ * 依赖 b.value / sorterHover / sorterSource / placement，任一变化自动重跑：
+ * - 悬停有 slot 的建筑：显示全部 slot（绿=空闲，红=占用，黄=将连接）
+ * - 悬停皮带：显示主轴 segIndex 范围条
+ * - 已选源且悬停有效目标：调 createSorterBetween 全真预演（含占用切换），
+ *   绿线=可放置，红线=不可（平行组占满 / 距离超 3 格）
+ */
+function refreshSorterOverlay() {
+    slotMarkersVisible.value = false;
+    beltRangeVisible.value = false;
+    sorterPreviewVisible.value = false;
+    const bp = b.value;
+    const queue = commandQueue.value;
+    if (!bp || !queue || !isPlacingSorter()
+        || placement.selectedItemId === null || placement.selectedModelIndex === null)
+        return;
+    const hover = sorterHover.value;
+    if (hover === null)
+        return;
+    const data = queue.data;
+    const hoverBuilding = data.buildings[hover];
+    const trans = calcBuildingTrans(R, bp.pos, hoverBuilding);
+
+    if (isBelt(hoverBuilding.itemId)) {
+        // 皮带：青色范围条沿主轴（盒 y 轴随 yaw 旋转对齐）
+        overlayLift.makeTranslation(0, 0, 0.25);
+        beltRangeMesh.matrix.multiplyMatrices(trans[0], overlayLift);
+        beltRangeVisible.value = true;
+        // 不 return：继续走下面的预演和预览连线逻辑
+    }
+
+    // 已选源且悬停有效目标 → 全真预演（含被占后的平行切换；与实际放置完全一致）
+    const src = sorterSource.value;
+    let preview: BlueprintBuilding | null = null;
+    if (src !== null && src !== hover) {
+        preview = createSorterBetween(
+            data.buildings[src], hoverBuilding,
+            placement.selectedItemId, placement.selectedModelIndex,
+            data.buildings,
+        );
+    }
+
+    const slots = getBuildingSlots(hoverBuilding.itemId);
+    if (slots.length > 0) {
+        // 建筑：全部 slot 染色显示
+        const occupied = collectOccupiedSlots(data.buildings, hover);
+        const targetSlot = preview ? preview.outputToSlot : -1;
+        for (let i = 0; i < slots.length && i < SLOT_MARKER_CAP; i++) {
+            overlayLift.makeTranslation(slots[i].x, slots[i].y, 0.35);
+            overlayM.multiplyMatrices(trans[0], overlayLift);
+            slotMarkers.setMatrixAt(i, overlayM);
+            slotMarkers.setColorAt(i,
+                i === targetSlot ? SLOT_COLORS.target
+                : occupied.has(i) ? SLOT_COLORS.used
+                : SLOT_COLORS.free);
+        }
+        slotMarkers.count = Math.min(slots.length, SLOT_MARKER_CAP);
+        slotMarkers.instanceMatrix.needsUpdate = true;
+        if (slotMarkers.instanceColor)
+            slotMarkers.instanceColor.needsUpdate = true;
+        slotMarkersVisible.value = true;
+    }
+
+    // 预览连线（建筑有无 slot 数据均显示；绿=可放置，红=不可）
+    if (src !== null && src !== hover) {
+        if (preview) {
+            const et = calcBuildingTrans(R, bp.pos, preview);
+            overlayP0.setFromMatrixPosition(et[0]);
+            overlayP1.setFromMatrixPosition(et[1]);
+            (sorterPreviewMesh.material as MeshBasicMaterial).color.setHex(0x50fa50);
+        } else {
+            // 不可放置：连两建筑中心的红线提示
+            overlayP0.setFromMatrixPosition(calcBuildingTrans(R, bp.pos, data.buildings[src])[0]);
+            overlayP1.setFromMatrixPosition(trans[0]);
+            (sorterPreviewMesh.material as MeshBasicMaterial).color.setHex(0xff4040);
+        }
+        // 右手正交基：x=切向(yaw 轴)，y=径向，z=沿连线（连线方向在局部 xy 平面内）
+        overlayZ.subVectors(overlayP1, overlayP0);
+        const len = overlayZ.length();
+        if (len > 1e-6) {
+            overlayZ.divideScalar(len);
+            overlayY.copy(overlayP0).add(overlayP1).normalize(); // 中点径向
+            overlayX.crossVectors(overlayY, overlayZ).normalize();
+            overlayY.crossVectors(overlayZ, overlayX); // 重新正交化
+            sorterPreviewMesh.matrix.makeBasis(overlayX, overlayY, overlayZ);
+            sorterPreviewMesh.matrix.setPosition(
+                (overlayP0.x + overlayP1.x) / 2,
+                (overlayP0.y + overlayP1.y) / 2,
+                (overlayP0.z + overlayP1.z) / 2,
+            );
+            sorterPreviewMesh.matrix.scale(overlayX.set(1, 1, len));
+            sorterPreviewVisible.value = true;
+        }
+    }
+}
+watchEffect(refreshSorterOverlay);
+
 // 退出 placing / 切换建筑时清理中途状态
 watchEffect(() => {
     placement.mode; placement.selectedItemId;
@@ -670,8 +823,10 @@ watchEffect(() => {
         beltStart = null;
         hideBeltPreview();
     }
-    if (!isPlacingSorter())
+    if (!isPlacingSorter()) {
         sorterSource.value = null;
+        sorterHover.value = null;
+    }
 });
 
 onMounted(() => {
@@ -753,10 +908,10 @@ onMounted(() => {
 			// Outside equator band — ignore
 		}
 	}
-	/** 鼠标跟随预览：placing 模式下更新半透明绿盒的位置与朝向 */
+	/** 鼠标跟随预览：placing 模式下更新半透明绿盒的位置与朝向（分拣器走两点架接，无绿盒） */
 	let lastMouseEvent: MouseEvent | null = null;
 	const updatePreview = (e: MouseEvent) => {
-		if (placement.appMode !== 'edit' || placement.mode !== 'placing') {
+		if (placement.appMode !== 'edit' || placement.mode !== 'placing' || isPlacingSorter()) {
 			if (previewVisible.value)
 				previewVisible.value = false;
 			return;
@@ -818,28 +973,33 @@ onMounted(() => {
 			// Outside equator band — ignore
 		}
 	}
-	/** 分拣器两点架接 */
-	const pickSorterPoint = (e: MouseEvent) => {
-		const queue = commandQueue.value;
-		if (!queue)
-			return;
-		const index = pickBuilding(e);
-		if (sorterSource.value === null) {
-			if (index !== null)
-				sorterSource.value = index;
-			return;
+	/** 分拣器两点架接：支持建筑↔建筑、建筑↔皮带、皮带↔皮带 */
+		const pickSorterPoint = (e: MouseEvent) => {
+			const queue = commandQueue.value;
+			if (!queue)
+				return;
+			const index = pickBuilding(e);
+			if (sorterSource.value === null) {
+				if (index !== null)
+					sorterSource.value = index;
+				return;
+			}
+			const src = sorterSource.value;
+			sorterSource.value = null;
+			if (index === null || index === src || placement.selectedItemId === null || placement.selectedModelIndex === null)
+				return;
+			const srcBuilding = queue.data.buildings[src];
+			const dstBuilding = queue.data.buildings[index];
+			// 允许任意两端组合：建筑↔建筑、建筑↔皮带、皮带↔皮带
+			// 传入 buildings 以检测 slot 占用（一 slot 一分拣器，冲突自动切同侧平行 slot）
+			const sorter = createSorterBetween(
+				srcBuilding, dstBuilding,
+				placement.selectedItemId, placement.selectedModelIndex,
+				queue.data.buildings,
+			);
+			if (sorter)
+				queue.push(new CreateBuildingCommand(sorter));
 		}
-		const src = sorterSource.value;
-		sorterSource.value = null;
-		if (index === null || index === src || placement.selectedItemId === null || placement.selectedModelIndex === null)
-			return;
-		const sorter = createSorterBetween(
-			queue.data.buildings[src], queue.data.buildings[index],
-			placement.selectedItemId, placement.selectedModelIndex,
-		);
-		if (sorter)
-			queue.push(new CreateBuildingCommand(sorter));
-	}
 	const onMouseUp = (e: MouseEvent) => {
 		if (isPlacingBelt() && beltStart !== null)
 			commitBeltLine(e);
@@ -850,8 +1010,15 @@ onMounted(() => {
 			updateBeltPreview(beltStart, e);
 		else
 			updatePreview(e);
+		// 分拣器架接模式：追踪悬停建筑以驱动 slot/范围/连线覆盖层
+		if (isPlacingSorter())
+			sorterHover.value = pickBuilding(e);
 	}
-	const onMouseLeave = () => { lastMouseEvent = null; previewVisible.value = false; };
+	const onMouseLeave = () => {
+		lastMouseEvent = null;
+		previewVisible.value = false;
+		sorterHover.value = null;
+	};
 	// 鼠标静止时，键盘切换建筑 / R 旋转 / Shift 吸附变化也要刷新预览
 	watchEffect(() => {
 		if (lastMouseEvent)

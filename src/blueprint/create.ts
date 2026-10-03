@@ -11,10 +11,10 @@ import { defaultParamsFor } from "./defaultParams";
 export function createEmptyBlueprint(): BlueprintData {
     return {
         header: {
-            layout: 0,
+            layout: 10,
             icons: [0, 0, 0, 0, 0],
             time: new Date(),
-            gameVersion: '0.10.34.28529',
+            gameVersion: '0.10.35.29104',
             shortDesc: '新蓝图',
             author: '',
             blueprintVersion: '',

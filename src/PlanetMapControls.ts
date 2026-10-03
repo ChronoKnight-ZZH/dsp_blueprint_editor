@@ -107,7 +107,9 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
     /** 重置视角：目标回到原点，相机回到正上方默认距离 */
     reset(distance: number) {
         this.target.set(0, 0, 0);
-        this.spherical.set(distance, Math.PI / 2, 0);
+        // update() 会从当前相机位置重建 spherical，因此必须直接设置相机位置，
+        // 仅设置 this.spherical 会被 setFromVector3 覆盖导致重置无效
+        this.object.position.set(0, 0, distance);
         this.sphericalDelta.set(0, 0, 0);
         this.panOffset.set(0, 0, 0);
         this.scale = 1.0;
