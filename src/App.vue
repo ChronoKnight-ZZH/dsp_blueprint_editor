@@ -3,6 +3,8 @@
         <BlueprintEditor ref="renderer" v-model:selectedBuildingIndex="selectedBuildingIndex"
             @update:selectedBuildingIndex="i => buildingFocused(i !== null)"
             @click-empty="palette?.collapse()" />
+            @update:selectedBuildingIndex="i => buildingFocused(i !== null)"
+            @click-empty="palette?.collapse()" />
         <div class="sidebar" :class="{ expanded: sidebarExpanded }">
             <div>
                 <div class="info-tab tab" :class="{ active: activeTab === 'info' }" @click="activeTab = 'info'"></div>
@@ -65,6 +67,9 @@
                 <section>
                     <div class="row">
                         <label for="bp-str" style="margin-right: auto;">{{ t('蓝图代码') }}</label>
+                        <button style="margin-left: 4px;" @click="onModeButton" :disabled="working">
+                            {{ placement.appMode === 'edit' ? t('保存') : t('编辑') }}
+                        </button>
                         <button style="margin-left: 4px;" @click="onModeButton" :disabled="working">
                             {{ placement.appMode === 'edit' ? t('保存') : t('编辑') }}
                         </button>
@@ -164,6 +169,9 @@
             <!-- 底部UI建筑面板 -->
         <BuildingPalette v-if="data && placement.appMode === 'edit'" ref="palette" />
         <ShortcutHint />
+            <!-- 底部UI建筑面板 -->
+        <BuildingPalette v-if="data && placement.appMode === 'edit'" ref="palette" />
+        <ShortcutHint />
     </div>
 </template>
 
@@ -172,9 +180,13 @@ import { computed, defineAsyncComponent, onMounted, onUnmounted, provide, reacti
 import { useI18n } from 'vue-i18n';
 import { BlueprintData, fromStr, toStr } from '@/blueprint/parser';
 import { createEmptyBlueprint } from '@/blueprint/create';
+import { createEmptyBlueprint } from '@/blueprint/create';
 import { version, rendererKey, buildingInfoKey, commandQueueKey } from '@/define';
 import { BuildingInfo } from './blueprint/buildingInfo';
 import { RemoveBuildingsByItemCommand } from './blueprint/removeBuilding';
+import { usePlacement, resetToIdle, selectBuilding, enterDeleteMode,
+         rotateBuilding, enterEditMode, exitEditMode } from './editor/placementState';
+import { buildingCategories } from './data/buildingCategories';
 import { usePlacement, resetToIdle, selectBuilding, enterDeleteMode,
          rotateBuilding, enterEditMode, exitEditMode } from './editor/placementState';
 import { buildingCategories } from './data/buildingCategories';
@@ -187,6 +199,8 @@ import ReplaceModal from './components/ReplaceModal.vue';
 import ProductionStats from './components/ProductionStats.vue';
 import { CommandQueue } from './command';
 import BuildingOverview from './components/BuildingOverview.vue';
+import BuildingPalette from './components/BuildingPalette.vue';
+import ShortcutHint from './components/ShortcutHint.vue';
 import BuildingPalette from './components/BuildingPalette.vue';
 import ShortcutHint from './components/ShortcutHint.vue';
 import { useLang } from './i18n';
@@ -405,6 +419,8 @@ const parseBp = (s: string) => {
             selectedBuildingIndex.value = null;
             bpStr.value = s;
             codeExpired.value = false;
+            if (placement.appMode === 'edit')
+            exitEditMode();
             return;
         }
     } else {
@@ -546,12 +562,25 @@ const paste = async () => {
 
 const placement = usePlacement();
 
+const placement = usePlacement();
+
 const hotkey = (event: KeyboardEvent) => {
+    
+const isEdit = placement.appMode === 'edit';
+
     
 const isEdit = placement.appMode === 'edit';
 
     if (event.isComposing)
         return;
+    // Track Shift for free placement
+    // Shift：仅编辑模式
+    if ((event.code === 'ShiftLeft' || event.code === 'ShiftRight') && isEdit) {
+        if (placement.mode === 'placing')
+            placement.freePlacement = true;
+    }
+
+    // Ctrl+Z/Y
     // Track Shift for free placement
     // Shift：仅编辑模式
     if ((event.code === 'ShiftLeft' || event.code === 'ShiftRight') && isEdit) {
@@ -625,11 +654,48 @@ const isEdit = placement.appMode === 'edit';
     if (event.altKey || event.metaKey)
         return;
 
+
     // 在输入框/文本域中打字时不触发
     const target = event.target as HTMLElement | null;
     const tag = target?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable)
         return;
+}
+
+// Shift
+const onKeyUp = (event: KeyboardEvent) => {
+    if ((event.code === 'ShiftLeft' || event.code === 'ShiftRight'))
+        placement.freePlacement = false;
+}
+// 添加事件监听
+onMounted(() => {
+    document.body.addEventListener('keydown', hotkey);
+    document.body.addEventListener('keyup', onKeyUp);
+});
+// 移除事件监听
+onUnmounted(() => {
+    document.body.removeEventListener('keydown', hotkey);
+    document.body.removeEventListener('keyup', onKeyUp);
+});
+// 初始化建筑面板
+const palette = ref<InstanceType<typeof BuildingPalette> | null>(null);
+
+const onModeButton = () => {
+    if (placement.appMode === 'edit') {
+        // 保存：无条件刷回代码框 → 回预览
+        if (data.value) {
+            bpStr.value = toStr(data.value);
+            codeExpired.value = false;
+        }
+        exitEditMode();
+    } else {
+        // 编辑：data 为空则自动创建空蓝图
+        if (!data.value) {
+            parseBp(toStr(createEmptyBlueprint()));   // 复用 parseBp，保证 bpStr/codeExpired 一致
+        }
+        enterEditMode();
+    }
+};
 }
 
 // Shift

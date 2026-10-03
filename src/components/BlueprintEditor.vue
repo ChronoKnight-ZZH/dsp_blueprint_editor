@@ -6,6 +6,7 @@
 import {
 	Group, LineSegments, InstancedMesh, WebGLRenderer,
 	LineBasicMaterial, MeshStandardMaterial, MeshLambertMaterial, MeshBasicMaterial, CylinderGeometry, BoxGeometry,
+	LineBasicMaterial, MeshStandardMaterial, MeshLambertMaterial, MeshBasicMaterial, CylinderGeometry, BoxGeometry,
 	Matrix4, DirectionalLight, Vector3, Object3D, Color, Ray, Sphere, Vector2, Mesh,
 } from 'three';
 import { SphereLatitudeGridGeometry, SphereLongitudeGridGeometry } from '@/SphereGridGeometry';
@@ -17,10 +18,13 @@ import { IconTexture } from '@/iconTexture';
 import { IconGeometry, Icons } from '@/icons';
 import { IconSubscript } from '@/iconSubscript';
 import { Cargos, CargoGeometry, makeCargoGeometry } from '@/cargos';
+import { Cargos, CargoGeometry, makeCargoGeometry } from '@/cargos';
 import { BVH } from '@/bvh';
 import { Updater } from '@/command';
 import { RemoveBuildingCommand } from '@/blueprint/removeBuilding';
 import { commandQueueKey } from '@/define';
+import { BeltParameters, BlueprintBuilding, LabParamerters, ResearchMode } from '@/blueprint/parser';
+import { isBelt, isInserter, isLab } from '@/data/items';
 import { BeltParameters, BlueprintBuilding, LabParamerters, ResearchMode } from '@/blueprint/parser';
 import { isBelt, isInserter, isLab } from '@/data/items';
 function buildPlanetGrid(radius = 1, segment = 200) {
@@ -45,6 +49,7 @@ function buildPlanetGrid(radius = 1, segment = 200) {
 		allGrids.add(new LineSegments(geometry, material));
 	}
 	return { grids: allGrids, material };
+	return { grids: allGrids, material };
 }
 
 class AllBuildings extends Object3D {
@@ -52,6 +57,7 @@ class AllBuildings extends Object3D {
         objects: Object3D[],
         public readonly iconsMesh: Icons,
         public readonly iconTexture: IconTexture,
+        public readonly cargos: Cargos[],
         public readonly cargos: Cargos[],
         public readonly modelRef: { mesh: InstancedMesh, instance: number }[],
         public readonly subscriptMesh: IconSubscript | null = null,
@@ -61,6 +67,8 @@ class AllBuildings extends Object3D {
         super();
         this.add(...objects);
         this.add(iconsMesh);
+        for (const c of cargos)
+            this.add(c);
         for (const c of cargos)
             this.add(c);
         if (subscriptMesh)
@@ -102,6 +110,15 @@ function inserterTrans(transforms: Matrix4[], trans: Matrix4) {
 }
 
 function buildingIconId(b: BlueprintBuilding) {
+    if (isLab(b.itemId)) {
+        const mode = (b.parameters as LabParamerters | null)?.researchMode;
+        // 矩阵合成：有配方显示配方图标，无配方退回研究站自身图标
+        if (mode === ResearchMode.Compose && b.recipeId > 0) {
+            return recipeIconId(b.recipeId);
+        }
+        // 科研模式 / 选择模式 / 合成但未选配方：显示研究站自身图标
+        return itemIconId(b.itemId);
+    }
     if (isLab(b.itemId)) {
         const mode = (b.parameters as LabParamerters | null)?.researchMode;
         // 矩阵合成：有配方显示配方图标，无配方退回研究站自身图标
@@ -154,12 +171,26 @@ function createInserterCargoGeometry(count: number): CargoGeometry {
 	return makeCargoGeometry(geo, count);
 }
 
+/** 传送带货物：正六棱柱，外接圆半径 0.15，长 0.4，轴向沿 z CylinderGeometry */
+function createBeltCargoGeometry(count: number): CargoGeometry {
+	const geo = new BoxGeometry(0.4, 0.4, 0.4);
+	geo.rotateX(Math.PI / 2); // 圆柱轴向从 y 转到 z
+	return makeCargoGeometry(geo, count);
+}
+
+/** 分拣器货物：正四棱柱，正方形截面 0.15 × 0.15，长 0.4（沿 z）BoxGeometry */
+function createInserterCargoGeometry(count: number): CargoGeometry {
+	const geo = new BoxGeometry(0.4, 0.4, 0.6);
+	return makeCargoGeometry(geo, count);
+}
+
 function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[], renderer: WebGLRenderer) {
 	const buildBelts = (belts: BlueprintBuilding[]) => {
 		const thickness = 0.1;
 		const material = new MeshLambertMaterial();
 		const objects: Object3D[] = [];
 		{
+			const geometry = new CylinderGeometry(0.32, 0.32, thickness, 6);
 			const geometry = new CylinderGeometry(0.32, 0.32, thickness, 6);
 			const mesh = new InstancedMesh(geometry, material, belts.length);
 			const offset = new Matrix4().makeRotationX(Math.PI / 2);
@@ -201,6 +232,7 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
 
 				const color = buildingMeta.get(b1.modelIndex)!.color;
 				addBeltCargo(trans, color, len);
+				addBeltCargo(trans, color, len);
 
 				trans.multiply(temp.makeScale(1., 1., len));
 				trans.multiply(offset);
@@ -219,6 +251,7 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
 	}
 	const buildInserters = (inserters: BlueprintBuilding[]) => {
 		const geometry = new BoxGeometry(0.1, 0.1, 1.0);
+		const geometry = new BoxGeometry(0.1, 0.1, 1.0);
 		const material = new MeshLambertMaterial();
 		const mesh = new InstancedMesh(geometry, material, inserters.length);
 		const offset = new Matrix4().makeTranslation(0, 0, -0.5);
@@ -229,6 +262,7 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
 
 			const len = inserterTrans(transforms[b.index], trans);
 			const color = buildingMeta.get(b.modelIndex)!.color;
+			addInserterCargo(trans, color, len);
 			addInserterCargo(trans, color, len);
 
 			trans.multiply(temp.makeScale(1., 1., len));
@@ -353,6 +387,22 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
 		inserterCargosMesh.setCargoDistanceAt(numInserterCargos, distance);
 		numInserterCargos++;
 	};
+	const beltCargosMesh = new Cargos(createBeltCargoGeometry(belts.length), belts.length);
+	const inserterCargosMesh = new Cargos(createInserterCargoGeometry(inserters.length), inserters.length);
+	let numBeltCargos = 0;
+	let numInserterCargos = 0;
+	const addBeltCargo = (trans: Matrix4, color: Color, distance: number) => {
+		beltCargosMesh.setMatrixAt(numBeltCargos, trans);
+		beltCargosMesh.setColorAt(numBeltCargos, color);
+		beltCargosMesh.setCargoDistanceAt(numBeltCargos, distance);
+		numBeltCargos++;
+	};
+	const addInserterCargo = (trans: Matrix4, color: Color, distance: number) => {
+		inserterCargosMesh.setMatrixAt(numInserterCargos, trans);
+		inserterCargosMesh.setColorAt(numInserterCargos, color);
+		inserterCargosMesh.setCargoDistanceAt(numInserterCargos, distance);
+		numInserterCargos++;
+	};
 
     const meshes: Object3D[] = [];
 	if (belts.length)
@@ -361,6 +411,17 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
 	if (inserters.length)
 		meshes.push(...buildInserters(inserters));
 
+	if (numBeltCargos) {
+		beltCargosMesh.count = numBeltCargos;
+		beltCargosMesh.instanceMatrix.needsUpdate = true;
+		beltCargosMesh.instanceColor!.needsUpdate = true;
+		beltCargosMesh.geometry.cargoDistance.needsUpdate = true;
+	}
+	if (numInserterCargos) {
+		inserterCargosMesh.count = numInserterCargos;
+		inserterCargosMesh.instanceMatrix.needsUpdate = true;
+		inserterCargosMesh.instanceColor!.needsUpdate = true;
+		inserterCargosMesh.geometry.cargoDistance.needsUpdate = true;
 	if (numBeltCargos) {
 		beltCargosMesh.count = numBeltCargos;
 		beltCargosMesh.instanceMatrix.needsUpdate = true;
@@ -386,6 +447,7 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
     const iconMesh = new Icons(iconTexture.texture, icons);
     iconMesh.renderOrder = 10;
 
+	return new AllBuildings(meshes, iconMesh, iconTexture, [beltCargosMesh, inserterCargosMesh], modelRef, subscriptsMesh, subscriptMap);
 	return new AllBuildings(meshes, iconMesh, iconTexture, [beltCargosMesh, inserterCargosMesh], modelRef, subscriptsMesh, subscriptMap);
 }
 
@@ -508,6 +570,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:selectedBuildingIndex', index: number | null): void,
   (e: 'clickEmpty'): void,
+  (e: 'update:selectedBuildingIndex', index: number | null): void,
+  (e: 'clickEmpty'): void,
 }>()
 
 const scene = new Scene();
@@ -520,6 +584,17 @@ scene.add(dirLight);
 	const planet = new Mesh(geometry, material);
 	scene.add(planet);
 }
+const { grids: planetGrid, material: gridMaterial } = buildPlanetGrid(R * 1.0001, SEGMENT);
+scene.add(planetGrid);
+
+const placement = usePlacement();
+// 网格线随模式变色：预览原色 / 编辑绿 / 删除红
+watchEffect(() => {
+	if (placement.appMode === 'edit')
+		gridMaterial.color.set(placement.mode === 'deleting' ? 0xff5050 : 0x50fa50);
+	else
+		gridMaterial.color.set(0xf0f0f0);
+});
 const { grids: planetGrid, material: gridMaterial } = buildPlanetGrid(R * 1.0001, SEGMENT);
 scene.add(planetGrid);
 
@@ -558,6 +633,7 @@ const b = computed(() => {
     const bvh = buildBVH(transforms, d.buildings);
     const reforms = buildReforms(R, pos, d.reformData);
     registerUpdater(commandQueue.value.updater, buildings, pos);
+	return { buildings, bvh, reforms, pos };
 	return { buildings, bvh, reforms, pos };
 });
 
@@ -848,12 +924,22 @@ onMounted(() => {
 	const RAD_TO_GRID = GRID_SIZE / (2 * Math.PI);
 
 	const setupRay = (e: MouseEvent) => {
+	const GRID_SIZE = 1000; // 200 segments * 5 grids/segment
+	const RAD_TO_GRID = GRID_SIZE / (2 * Math.PI);
+
+	const setupRay = (e: MouseEvent) => {
 		ray.origin.setFromMatrixPosition(camera.matrixWorld);
 		const rect = renderer.domElement.getBoundingClientRect();
 		ray.direction.x = ((e.clientX - rect.left) / rect.width ) * 2 - 1;
 		ray.direction.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+		ray.direction.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 		ray.direction.z = .5;
 		ray.direction.unproject(camera).sub(ray.origin).normalize();
+	}
+	const pickBuilding = (e: MouseEvent) => {
+		if (b.value === null)
+			return null;
+		setupRay(e);
 	}
 	const pickBuilding = (e: MouseEvent) => {
 		if (b.value === null)
@@ -1027,6 +1113,42 @@ onMounted(() => {
 	/** Delete building at clicked position */
 	const deleteBuilding = (e: MouseEvent) => {
 		const index = pickBuilding(e);
+		if (sorterSource.value === null) {
+			if (index !== null)
+				sorterSource.value = index;
+			return;
+		}
+		const src = sorterSource.value;
+		sorterSource.value = null;
+		if (index === null || index === src || placement.selectedItemId === null || placement.selectedModelIndex === null)
+			return;
+		const sorter = createSorterBetween(
+			queue.data.buildings[src], queue.data.buildings[index],
+			placement.selectedItemId, placement.selectedModelIndex,
+		);
+		if (sorter)
+			queue.push(new CreateBuildingCommand(sorter));
+	}
+	const onMouseUp = (e: MouseEvent) => {
+		if (isPlacingBelt() && beltStart !== null)
+			commitBeltLine(e);
+	}
+	const onPointerMove = (e: MouseEvent) => {
+		lastMouseEvent = e;
+		if (isPlacingBelt() && beltStart !== null)
+			updateBeltPreview(beltStart, e);
+		else
+			updatePreview(e);
+	}
+	const onMouseLeave = () => { lastMouseEvent = null; previewVisible.value = false; };
+	// 鼠标静止时，键盘切换建筑 / R 旋转 / Shift 吸附变化也要刷新预览
+	watchEffect(() => {
+		if (lastMouseEvent)
+			updatePreview(lastMouseEvent);
+	});
+	/** Delete building at clicked position */
+	const deleteBuilding = (e: MouseEvent) => {
+		const index = pickBuilding(e);
 		if (index === null)
 			return;
 		const queue = commandQueue.value;
@@ -1103,6 +1225,73 @@ onMounted(() => {
 		rootEl.removeEventListener('mouseleave', onMouseLeave);
 	});
 
+	// Drag threshold: distinguish click from drag.
+	// Listen on rootEl (parent div) — events bubble from canvas, unaffected by
+	// PlanetMapControls' setPointerCapture which only captures pointer events.
+	const DRAG_THRESHOLD = 4;
+	let downPos: { x: number, y: number } | null = null;
+	const onMouseDown = (e: MouseEvent) => {
+		downPos = { x: e.clientX, y: e.clientY };
+		if (isPlacingBelt())
+			beltStart = placementOffset(e);
+	}
+	const onClick = (e: MouseEvent) => {
+		if (downPos === null)
+			return;
+		const dx = e.clientX - downPos.x;
+		const dy = e.clientY - downPos.y;
+		downPos = null;
+		// 传送带在 mouseup 已整条提交，click 忽略（拖拽位移也合法）
+		if (isPlacingBelt())
+			return;
+		if (dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD)
+			return; // was a drag, not a click
+		// Left click: place / delete / select
+		if (placement.mode === 'placing') {
+			if (isPlacingSorter())
+				pickSorterPoint(e);
+			else
+				placeBuilding(e);
+		}
+		else if (placement.mode === 'deleting')
+			deleteBuilding(e);
+		else {
+			const index = pickBuilding(e);
+			if (index === null)
+				emit('clickEmpty');
+			emit('update:selectedBuildingIndex', index);
+		}
+	}
+	const onContextMenu = (e: MouseEvent) => {
+		// Right click: exit placement/deleting mode (PlanetMapControls already
+		// preventDefault on canvas; this fires via bubbling)
+		// 预览模式：右键直接删除鼠标所指建筑
+    if (placement.appMode === 'preview') {
+        e.preventDefault();
+        deleteBuilding(e);         // 内部已 emit(selectedBuildingIndex, null)
+        return;
+    }
+    // 编辑模式：原行为 —— 退出 placing/deleting
+    if (placement.mode !== 'idle') {
+        e.preventDefault();
+        resetToIdle();
+    }
+	}
+	rootEl.addEventListener('mousedown', onMouseDown);
+	rootEl.addEventListener('mouseup', onMouseUp);
+	rootEl.addEventListener('click', onClick);
+	rootEl.addEventListener('contextmenu', onContextMenu);
+	rootEl.addEventListener('pointermove', onPointerMove);
+	rootEl.addEventListener('mouseleave', onMouseLeave);
+	onUnmounted(() => {
+		rootEl.removeEventListener('mousedown', onMouseDown);
+		rootEl.removeEventListener('mouseup', onMouseUp);
+		rootEl.removeEventListener('click', onClick);
+		rootEl.removeEventListener('contextmenu', onContextMenu);
+		rootEl.removeEventListener('pointermove', onPointerMove);
+		rootEl.removeEventListener('mouseleave', onMouseLeave);
+	});
+
 	let mounted = true;
 	onUnmounted(() => { mounted = false; });
 	let lastTimeStamp : number | null = null
@@ -1111,6 +1300,11 @@ onMounted(() => {
 			return;
 		if (lastTimeStamp) {
 			c.updateTimeDelta((time - lastTimeStamp) / 1000);
+		}
+		if (b.value?.buildings.cargos) {
+			const move = (time % 1000) / 1000;
+			for (const c of b.value.buildings.cargos)
+				c.cargoMove = move;
 		}
 		if (b.value?.buildings.cargos) {
 			const move = (time % 1000) / 1000;
