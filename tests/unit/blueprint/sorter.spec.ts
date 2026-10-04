@@ -1,8 +1,15 @@
 import { BlueprintBuilding } from '@/blueprint/parser';
 import { createBuilding } from '@/blueprint/create';
-import { createSorterBetween } from '@/blueprint/sorter';
+import { createSorterBetween, beltOffsetFromMain } from '@/blueprint/sorter';
 import { isBelt, isInserter } from '@/data/items';
 import { getBuildingSlots, findNearestSlot, findNearestFreeSlot } from '@/data/buildingSlots';
+
+/** 创建测试用建筑（index 由调用方设置） */
+function makeBuildingAt(
+    itemId: number, modelIndex: number, x: number, y: number, yaw = 0,
+): BlueprintBuilding {
+    return createBuilding(itemId, modelIndex, { x, y }, yaw);
+}
 
 describe('buildingSlots', () => {
     test('assembler 2303 has 12 slots', () => {
@@ -12,6 +19,18 @@ describe('buildingSlots', () => {
 
     test('unknown building returns empty slots', () => {
         expect(getBuildingSlots(9999)).toEqual([]);
+    });
+
+    test('same-model tiers share the calibrated slot table', () => {
+        // 制造台 Mk.II/III/IV 与 Mk.I 同选择盒（4.2 格）→ 复用 slot 表
+        expect(getBuildingSlots(2304).length).toBe(12);
+        expect(getBuildingSlots(2305).length).toBe(12);
+        expect(getBuildingSlots(2305)[10]).toEqual(getBuildingSlots(2303)[10]);
+        // 位面熔炉 / 熔炉 Mk.III 复用 2302；研究站 Mk.II 复用 2901
+        expect(getBuildingSlots(2315)).toEqual(getBuildingSlots(2302));
+        expect(getBuildingSlots(2319)).toEqual(getBuildingSlots(2302));
+        expect(getBuildingSlots(2902)).toEqual(getBuildingSlots(2901));
+        expect(getBuildingSlots(2301)).toEqual([]);   // 采矿机尚未收录
     });
 
     test('findNearestSlot returns correct slot for top-center', () => {
@@ -125,8 +144,8 @@ describe('createSorterBetween', () => {
         expect(sorter.outputObjIdx).toBe(1);
         expect(sorter.inputFromSlot).toBeGreaterThanOrEqual(0);  // 建筑 slot
         expect(sorter.outputToSlot).toBe(-1);  // 皮带端固定 -1
-        expect(sorter.outputOffset).toBeGreaterThanOrEqual(-5);
-        expect(sorter.outputOffset).toBeLessThanOrEqual(4);
+        expect(sorter.outputOffset).toBeGreaterThanOrEqual(-10);
+        expect(sorter.outputOffset).toBeLessThanOrEqual(10);
     });
 
     test('belt to assembler (belt to slot)', () => {
@@ -143,8 +162,8 @@ describe('createSorterBetween', () => {
         expect(sorter.outputObjIdx).toBe(1);
         expect(sorter.inputFromSlot).toBe(-1);  // 皮带端固定 -1
         expect(sorter.outputToSlot).toBeGreaterThanOrEqual(0);  // 建筑 slot
-        expect(sorter.inputOffset).toBeGreaterThanOrEqual(-5);
-        expect(sorter.inputOffset).toBeLessThanOrEqual(4);
+        expect(sorter.inputOffset).toBeGreaterThanOrEqual(-10);
+        expect(sorter.inputOffset).toBeLessThanOrEqual(10);
         expect(sorter.outputOffset).toBe(0);  // 建筑端无 offset
     });
 
@@ -160,10 +179,10 @@ describe('createSorterBetween', () => {
 
         expect(sorter.inputFromSlot).toBe(-1);
         expect(sorter.outputToSlot).toBe(-1);
-        expect(sorter.inputOffset).toBeGreaterThanOrEqual(-5);
-        expect(sorter.inputOffset).toBeLessThanOrEqual(4);
-        expect(sorter.outputOffset).toBeGreaterThanOrEqual(-5);
-        expect(sorter.outputOffset).toBeLessThanOrEqual(4);
+        expect(sorter.inputOffset).toBeGreaterThanOrEqual(-10);
+        expect(sorter.inputOffset).toBeLessThanOrEqual(10);
+        expect(sorter.outputOffset).toBeGreaterThanOrEqual(-10);
+        expect(sorter.outputOffset).toBeLessThanOrEqual(10);
     });
 
     test('too far returns null', () => {
@@ -314,11 +333,9 @@ describe('createSorterBetween', () => {
             belt1.index = 0;
             belt2.index = 1;
 
-            // 构造一个虚拟分拣器占满 belt1 的全部 13 档 offset
-            const blocker = createBuilding(2011, 0, { x: 0, y: 0 }, 0);
-            blocker.index = 99;
+            // 皮带可连接分段为 -10 .. 10 共 21 档（±半格 × 每格 21 段），全部占满 → 拒绝
             const placed: BlueprintBuilding[] = [belt1, belt2];
-            for (const o of [-10, -8, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 7, 10]) {
+            for (let o = -10; o <= 10; o++) {
                 const fake = createBuilding(2011, 0, { x: 0, y: 0 }, 0);
                 fake.index = 100 + o + 10;
                 fake.inputObjIdx = 0;  // 指向 belt1
@@ -492,3 +509,239 @@ describe('createSorterBetween', () => {
         });
     });
 });
+
+/**
+ * 以下用例按真实蓝图 tests/tools/分拣器.txt（游戏 0.10.35）标定的规则编写：
+ * 建筑端端点 = slot 坐标；皮带端端点 = 轴线与皮带中心线交点；offset = floor(main × 21)。
+ * 坐标取自该蓝图中制造台 Mk.I（2303，中心 (13,11)）与周边皮带的实际布局。
+ */
+describe('blueprint-calibrated rules (分拣器.txt)', () => {
+    /** 制造台 Mk.I：modelIndex 65，选择盒 4.2 格 */
+    function assembler(x: number, y: number, yaw = 0) {
+        return makeBuildingAt(2303, 65, x, y, yaw);
+    }
+    /** 低速传送带：modelIndex 35 */
+    function belt(x: number, y: number, yaw: number) {
+        return makeBuildingAt(2001, 35, x, y, yaw);
+    }
+
+    describe('belt offset encoding', () => {
+        test.each([
+            [0, 0],
+            [0.0025, 0],
+            [-0.0025, -1],
+            [0.1865, 3],          // 3/21 = 0.1429 ≤ x < 4/21 = 0.1905
+            [0.1907, 4],
+            [-0.1865, -4],
+            [-0.1907, -5],
+            [0.2075, 4],
+            [-0.2075, -5],
+            [0.476, 9],
+            [0.5, 10],            // 上限截断
+            [-0.5, -10],
+        ])('main %f → offset %i', (main, expected) => {
+            expect(beltOffsetFromMain(main)).toBe(expected);
+        });
+    });
+
+    describe('building → belt (#0 in 分拣器.txt)', () => {
+        // 制造台 (13,11) → 皮带 (11,12) yaw=180（皮带向 -y 走）
+        test('slot 11 endpoint + belt centerline projection + offset 4', () => {
+            const asm = assembler(13, 11);
+            const dst = belt(11, 12, 180);
+            asm.index = 0;
+            dst.index = 1;
+
+            const s = createSorterBetween(asm, dst, 2011, 41, [asm, dst], {
+                src: { x: 12, y: 12 },   // 点击落在 y=12 行 → slot 11（+0.7955）
+            })!;
+            expect(s).not.toBeNull();
+            expect(s.inputFromSlot).toBe(11);
+            expect(s.inputOffset).toBe(0);
+            expect(s.outputToSlot).toBe(-1);
+            expect(s.outputOffset).toBe(4);
+            expect(s.inputToSlot).toBe(1);
+            expect(s.outputFromSlot).toBe(0);
+            expect((s.parameters as { length: number }).length).toBe(1);
+            expect(s.yaw[0]).toBe(270);
+            // 建筑端 = 建筑中心 + slot 11 局部坐标 (yaw=0)
+            expect(s.localOffset[0].x).toBeCloseTo(13 - 0.8916, 3);
+            expect(s.localOffset[0].y).toBeCloseTo(11 + 0.7955, 3);
+            // 皮带端 = 轴线与皮带中心线交点（皮带中心 (11,12)，主轴投影 +0.2045）
+            expect(s.localOffset[1].x).toBeCloseTo(11, 3);
+            expect(s.localOffset[1].y).toBeCloseTo(11.7955, 3);
+        });
+
+        test('click row selects the slot (#56 / #15 in 分拣器.txt)', () => {
+            const asm = assembler(13, 11);
+            asm.index = 0;
+            // #56：点击 y=11 行 → slot 10（左列中间），挂到同排皮带 (11,11)，offset -1
+            const beltMiddle = belt(11, 11, 180);
+            beltMiddle.index = 1;
+            const middle = createSorterBetween(asm, beltMiddle, 2011, 41,
+                [asm, beltMiddle], { src: { x: 12, y: 11 } })!;
+            expect(middle).not.toBeNull();
+            expect(middle.inputFromSlot).toBe(10);
+            expect(middle.outputOffset).toBe(-1);
+
+            // #15：点击 y=10 行 → slot 9（左列偏下），挂到 (11,10)，offset -5
+            const beltLower = belt(11, 10, 180);
+            beltLower.index = 2;
+            const lower = createSorterBetween(asm, beltLower, 2011, 41,
+                [asm, beltLower], { src: { x: 12, y: 10 } })!;
+            expect(lower).not.toBeNull();
+            expect(lower.inputFromSlot).toBe(9);
+            expect(lower.outputOffset).toBe(-5);
+        });
+
+        test('anchor row that cannot reach the belt falls back to the belt row', () => {
+            const asm = assembler(13, 11);
+            const dst = belt(11, 12, 180);
+            asm.index = 0;
+            dst.index = 1;
+            // 锚点落在 y=11 行（slot 10 → 轴线 y≈11.0）时皮带 (11,12) 在另一格、无法挂接，
+            // 此时忽略锚点用"对端中心"基准重试 → 自动选到能连上的 slot 11（与游戏结果一致）
+            const s = createSorterBetween(asm, dst, 2011, 41, [asm, dst],
+                { src: { x: 12, y: 11 } })!;
+            expect(s).not.toBeNull();
+            expect(s.inputFromSlot).toBe(11);
+            expect(s.outputOffset).toBe(4);
+        });
+    });
+
+    describe('belt → building (#10 in 分拣器.txt)', () => {
+        test('destination slot from source lateral + belt offset -1', () => {
+            const src = belt(4, 11, 180);
+            const dst = assembler(2, 11);
+            src.index = 0;
+            dst.index = 1;
+
+            const s = createSorterBetween(src, dst, 2011, 41, [src, dst])!;
+            expect(s).not.toBeNull();
+            expect(s.inputFromSlot).toBe(-1);
+            expect(s.inputOffset).toBe(-1);     // main = -0.0005 → floor(-0.0105) = -1
+            expect(s.outputToSlot).toBe(4);     // 右列中间
+            expect(s.outputOffset).toBe(0);
+            expect(s.localOffset[1].x).toBeCloseTo(2 + 0.8925, 3);
+            expect(s.localOffset[0].x).toBeCloseTo(4, 3);
+            expect(s.yaw[0]).toBe(270);
+        });
+    });
+
+    describe('building ↔ building (#12 / #16 in 分拣器.txt)', () => {
+        test('#12: lateral -0.794 slot row on both ends, len 2', () => {
+            const src = assembler(27, 11);
+            const dst = assembler(23, 11);
+            src.index = 0;
+            dst.index = 1;
+
+            const s = createSorterBetween(src, dst, 2011, 41, [src, dst], {
+                src: { x: 26, y: 10 },
+                dst: { x: 24, y: 10 },
+            })!;
+            expect(s).not.toBeNull();
+            expect(s.inputFromSlot).toBe(9);
+            expect(s.outputToSlot).toBe(5);
+            expect((s.parameters as { length: number }).length).toBe(2);
+            expect(s.localOffset[0].y).toBeCloseTo(11 - 0.7945, 3);
+            expect(s.localOffset[1].y).toBeCloseTo(11 - 0.7945, 3);
+            expect(s.localOffset[0].x).toBeCloseTo(27 - 0.8934, 3);
+            expect(s.localOffset[1].x).toBeCloseTo(23 + 0.8934, 3);
+        });
+
+        test('#16: reverse direction uses the mirrored slot row', () => {
+            const src = assembler(23, 11);
+            const dst = assembler(27, 11);
+            src.index = 0;
+            dst.index = 1;
+
+            const s = createSorterBetween(src, dst, 2011, 41, [src, dst], {
+                src: { x: 24, y: 12 },
+                dst: { x: 26, y: 12 },
+            })!;
+            expect(s).not.toBeNull();
+            expect(s.inputFromSlot).toBe(3);
+            expect(s.outputToSlot).toBe(11);
+            expect(s.yaw[0]).toBe(90);
+            expect((s.parameters as { length: number }).length).toBe(2);
+        });
+
+        test('default (no anchor) picks the middle slot row', () => {
+            const src = assembler(27, 11);
+            const dst = assembler(23, 11);
+            src.index = 0;
+            dst.index = 1;
+
+            const s = createSorterBetween(src, dst, 2011, 41, [src, dst])!;
+            expect(s).not.toBeNull();
+            expect([4, 10]).toContain(s.inputFromSlot);
+            expect([4, 10]).toContain(s.outputToSlot);
+        });
+    });
+
+    describe('axis and cell rules', () => {
+        test('axis comes from the dominant cell delta (not the exact center line)', () => {
+            // Δ = (-2, +1)：主轴 -x，斜向偏差由 slot 横向坐标吸收
+            const asm = assembler(13, 11);
+            const dst = belt(11, 12, 180);
+            asm.index = 0;
+            dst.index = 1;
+            const s = createSorterBetween(asm, dst, 2011, 41, [asm, dst])!;
+            expect(s).not.toBeNull();
+            expect(s.yaw[0]).toBe(270);
+        });
+
+        test('45° diagonal (equal cell deltas) is rejected', () => {
+            const asm = assembler(13, 11);
+            const dst = belt(11, 13, 180);
+            asm.index = 0;
+            dst.index = 1;
+            expect(createSorterBetween(asm, dst, 2011, 41, [asm, dst])).toBeNull();
+        });
+
+        test('axis parallel to the belt: endpoint falls back to the belt cell center', () => {
+            // 皮带 (0,0) yaw=90（向 +x 走）正对建筑 (3,0)：轴线与皮带方向平行
+            const src = belt(0, 0, 90);
+            const dst = assembler(3, 0);
+            src.index = 0;
+            dst.index = 1;
+
+            const s = createSorterBetween(src, dst, 2011, 41, [src, dst])!;
+            expect(s).not.toBeNull();
+            expect(s.localOffset[0].x).toBeCloseTo(0, 6);
+            expect(s.localOffset[0].y).toBeCloseTo(0, 6);
+            expect(s.inputOffset).toBe(0);
+            expect(s.outputToSlot).toBe(10);          // 建筑 -x 面中间 slot
+            expect((s.parameters as { length: number }).length).toBe(2);
+        });
+
+        test('building↔building with mismatched lateral slot rows is rejected', () => {
+            // 沿 +y 相隔 3 格、横向错开 2 格：主轴 +y，但两端 slot 横向差 ≈2 格
+            // （游戏里分拣器只沿主轴架接，横向差这么大的连线必然是斜向）→ 拒绝
+            const src = assembler(0, 0);
+            const dst = assembler(2, 3);
+            src.index = 0;
+            dst.index = 1;
+            expect(createSorterBetween(src, dst, 2011, 65, [src, dst])).toBeNull();
+        });
+
+        test('lateral offset is measured in a single global frame', () => {
+            // 轴向隔 3 格、横向错 2 格：两端 slot 横向差 ≈0.41 格（超出容差）→ 拒绝
+            const a = assembler(0, 0);
+            const b = assembler(3, 2);
+            a.index = 0; b.index = 1;
+            expect(createSorterBetween(a, b, 2011, 65, [a, b])).toBeNull();
+
+            // 横向错 1 格：算法选到对侧中间 slot，偏差压到 ≈0.20 格 → 允许（轻微斜置）
+            const c = assembler(0, 0);
+            const d = assembler(3, 1);
+            c.index = 0; d.index = 1;
+            const s = createSorterBetween(c, d, 2011, 65, [c, d]);
+            expect(s).not.toBeNull();
+            expect(s!.yaw[0]).toBe(90);
+            expect(s!.inputFromSlot).toBe(3);    // +x 面偏上 slot
+            expect(s!.outputToSlot).toBe(10);    // -x 面中间 slot
+        });
+    });
+});
+

@@ -3,7 +3,7 @@ import { BlueprintData } from "./parser";
 // Root area constants: equator band, segment=200
 const ROOT_SEGMENT = 200;
 const GRID_PER_SEGMENT = 5;
-const ROOT_GRID_SIZE = ROOT_SEGMENT * GRID_PER_SEGMENT; // 1000 grid columns
+export const ROOT_GRID_SIZE = ROOT_SEGMENT * GRID_PER_SEGMENT; // 1000 grid columns
 const ROOT_LATITUDE = -80; // Derived from size.y=161 via findPosForAreas
 
 /**
@@ -89,13 +89,13 @@ export function normalizeBlueprintAreas(bp: BlueprintData): BlueprintData {
         }
     }
     const arcStart = gapStart + maxGap;              // 覆盖弧起点（未取模）
-    const originX = Math.floor(arcStart);
-    // 最远端点映射到 originX + (sizeX - 1) 之内，端点取整坐标时仍需独占一格
-    const sizeX = Math.max(1, Math.floor(arcStart + (ROOT_GRID_SIZE - maxGap)) - originX + 1);
+    // 左右各留一格边距：originX 左移一格，sizeX 在原基础上 +2
+    const originX = Math.floor(arcStart) - 1;
+    const sizeX = Math.max(1, Math.floor(arcStart + (ROOT_GRID_SIZE - maxGap)) - originX + 2);
 
-    // y：赤道居中约束下的最小高度
-    const needLo = Math.max(0, -Math.floor(ys[0]));
-    const needHi = Math.max(0, Math.floor(ys[ys.length - 1]) + 1);
+    // y：赤道居中约束下的最小高度，上下各留一格边距
+    const needLo = Math.max(0, -Math.floor(ys[0]) + 1);
+    const needHi = Math.max(0, Math.floor(ys[ys.length - 1]) + 2);
     const sizeY = Math.max(1, 2 * needLo, 2 * needHi - 1);
     // 新原点纬度 rootAreaLatitude(sizeY)，y' = 绝对纬度 - 新原点纬度 = y + liveLat - newLat
     const dy = liveLat - rootAreaLatitude(sizeY);

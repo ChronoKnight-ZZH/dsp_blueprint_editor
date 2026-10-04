@@ -158,6 +158,20 @@ const battleBase3009: SlotPos[] = [
     { x: -1.8033, y: 0.7974 },   // slot 8
 ];
 
+/**
+ * 同款模型共用 slot 表：这些建筑的 modelIndex 与选择盒尺寸和已标定建筑完全一致，
+ * slot 布局与编号顺序相同（实测偏差 ≤0.05 格，属模型差异），因此直接复用。
+ * 更精确的各等级 slot 坐标待有真实蓝图样本后再单独标定。
+ */
+const slotAliases: Record<number, number> = {
+    2304: 2303, // 制造台 Mk.II（model 66）
+    2305: 2303, // 制造台 Mk.III（model 67）
+    2318: 2303, // 制造台 Mk.IV（model 456）
+    2315: 2302, // 位面熔炉（model 194）
+    2319: 2302, // 熔炉 Mk.III（model 457）
+    2902: 2901, // 矩阵研究站 Mk.II（model 455）
+};
+
 /** itemId → slot 坐标表 */
 const slotTable: Record<number, SlotPos[]> = {
     2101: storage2101,
@@ -183,14 +197,15 @@ const slotTable: Record<number, SlotPos[]> = {
  * @returns slot 坐标数组，无 slot 或未知建筑返回空数组
  */
 export function getBuildingSlots(itemId: number): SlotPos[] {
-    return slotTable[itemId] ?? [];
+    const alias = slotAliases[itemId];
+    return slotTable[alias ?? itemId] ?? [];
 }
 
 /**
  * 判断建筑是否有 slot（可连接分拣器）
  */
 export function hasSlots(itemId: number): boolean {
-    return itemId in slotTable;
+    return getBuildingSlots(itemId).length > 0;
 }
 
 /**
@@ -219,7 +234,7 @@ export function findNearestSlot(itemId: number, localX: number, localY: number):
  * 按离建筑中心较远的主轴及其符号分组——同侧 slot 的坐标矢量互相平行，
  * 游戏中它们挂在同一连接面上，可互相替代。
  */
-function slotGroup(s: SlotPos): number {
+export function slotGroup(s: SlotPos): number {
     if (Math.abs(s.x) >= Math.abs(s.y))
         return s.x >= 0 ? 0 : 1;
     return s.y >= 0 ? 2 : 3;

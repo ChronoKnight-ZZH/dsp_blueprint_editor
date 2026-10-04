@@ -9,7 +9,6 @@ import {
     MonitorParameters, BattleBaseParameters, DispenserParameters,
     UnknownParamerters, LogisticRole,
     ResearchMode, AcceleratorMode,
-    BeltParameters,
 } from './parser';
 import { allAssemblers } from '@/data/items';
 
@@ -40,8 +39,7 @@ export function defaultParamsFor(itemId: number, _modelIndex: number): AllParame
         case 2001:
         case 2002:
         case 2003:
-            return { iconId: 0, count: 0 } as BeltParameters;
-            // return null;
+            return null;
         // 分拣器
         case 2011:
         case 2012:

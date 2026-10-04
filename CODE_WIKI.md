@@ -216,6 +216,10 @@
 | `setBeaconContent.ts` | `SetBeaconContentCommand`：修改全息信标（itemId=2401）`content` 文本字段，`silent=true` 不触发 3D 重建；`merge` 合并对同一建筑的连续编辑。 |
 | `reform.ts` | 地基（reformData）3D 渲染层：`Reforms extends Group` + `buildReforms`，把 `BlueprintReformData` 渲染为工字铺（IBEAM）/ 直铺（PLAIN）/ 网格（GRID）+ 自定义颜色（共享 CanvasTexture 与 InstancedMesh）。 |
 | `removeBuilding.ts` | `RemoveBuildingsCommand` / `RemoveBuildingCommand` / `RemoveBuildingsByItemCommand`：删除建筑并维护 index 与交叉引用。 |
+| `area.ts` | 编辑期区域坐标：`planetToLocal / localToPlanet / ensureAreaFor`（放置时扩张根区域）与 `normalizeBlueprintAreas`（导出时把根区域收缩到实际建筑区间，环形经度取最小覆盖弧）。 |
+| `create.ts` | 新建蓝图与入库：`createEmptyBlueprint`（根区域 size 10×161 的临时画布）、`createBuilding`（最小合法 v2 记录）、`CreateBuildingCommand`。 |
+| `beltLine.ts` | 传送带铺线：`rasterizeLine`（latFirst / lonFirst / straight 三种走法）、`buildBeltLine`（逐格算 yaw）、`CreateBeltLineCommand`（整条一次撤销 + 内部串联）。 |
+| `sorter.ts` | 分拣器连接构造：`createSorterBetween`（建筑↔建筑 / 建筑↔皮带 / 皮带↔皮带 / 分流器），规则见 §6.12。 |
 
 ### 5.2 命令与状态层 `src/`
 
@@ -437,6 +441,31 @@
 - `merge()` 恒返回 `false`。
 - **典型用法**：`ReplaceModal.vue` 在勾选"配方"范围并选了具体加速模式时，先 `push(new ReplaceCommand(...))`，再读取 `replaceCmd.recipeBuildings.map(b => b.index)` 作为 `buildingIndexes` 推送 `SetAcceleratorCommand`，从而只对刚被替换配方的建筑翻转加速模式，避免影响其它建筑。
 
+### 6.12 `blueprint/sorter.ts` 分拣器连接构造
+
+`createSorterBetween(src, dst, itemId, modelIndex, buildings?, anchors?)`：在两端已有对象之间构造一根分拣器（尚未入库，由 `CreateBuildingCommand` 落地）。
+
+**真实蓝图标定的连接规则**（标定样本：`tests/tools/分拣器.txt`，0.10.35，29 根分拣器；另有 `starting_base_01029` / `sorter_belt_replay` 共 122 条皮带端样本）：
+
+| 量 | 规则 |
+| --- | --- |
+| 主轴 | 由两端对象**整格差**的主分量决定（如制造台 (13,11) → 皮带 (11,12)：Δ=(-2,+1) → 沿 -x）；整格差为 45° 时主轴不唯一 → 拒绝 |
+| 建筑端端点 | = 该建筑某个 **slot 的坐标**（`buildingSlots`，按建筑 yaw 旋转）。slot = 朝向对端的面 + 横向坐标离目标最近者；被占用时同面切换到最近空闲 slot |
+| 皮带端端点 | = **轴线与皮带中心线的交点**（把对端端点投影到皮带中心线上）；轴线与皮带方向近似平行（<26°）时投影退化，取皮带格中心 |
+| 皮带 `offset` | `floor(main × 21)`，`main` = 端点在皮带方向上相对皮带中心的投影（格），合法区间 −10..10（±半格）；≈0 的浮点噪声归零，被占用时平移到最近空闲分段中心 |
+| `length` | `round(两端点距离)`，必须落在 1–3 |
+| `yaw` | `yaw[0]` = 主轴整数角（0/90/180/270），`yaw[1]`/`tilt` = 0（游戏值带 ±0.3° 球面噪声） |
+| slot 字段 | 分拣器自身 `inputToSlot=1 / outputFromSlot=0`；建筑端 slot 0–11 且 offset 0；皮带/分流器端 slot −1 |
+| `v2ExtraPose` | `[pose0, tip.x, tip.y, tip.z, yaw0, tilt, yaw1]`，`pose0` 复现游戏"输入端为建筑时 ≈0.20118，为皮带时 ≈0" |
+
+**点击锚点**（`SorterAnchors`，`src`/`dst` 为连续网格坐标）：与游戏一致，光标落在哪一列/哪一行就决定挂哪个 slot。缺省时以"对端中心"为横向基准。按锚点无解时会**忽略锚点重试一次**（例如点源建筑正中、而目标皮带在相邻一行）。
+
+**拒绝放置**（返回 `null`，编辑器预览显示红线）：两端同对象 / 45° 斜向 / 建筑 slot 面全占用 / 分流器口已被引用 / 皮带端落在皮带格之外 / 长度超出 1–3 / 建筑↔建筑两端 slot 横向偏差 > 0.35 格 / 端点重复（含反向）或与已有分拣器共线压叠。
+
+**相关常量**：`BELT_SEGMENTS_PER_CELL = 21`、`ROOT_HAND_REST_OFFSET ≈ 0.20118`、`SLOT_LATERAL_TOLERANCE = 0.35`、`FACE_CAP = 0.9`、`ENDPOINT_INSET = 0.2`（后两者用于无 slot 数据的建筑端）。`collectOccupiedSlots` 供 UI 给 slot 标记染色。
+
+**UI 接入**（`BlueprintEditor.vue`）：`anchorOffset(e)` 把屏幕位置转成连续网格坐标（命中建筑时用建筑表面命中点径向投影回球面），第一次点击记下 `sorterSourceAnchor`、悬停时记下 `sorterHoverAnchor`，预演与实际放置都把它们传给 `createSorterBetween`。
+
 ---
 
 ## 7. 蓝图二进制格式与参数编解码
@@ -640,8 +669,10 @@ python3 i18n.py ... -o ../locales     # 生成 zh/en locale
 | `setBuildingRecipe.spec.ts` | 单体配方/研究模式命令的 do/undo 与 silent 性质、merge 行为。 |
 | `normalizeArea.spec.ts` | `normalizeBlueprintAreas`：远处成簇收缩、跨 0 经线取最小弧、北半球赤道居中、单建筑 1×1；校验入参不被修改。 |
 | `stats.spec.ts` | `calculateProductionStats`：分馏塔特例、普通配方建筑、增产剂各等级倍率与自身消耗、研究站科研模式。 |
+| `sorter.spec.ts` | 分拣器连接：slot 表与同款模型复用、slot 占用切换、皮带 `offset = floor(main×21)` 编码、建筑↔皮带 / 建筑↔建筑端点、主轴与 45° 拒绝、分流器口唯一性、重复/重叠拒绝、点击锚点选 slot。 |
+| `sorter_replay.spec.ts` | 真实蓝图全量复现：`sorter_belt_replay`（3 根皮带↔皮带）与 `sorter_building_belt_replay`（29 根建筑/皮带混合，`tests/tools/分拣器.txt` 的副本）逐字段比对。 |
 
-fixtures 位于 `tests/unit/blueprint/fixtures/`：除原有蓝图外新增 `starting_base_01029.txt`（0.10.29 老版本基地）、`foundation_only_99.txt`、`facilities_with_foundation_320.txt`。
+fixtures 位于 `tests/unit/blueprint/fixtures/`：除原有蓝图外新增 `starting_base_01029.txt`（0.10.29 老版本基地）、`foundation_only_99.txt`、`facilities_with_foundation_320.txt`、`sorter_belt_replay.txt`、`sorter_building_belt_replay.txt`。调试/标定脚本位于 `tests/tools/`（`parseBlueprint.ts` 蓝图→JSON、`sorterReplay.ts` 分拣器连接复现比对、`dumpBuildings.ts` 紧凑建筑表、`fitBeltOffset.ts` 皮带 offset 分段数拟合），样本 `分拣器.txt` 为游戏 0.10.35 实测蓝图。
 
 ### 12.3 运行
 
@@ -755,6 +786,9 @@ cat blueprint.txt | yarn cli > bp.json
 | `SetAcceleratorCommand` | 批量设置加速模式命令：作用于含 `acceleratorMode` 字段的建筑（制造台/熔炉/精炼厂/化工厂/对撞机/研究站）；`ReplaceModal` 在替换配方后用它顺带翻转模式。 |
 | `AcceleratorMode` | 加速模式枚举：`Accelerate`=生产加速、`ExtraOutput`=额外产出；由 `assembleParamParser`/`labParamParser` 编解码。 |
 | `dispatchIconUpdate` | `UpgradeCommand` 内部的图标刷新分流函数，避免传送带/分拣器走错通道抛 `'No icon to update'`。 |
+| `createSorterBetween` | 分拣器连接构造（§6.12）：主轴取两端整格差的主分量，建筑端端点落 slot、皮带端落在轴线与皮带中心线交点，皮带 `offset = floor(main × 21)`，`length = round(端点距)`。 |
+| `BELT_SEGMENTS_PER_CELL` | 21：皮带每格内部分段数（真实蓝图反推）；皮带端 offset 合法区间 −10..10（±半格）。 |
+| `SorterAnchors` | 分拣器点击锚点：光标所在列/行决定挂哪个建筑 slot；按锚点无解时忽略锚点重试一次（退回对端中心基准）。 |
 
 ---
 

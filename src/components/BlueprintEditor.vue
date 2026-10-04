@@ -6,7 +6,7 @@
 import {
 	Group, LineSegments, InstancedMesh, WebGLRenderer,
 	LineBasicMaterial, MeshStandardMaterial, MeshLambertMaterial, MeshBasicMaterial, CylinderGeometry, BoxGeometry,
-	Matrix4, DirectionalLight, Vector3, Object3D, Color, Ray, Sphere, Vector2, Mesh,
+	Matrix4, DirectionalLight, Vector3, Object3D, Color, Ray, Sphere, Vector2, Mesh, Line, BufferGeometry, Float32BufferAttribute,
 } from 'three';
 import { SphereLatitudeGridGeometry, SphereLongitudeGridGeometry } from '@/SphereGridGeometry';
 import { findPosForAreas, gridAreas, calcBuildingTrans, PositionedBlueprint } from '@/blueprint/planet';
@@ -497,7 +497,7 @@ import { attachCamera, attachRenderer } from '@/utils';
 import { usePlacement, resetToIdle } from '@/editor/placementState';
 import { planetToLocal } from '@/blueprint/area';
 import { createBuilding, CreateBuildingCommand } from '@/blueprint/create';
-import { buildBeltLine, CreateBeltLineCommand, rasterizeLine } from '@/blueprint/beltLine';
+import { buildBeltLine, CreateBeltLineCommand, rasterizeLine, type BeltPathMode } from '@/blueprint/beltLine';
 import { createSorterBetween, collectOccupiedSlots } from '@/blueprint/sorter';
 import { getBuildingSlots } from '@/data/buildingSlots';
 
@@ -627,6 +627,13 @@ const isPlacingSorter = () => placement.appMode === 'edit' && placement.mode ===
 let beltStart: { x: number, y: number } | null = null;
 const sorterSource = ref<number | null>(null);
 
+// 传送带路径走法（R 键循环切换）：latFirst → lonFirst → straight → latFirst
+let beltPathMode: BeltPathMode = 'latFirst';
+const BELT_PATH_MODES: BeltPathMode[] = ['latFirst', 'lonFirst', 'straight'];
+// 实际切换函数在 onMounted 内部定义（需访问 lastMouseEvent/updateBeltPreview），
+// 此处用 ref 桥接供 defineExpose 调用
+const cycleBeltPathModeFn = ref<(() => BeltPathMode) | null>(null);
+
 // 整条传送带的拖拽预览（复用实例网格，count 随路径变化）
 const BELT_PREVIEW_CAP = 1024;
 const beltPreviewMesh = new InstancedMesh(
@@ -644,12 +651,30 @@ watchEffect(() => {
     else
         scene.remove(beltPreviewMesh);
 });
+
+// straight 模式预览：矢量直线（非阶梯状位图）
+const beltStraightLine = new Line(
+    new BufferGeometry(),
+    new LineBasicMaterial({ color: 0x50fa50, opacity: 0.8, transparent: true }),
+);
+beltStraightLine.renderOrder = 10;
+const beltStraightLineVisible = ref(false);
+watchEffect(() => {
+    if (isPlacingBelt() && beltStraightLineVisible.value)
+        scene.add(beltStraightLine);
+    else
+        scene.remove(beltStraightLine);
+});
 function hideBeltPreview() {
     beltPreviewMesh.count = 0;
     beltPreviewVisible.value = false;
+    beltStraightLineVisible.value = false;
 }
 
-// 分拣器第一点（源建筑）高亮
+// 分拣器第一点（源建筑）高亮 / 点击锚点（决定挂哪个 slot，与游戏光标一致）
+let sorterSourceAnchor: { x: number, y: number } | null = null;
+// 悬停锚点用 ref：鼠标在同一建筑内移动时也要驱动 slot 预演刷新
+const sorterHoverAnchor = ref<{ x: number, y: number } | null>(null);
 const sorterSrcBox = new Mesh(
     new BoxGeometry(1, 1, 1),
     new MeshBasicMaterial({ color: 0x50fa50, opacity: 0.3, transparent: true, depthWrite: false }),
@@ -685,7 +710,7 @@ const SLOT_COLORS = {
     target: new Color(0xffd700), // 本次将连接（含被占后切换到的平行 slot）
 };
 
-// 皮带可连接范围（沿主轴 ±0.5 格，与 computeBeltOffset 的 mainOffset 区间对应）
+// 皮带可连接范围（沿主轴 ±0.5 格 = offset ±10 段，与 sorter.ts 的 main 区间一致）
 const beltRangeMesh = new Mesh(
     new BoxGeometry(0.1, 1.0, 0.1),
     new MeshBasicMaterial({ color: 0x40c8ff, transparent: true, opacity: 0.7, depthTest: false }),
@@ -758,6 +783,10 @@ function refreshSorterOverlay() {
             data.buildings[src], hoverBuilding,
             placement.selectedItemId, placement.selectedModelIndex,
             data.buildings,
+            {
+                src: sorterSourceAnchor ?? undefined,
+                dst: sorterHoverAnchor.value ?? undefined,
+            },
         );
     }
 
@@ -825,7 +854,9 @@ watchEffect(() => {
     }
     if (!isPlacingSorter()) {
         sorterSource.value = null;
+        sorterSourceAnchor = null;
         sorterHover.value = null;
+        sorterHoverAnchor.value = null;
     }
 });
 
@@ -888,6 +919,32 @@ onMounted(() => {
 		}
 		return { x: offset.x, y: offset.y };
 	}
+	/**
+	 * 屏幕位置 → 连续网格坐标（不取整）。用于分拣器的 slot 锚点：
+	 * 与游戏一致，光标落在哪一列/哪一行就决定挂哪个 slot。
+	 * 命中建筑时用建筑表面命中点径向投影回球面，否则用星球表面点。
+	 */
+	const anchorPoint = new Vector3();
+	const anchorOffset = (e: MouseEvent) => {
+		if (b.value === null)
+			return null;
+		setupRay(e);
+		const intersects = b.value.bvh.raycast(ray);
+		const hitPlanet = ray.intersectSphere(planetSphere, anchorPoint);
+		if (intersects.length > 0
+			&& (hitPlanet === null
+				|| intersects[0].distanceSquared <= hitPlanet.distanceToSquared(ray.origin))) {
+			anchorPoint.copy(ray.origin)
+				.addScaledVector(ray.direction, Math.sqrt(intersects[0].distanceSquared));
+		} else if (hitPlanet === null) {
+			return null;
+		}
+		// 径向投影回球面后再转网格（建筑命中点浮在地表上方）
+		anchorPoint.normalize().multiplyScalar(R);
+		const latGrid = Math.asin(anchorPoint.y / R) * RAD_TO_GRID;
+		const lonGrid = Math.atan2(anchorPoint.x, anchorPoint.z) * RAD_TO_GRID;
+		return planetToLocal(latGrid, lonGrid);
+	}
 	/** Place building at clicked planet position */
 	const placeBuilding = (e: MouseEvent) => {
 		const queue = commandQueue.value;
@@ -911,7 +968,7 @@ onMounted(() => {
 	/** 鼠标跟随预览：placing 模式下更新半透明绿盒的位置与朝向（分拣器走两点架接，无绿盒） */
 	let lastMouseEvent: MouseEvent | null = null;
 	const updatePreview = (e: MouseEvent) => {
-		if (placement.appMode !== 'edit' || placement.mode !== 'placing' || isPlacingSorter()) {
+		if (placement.appMode !== 'edit' || placement.mode !== 'placing' || isPlacingSorter() || isPlacingBelt()) {
 			if (previewVisible.value)
 				previewVisible.value = false;
 			return;
@@ -935,13 +992,67 @@ onMounted(() => {
 	// 传送带拖拽预览：把起点到当前点的栅格化路径写入实例网格
 	const beltPreviewM = new Matrix4();
 	const beltLift = new Matrix4().makeTranslation(0, 0, 0.05);
+	const _tmpPos = new Vector3();
+
+	/** 网格偏移 → 世界坐标（用于直线预览端点） */
+	const gridToWorld = (offset: { x: number, y: number }): Vector3 | null => {
+		if (b.value === null || placement.selectedItemId === null || placement.selectedModelIndex === null)
+			return null;
+		const fake = createBuilding(placement.selectedItemId, placement.selectedModelIndex, offset, 0);
+		const t = calcBuildingTrans(R, b.value.pos, fake)[0];
+		return _tmpPos.setFromMatrixPosition(t).clone();
+	};
+
+	/** 未设 A 点时：在鼠标位置显示单个传送带方块 */
+	const showSingleBeltPreview = (e: MouseEvent) => {
+		if (b.value === null || placement.selectedItemId === null || placement.selectedModelIndex === null)
+			return;
+		const offset = placementOffset(e);
+		if (offset === null)
+			return;
+		const fake = createBuilding(placement.selectedItemId, placement.selectedModelIndex, offset, placement.yaw);
+		const t = calcBuildingTrans(R, b.value.pos, fake)[0];
+		beltPreviewM.multiplyMatrices(t, beltLift);
+		beltPreviewMesh.setMatrixAt(0, beltPreviewM);
+		beltPreviewMesh.count = 1;
+		beltPreviewMesh.instanceMatrix.needsUpdate = true;
+		beltPreviewVisible.value = true;
+		beltStraightLineVisible.value = false;
+	};
+
 	const updateBeltPreview = (p0: { x: number, y: number }, e: MouseEvent) => {
 		if (b.value === null || placement.selectedItemId === null || placement.selectedModelIndex === null)
 			return;
 		const cur = placementOffset(e);
 		if (cur === null)
 			return;
-		const pts = rasterizeLine(p0.x, p0.y, cur.x, cur.y);
+
+		// straight 模式：矢量直线预览（沿球面采样，非阶梯状位图）
+		if (beltPathMode === 'straight') {
+			const startPos = gridToWorld(p0);
+			const endPos = gridToWorld(cur);
+			if (startPos && endPos) {
+				const dist = startPos.distanceTo(endPos);
+				const segments = Math.min(128, Math.max(2, Math.ceil(dist * 2)));
+				const positions = new Float32Array((segments + 1) * 3);
+				for (let i = 0; i <= segments; i++) {
+					const t = i / segments;
+					const p = startPos.clone().lerp(endPos, t).normalize().multiplyScalar(R + 0.05);
+					positions[i * 3] = p.x;
+					positions[i * 3 + 1] = p.y;
+					positions[i * 3 + 2] = p.z;
+				}
+				beltStraightLine.geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
+				beltStraightLine.geometry.computeBoundingSphere();
+				beltStraightLineVisible.value = true;
+			}
+			beltPreviewMesh.count = 0;
+			beltPreviewVisible.value = false;
+			return;
+		}
+
+		// latFirst / lonFirst：阶梯状传送带方块预览
+		const pts = rasterizeLine(p0.x, p0.y, cur.x, cur.y, beltPathMode);
 		const n = Math.min(pts.length, BELT_PREVIEW_CAP);
 		for (let i = 0; i < n; i++) {
 			const fake = createBuilding(placement.selectedItemId, placement.selectedModelIndex, pts[i], 0);
@@ -952,21 +1063,30 @@ onMounted(() => {
 		beltPreviewMesh.count = n;
 		beltPreviewMesh.instanceMatrix.needsUpdate = true;
 		beltPreviewVisible.value = n > 0;
+		beltStraightLineVisible.value = false;
 	}
-	/** 松开鼠标：提交整条传送带（一次撤销） */
+	// 切换传送带路径走法（在 onMounted 内定义，可访问 lastMouseEvent / updateBeltPreview）
+	cycleBeltPathModeFn.value = () => {
+		const i = BELT_PATH_MODES.indexOf(beltPathMode);
+		beltPathMode = BELT_PATH_MODES[(i + 1) % BELT_PATH_MODES.length];
+		if (beltStart !== null && lastMouseEvent)
+			updateBeltPreview(beltStart, lastMouseEvent);
+		return beltPathMode;
+	};
+	/** 点击 B 点：提交整条传送带（一次撤销）。仅在放置成功后清空 A 点。 */
 	const commitBeltLine = (e: MouseEvent) => {
 		const queue = commandQueue.value;
 		const start = beltStart;
-		beltStart = null;
-		hideBeltPreview();
 		if (!queue || !start || placement.selectedItemId === null || placement.selectedModelIndex === null)
 			return;
 		const end = placementOffset(e);
 		if (end === null)
 			return;
-		const belts = buildBeltLine(placement.selectedItemId, placement.selectedModelIndex, start, end, placement.yaw);
+		const belts = buildBeltLine(placement.selectedItemId, placement.selectedModelIndex, start, end, placement.yaw, beltPathMode);
 		if (belts.length === 0)
 			return;
+		beltStart = null;
+		hideBeltPreview();
 		try {
 			queue.push(new CreateBeltLineCommand(belts));
 		} catch {
@@ -978,10 +1098,13 @@ onMounted(() => {
 			const queue = commandQueue.value;
 			if (!queue)
 				return;
+			const anchor = anchorOffset(e) ?? undefined;
 			const index = pickBuilding(e);
 			if (sorterSource.value === null) {
-				if (index !== null)
+				if (index !== null) {
 					sorterSource.value = index;
+					sorterSourceAnchor = anchor ?? null;
+				}
 				return;
 			}
 			const src = sorterSource.value;
@@ -991,38 +1114,67 @@ onMounted(() => {
 			const srcBuilding = queue.data.buildings[src];
 			const dstBuilding = queue.data.buildings[index];
 			// 允许任意两端组合：建筑↔建筑、建筑↔皮带、皮带↔皮带
-			// 传入 buildings 以检测 slot 占用（一 slot 一分拣器，冲突自动切同侧平行 slot）
+			// 传入 buildings 以检测 slot / offset / 分流器口占用
+			// 传入两端点击锚点 以按点击所在的列/行选择 slot（与游戏光标行为一致）
 			const sorter = createSorterBetween(
 				srcBuilding, dstBuilding,
 				placement.selectedItemId, placement.selectedModelIndex,
 				queue.data.buildings,
+				{ src: sorterSourceAnchor ?? undefined, dst: anchor },
 			);
+			sorterSourceAnchor = null;
 			if (sorter)
 				queue.push(new CreateBuildingCommand(sorter));
 		}
 	const onMouseUp = (e: MouseEvent) => {
-		if (isPlacingBelt() && beltStart !== null)
-			commitBeltLine(e);
+		if (downPos === null)
+			return;
+		const dx = e.clientX - downPos.x;
+		const dy = e.clientY - downPos.y;
+		const isDrag = dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD;
+		// 传送带：拖拽（旋转地图）时不处理；非拖拽点击在 A/B 状态间切换
+		if (isPlacingBelt() && !isDrag) {
+			if (beltStart === null)
+				beltStart = placementOffset(e);   // 第一次点击：设为 A 点
+			else
+				commitBeltLine(e);                 // 第二次点击：A→B 放置
+		}
 	}
 	const onPointerMove = (e: MouseEvent) => {
 		lastMouseEvent = e;
-		if (isPlacingBelt() && beltStart !== null)
-			updateBeltPreview(beltStart, e);
-		else
+		if (isPlacingBelt()) {
+			if (beltStart !== null)
+				updateBeltPreview(beltStart, e);
+			else
+				showSingleBeltPreview(e);
+		} else {
 			updatePreview(e);
-		// 分拣器架接模式：追踪悬停建筑以驱动 slot/范围/连线覆盖层
-		if (isPlacingSorter())
+		}
+		// 分拣器架接模式：追踪悬停建筑与悬停锚点，驱动 slot/范围/连线覆盖层
+		if (isPlacingSorter()) {
 			sorterHover.value = pickBuilding(e);
+			sorterHoverAnchor.value = sorterHover.value === null ? null : (anchorOffset(e) ?? null);
+		}
 	}
 	const onMouseLeave = () => {
 		lastMouseEvent = null;
 		previewVisible.value = false;
 		sorterHover.value = null;
+		sorterHoverAnchor.value = null;
+		hideBeltPreview(); // 隐藏路径预览，但保留 A 点
 	};
 	// 鼠标静止时，键盘切换建筑 / R 旋转 / Shift 吸附变化也要刷新预览
 	watchEffect(() => {
-		if (lastMouseEvent)
+		if (!lastMouseEvent)
+			return;
+		if (isPlacingBelt()) {
+			if (beltStart !== null)
+				updateBeltPreview(beltStart, lastMouseEvent);
+			else
+				showSingleBeltPreview(lastMouseEvent);
+		} else {
 			updatePreview(lastMouseEvent);
+		}
 	});
 	/** Delete building at clicked position */
 	const deleteBuilding = (e: MouseEvent) => {
@@ -1043,8 +1195,6 @@ onMounted(() => {
 	let downPos: { x: number, y: number } | null = null;
 	const onMouseDown = (e: MouseEvent) => {
 		downPos = { x: e.clientX, y: e.clientY };
-		if (isPlacingBelt())
-			beltStart = placementOffset(e);
 	}
 	const onClick = (e: MouseEvent) => {
 		if (downPos === null)
@@ -1052,7 +1202,7 @@ onMounted(() => {
 		const dx = e.clientX - downPos.x;
 		const dy = e.clientY - downPos.y;
 		downPos = null;
-		// 传送带在 mouseup 已整条提交，click 忽略（拖拽位移也合法）
+		// 传送带在 mouseup 中处理 A/B 点击状态机，click 忽略
 		if (isPlacingBelt())
 			return;
 		if (dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD)
@@ -1080,6 +1230,13 @@ onMounted(() => {
     if (placement.appMode === 'preview') {
         e.preventDefault();
         deleteBuilding(e);         // 内部已 emit(selectedBuildingIndex, null)
+        return;
+    }
+    // 传送带已设 A 点：右键取消 A 点选择，不退出放置模式
+    if (isPlacingBelt() && beltStart !== null) {
+        e.preventDefault();
+        beltStart = null;
+        hideBeltPreview();
         return;
     }
     // 编辑模式：原行为 —— 退出 placing/deleting
@@ -1149,6 +1306,7 @@ defineExpose({
 	cameraPosVersion,
     getModel,
 	resetCamera,
+	cycleBeltPathMode: () => cycleBeltPathModeFn.value?.(),
 });
 </script>
 

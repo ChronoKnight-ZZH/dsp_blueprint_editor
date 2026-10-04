@@ -178,6 +178,7 @@ import { RemoveBuildingsByItemCommand } from './blueprint/removeBuilding';
 import { usePlacement, resetToIdle, selectBuilding, enterDeleteMode,
          rotateBuilding, enterEditMode, exitEditMode } from './editor/placementState';
 import { buildingCategories } from './data/buildingCategories';
+import { isBelt } from './data/items';
 
 import BuildingInfoPanel from './components/BuildingInfoPanel.vue';
 import SWStatus from '@/swStatus.vue';
@@ -583,8 +584,14 @@ const isEdit = placement.appMode === 'edit';
     // 编辑模式专属
     // X：进入删除模式
     if (event.code === 'KeyX' && isEdit) { enterDeleteMode(); return; }
-    // R：旋转 90°（仅在放置模式）
-    if (event.code === 'KeyR' && isEdit && placement.mode === 'placing') { rotateBuilding(); return; }
+    // R：传送带模式下切换路径走法，其他建筑旋转 90°（仅在放置模式）
+    if (event.code === 'KeyR' && isEdit && placement.mode === 'placing') {
+        if (placement.selectedItemId !== null && isBelt(placement.selectedItemId))
+            renderer.value?.cycleBeltPathMode();
+        else
+            rotateBuilding();
+        return;
+    }
     // 1-9：切换分类并展开建筑列表
     if (event.code >= 'Digit1' && event.code <= 'Digit9' && isEdit) {
         const cat = parseInt(event.code.slice(5));
@@ -594,7 +601,7 @@ const isEdit = placement.appMode === 'edit';
             resetToIdle();
         return;
     }
-    // F1-F12：选中建筑（删除模式下忽略，避免静默切回放置模式）
+    // F1-F12：选中建筑并呼唤出建筑列表（删除模式下忽略，避免静默切回放置模式）
     if (event.code.startsWith('F') && isEdit && placement.mode !== 'deleting') {
         event.preventDefault();
         const fn = parseInt(event.code.slice(1));
@@ -606,6 +613,7 @@ const isEdit = placement.appMode === 'edit';
                     selectBuilding(b.itemId, b.modelIndex);
             }
         }
+        palette.value?.expand();
         return;
     }
     // N：重置镜头到初始状态（预览/编辑模式均可用）

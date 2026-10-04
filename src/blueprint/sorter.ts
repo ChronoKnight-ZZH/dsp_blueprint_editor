@@ -2,97 +2,137 @@ import { BlueprintBuilding } from "./parser";
 import { buildingBoxes } from "@/data/building";
 import { createBuilding } from "./create";
 import { isBelt, isInserter, isSplitter } from "@/data/items";
-import { findNearestFreeSlot, hasSlots } from "@/data/buildingSlots";
+import { getBuildingSlots, slotGroup } from "@/data/buildingSlots";
+
+/**
+ * 分拣器（inserter）连接构造：按真实蓝图（游戏 0.10.29 / 0.10.35 实测）标定的规则，
+ * 生成"建筑↔传送带 / 建筑↔建筑 / 传送带↔传送带 / 分流器"四类连接记录。
+ *
+ * 标定来源：tests/tools/分拣器.txt（29 根分拣器：12 根绕制造台 Mk.I 的建筑→皮带环、
+ * 3 根皮带→建筑、3 根建筑→建筑、3 根皮带→皮带）+ starting_base_01029 / sorter_belt_replay
+ * 共 122 条皮带端样本。要点：
+ *
+ * 1. 轴向：分拣器只沿网格主轴架接，主轴由两端对象的**整格差**的主分量决定
+ *    （如制造台(13,11)→皮带(11,12)：Δ=(-2,+1) → 沿 -x）。中心差为 45° 时主轴不唯一，拒绝。
+ * 2. 建筑端端点 = 该建筑某个 slot 的坐标（不是"中心连线与包围盒交点"）：
+ *    slot 编号由"朝向对端的面 + 横向坐标最近"决定，可用点击锚点指定横向坐标。
+ * 3. 皮带端端点 = **轴线与皮带中心线的交点**（= 把对端端点投影到皮带中心线上），
+ *    其主轴投影 main 决定 offset：offset = floor(main × 21)（±半格 ≈ ±10 段）。
+ * 4. len = round(两端点距离)，范围 1-3；yaw[0] 为轴向整数角，yaw[1]/tilt 恒 0；
+ *    建筑端 offset 恒 0；分拣器自身 slot 固定 inputToSlot=1 / outputFromSlot=0。
+ */
+
+/** 网格坐标点（连续值） */
+export interface GridPoint {
+    x: number;
+    y: number;
+}
+
+/**
+ * 点击锚点：用户在 3D 视图中点击某一端时的网格坐标（连续值）。
+ * 与游戏一致：玩家光标落在哪个格子/槽位附近，就决定了分拣器挂哪个 slot，
+ * 因此锚点用于"横向坐标最近"的 slot 取值；缺省时退化为对端中心。
+ */
+export interface SorterAnchors {
+    src?: GridPoint;
+    dst?: GridPoint;
+}
 
 /**
  * 大建筑功能连接面半径封顶（格）。
- * 项目无游戏 SlotConfig：选择盒半尺寸对制造台为 2.1，但实际皮带连接口约在 0.9。
- * 用此封顶可保证紧贴布局（如制造台—传送带）也能算出正的端点间距。
+ * 项目无游戏 SlotConfig（选择盒比模型大）：对无 slot 数据的建筑（分流器/监测器等）
+ * 用此封顶，保证紧贴布局也能算出正的端点间距。
  */
 const FACE_CAP = 0.9;
-/** 端点自连接面向内的内缩距离，保证端点埋在建筑内、游戏粘贴时能"抓"到建筑 */
+/** 无 slot 建筑端自连接面向内的内缩距离，保证端点埋在建筑内 */
 const ENDPOINT_INSET = 0.2;
 
-function faceRadius(half: number) {
-    return Math.min(half, FACE_CAP);
-}
-
-/** 归一化方向 (dux,duy) 从矩形中心到连接面（半尺寸 hx,hy）的轴向距离 */
-function rayFace(dux: number, duy: number, hx: number, hy: number) {
-    let t = Infinity;
-    if (dux !== 0) t = Math.min(t, hx / Math.abs(dux));
-    if (duy !== 0) t = Math.min(t, hy / Math.abs(duy));
-    return t;
-}
-
-/** 获取建筑连接面半尺寸（皮带不走此路径：端点直接取中心） */
-function getFaceRadius(modelIndex: number): [number, number] {
-    const box = buildingBoxes.get(modelIndex);
-    if (!box)
-        return [FACE_CAP, FACE_CAP];
-    return [faceRadius(box[0] / 2), faceRadius(box[2] / 2)];
-}
+/**
+ * 皮带每格的内部分段数：0.10.35 实测 offset = floor(main × 21)。
+ * 判据：真实蓝图中 offset 由 3→4 的临界 main = 4/21 = 0.1905（样本 0.1865→3、0.1907→4），
+ * 且 offset 区间 ±10 恰好覆盖 ±半格（10/21 = 0.476）。
+ */
+export const BELT_SEGMENTS_PER_CELL = 21;
+/** 皮带端 offset 合法上下限（±半格 ≈ ±10.5 段） */
+const BELT_OFFSET_MIN = -10;
+const BELT_OFFSET_MAX = 10;
+/** 皮带端点必须落在皮带格内：横向 / 主轴投影均不得超过半格 */
+const BELT_CELL_HALF = 0.5;
+/** main ≈ 0 的浮点容差：小于该值视为正中（避免 -1e-16 被 floor 成 -1） */
+const MAIN_EPSILON = 1e-5;
 
 /**
- * 皮带端 offset 精确查找表（基于 120 个真实蓝图样本反推）。
- * 主轴偏移 mainOffset = 分拣器端点在皮带方向上的投影距离（相对皮带中心）。
- * 范围边界来自数据统计的自然间隔。
+ * v2ExtraPose[0]：真实蓝图中"输入（根）端为建筑"时恒为 ≈0.20118，
+ * "输入端为皮带"时恒为 ≈0（仅球面浮点噪声）。语义未公开，按原样复现。
  */
-const OFFSET_RANGES: { max: number; offset: number }[] = [
-    { max: -0.409, offset: -10 },
-    { max: -0.281, offset: -8 },
-    { max: -0.190, offset: -5 },
-    { max: -0.155, offset: -4 },
-    { max: -0.099, offset: -3 },
-    { max: -0.029, offset: -2 },
-    { max: 0, offset: -1 },        // 负值接近 0
-    { max: 0.034, offset: 0 },     // 正值接近 0
-    { max: 0.099, offset: 1 },
-    { max: 0.155, offset: 2 },
-    { max: 0.189, offset: 3 },
-    { max: 0.294, offset: 4 },
-    { max: 0.421, offset: 7 },
-    { max: Infinity, offset: 10 },
-];
+const ROOT_HAND_REST_OFFSET = 0.20118311047554016;
 
-/**
- * 计算皮带端 offset（segIndex 偏移）。
- * 精确实现：基于分拣器端点相对皮带中心的主轴投影距离查表。
- */
-function computeBeltOffset(
-    sorterEnd: { x: number, y: number },
-    belt: BlueprintBuilding,
-): number {
-    // 用精确 yaw（度→弧度）计算皮带方向，避免球面浮点 yaw 归一化引入的误差
-    const rad = belt.yaw[0] * Math.PI / 180;
-    const dirX = Math.sin(rad);   // yaw=0 → +Y, yaw=90 → +X
-    const dirY = Math.cos(rad);
+/** 建筑↔建筑 两端 slot 横向坐标允许的最大偏差（不同建筑 slot 表略有差异；
+ *  ≥0.4 会架成明显斜向，≤0.2 是相邻一格错位时的正常微斜） */
+const SLOT_LATERAL_TOLERANCE = 0.35;
 
-    // 分拣器端点相对皮带中心的偏移
-    const relX = sorterEnd.x - belt.localOffset[0].x;
-    const relY = sorterEnd.y - belt.localOffset[0].y;
-
-    // 主轴偏移：投影到精确皮带方向
-    const mainOffset = relX * dirX + relY * dirY;
-
-    // 查表
-    for (const range of OFFSET_RANGES) {
-        if (mainOffset < range.max) {
-            return range.offset;
-        }
-    }
-    return 10;
+/** 分拣器端点身份键：同一对象 + 同一 slot（皮带再叠 offset）才算同一位置 */
+function endpointKey(objIdx: number, slot: number, offset: number): string {
+    return `${objIdx}:${slot}:${offset}`;
 }
 
-/**
- * 网格平面偏移 → 建筑 yaw=0 局部坐标。
- * calcBuildingTrans 中建筑经 R_Z(-yaw) 旋转：P_grid = R_Z(-yaw) * P_local，
- * 故逆变换 P_local = R_Z(+yaw) * P_grid。yaw 非 0 时不转换会选错 slot。
- */
+/** 网格偏移 → 建筑 yaw=0 局部坐标（calcBuildingTrans 中 P_grid = R_Z(-yaw)·P_local） */
 function toSlotLocal(building: BlueprintBuilding, dx: number, dy: number): [number, number] {
     const rad = building.yaw[0] * Math.PI / 180;
     const cos = Math.cos(rad), sin = Math.sin(rad);
     return [dx * cos - dy * sin, dx * sin + dy * cos];
+}
+
+/** 建筑 yaw=0 局部坐标 → 网格偏移（toSlotLocal 的逆变换） */
+function fromSlotLocal(building: BlueprintBuilding, lx: number, ly: number): [number, number] {
+    const rad = building.yaw[0] * Math.PI / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    return [lx * cos + ly * sin, -lx * sin + ly * cos];
+}
+
+/** 归一化方向 (ux,uy) 从矩形中心到连接面的轴向距离（局部系半尺寸 hx,hy） */
+function rayFace(ux: number, uy: number, hx: number, hy: number) {
+    let t = Infinity;
+    if (ux !== 0) t = Math.min(t, hx / Math.abs(ux));
+    if (uy !== 0) t = Math.min(t, hy / Math.abs(uy));
+    return t;
+}
+
+/** 建筑选择盒在 yaw=0 局部系下的半尺寸（x, y），大建筑按 {@link FACE_CAP} 封顶 */
+function faceHalfSize(modelIndex: number): [number, number] {
+    const box = buildingBoxes.get(modelIndex);
+    if (!box)
+        return [FACE_CAP, FACE_CAP];
+    return [Math.min(box[0] / 2, FACE_CAP), Math.min(box[2] / 2, FACE_CAP)];
+}
+
+/** 皮带行进方向（yaw=0 → +y，yaw=90 → +x） */
+function beltDir(belt: BlueprintBuilding): GridPoint {
+    const rad = belt.yaw[0] * Math.PI / 180;
+    return { x: Math.sin(rad), y: Math.cos(rad) };
+}
+
+/**
+ * 主轴投影 main → 皮带端 offset（真实蓝图标定：offset = floor(main × 21)）。
+ * main = 端点在皮带方向上相对皮带中心的投影距离（格），符号与行进方向一致。
+ */
+export function beltOffsetFromMain(main: number): number {
+    const m = Math.abs(main) < MAIN_EPSILON ? 0 : main;
+    const raw = Math.floor(m * BELT_SEGMENTS_PER_CELL);
+    return Math.max(BELT_OFFSET_MIN, Math.min(BELT_OFFSET_MAX, raw));
+}
+
+/** offset 对应分段的中点 main（避让占用时把端点平移到空闲分段中心，保持 offset 与几何一致） */
+function mainForOffset(offset: number): number {
+    return (offset + 0.5) / BELT_SEGMENTS_PER_CELL;
+}
+
+/** 把点投影到皮带中心线上（返回中心线上离该点最近的点） */
+function projectOnBelt(belt: BlueprintBuilding, p: GridPoint): GridPoint {
+    const c = belt.localOffset[0];
+    const d = beltDir(belt);
+    const main = (p.x - c.x) * d.x + (p.y - c.y) * d.y;
+    return { x: c.x + d.x * main, y: c.y + d.y * main };
 }
 
 /**
@@ -116,10 +156,7 @@ export function collectOccupiedSlots(
     return occ;
 }
 
-/**
- * 收集目标皮带上已被其他分拣器占用的 offset。
- * 皮带端 slot 固定 -1，同一 offset 只能有一个分拣器端点。
- */
+/** 收集目标皮带上已被其他分拣器占用的 offset（皮带端 slot 固定 -1） */
 function collectOccupiedBeltOffsets(
     buildings: readonly BlueprintBuilding[],
     beltIndex: number,
@@ -136,42 +173,30 @@ function collectOccupiedBeltOffsets(
 }
 
 /**
- * 在 OFFSET_RANGES 的合法值中找离 preferred 最近的空闲 offset。
- * 皮带可连位置有限（13 档），全被占用返回 null。
- */
-function findNearestFreeBeltOffset(preferred: number, occupied: ReadonlySet<number>): number | null {
-    if (!occupied.has(preferred)) return preferred;
-    // 候选按与 preferred 的距离升序
-    const candidates = OFFSET_RANGES
-        .map(r => r.offset)
-        .filter(o => !occupied.has(o))
-        .sort((a, b) => Math.abs(a - preferred) - Math.abs(b - preferred));
-    return candidates.length > 0 ? candidates[0] : null;
-}
-
-/**
- * 分拣器只能沿网格主轴架接（每 90° 一个方向），游戏不允许 45° 斜向分拣器。
- * 球面网格主轴连线带浮点噪声（实测蓝图 yaw 偏差 ≤0.1°），给 5° 容差：
- * 合法轴向小分量 ≈ 0 通过；45° 斜向（两分量等大）被拒。
- */
-const AXIS_ALIGN_TOL = Math.tan(5 * Math.PI / 180);
-
-function isAxisAligned(dux: number, duy: number): boolean {
-    const major = Math.max(Math.abs(dux), Math.abs(duy));
-    if (major < 1e-9) return false;
-    return Math.min(Math.abs(dux), Math.abs(duy)) / major <= AXIS_ALIGN_TOL;
-}
-
-/**
  * 分拣器端点落在四向分流器（2020）哪个口。
- * 口编号与 SpitterInfo / BuildingInfo 的 adjacency 下标一致（yaw=0 局部系）：
+ * 口的判定以"分拣器另一端（partner）相对分流器的方向"为准——与游戏里分拣器
+ * "从哪一侧接入"一致；缺 partner 时退回端点几何位置。口编号与 SpitterInfo /
+ * BuildingInfo 的 adjacency 下标一致（分流器 yaw=0 局部系）：
  * - 十字形（modelIndex 38/40）：0=+y, 1=+x, 2=-y, 3=-x，共四口
  * - 一字形（modelIndex 39）：仅长轴两端开口，0=A 端(+y)，2=B 端(-y)；
  *   0/1、2/3 是同一端的两层高度（平面架接不区分），短轴两侧封闭 → 返回 -1
  */
-function splitterPortAt(sp: BlueprintBuilding, p: { x: number; y: number }): number {
-    const c = sp.localOffset[0];
-    const [lx, ly] = toSlotLocal(sp, p.x - c.x, p.y - c.y);
+function splitterPortAt(
+    sp: BlueprintBuilding,
+    partner: BlueprintBuilding | null,
+    fallback?: GridPoint,
+): number {
+    let dx: number, dy: number;
+    if (partner !== null && partner !== undefined) {
+        dx = partner.localOffset[0].x - sp.localOffset[0].x;
+        dy = partner.localOffset[0].y - sp.localOffset[0].y;
+    } else if (fallback !== undefined) {
+        dx = fallback.x - sp.localOffset[0].x;
+        dy = fallback.y - sp.localOffset[0].y;
+    } else {
+        return -1;
+    }
+    const [lx, ly] = toSlotLocal(sp, dx, dy);
     if (sp.modelIndex === 39) {
         if (Math.abs(lx) >= Math.abs(ly)) return -1;  // 一字形短边：无开口
         return ly >= 0 ? 0 : 2;
@@ -180,8 +205,19 @@ function splitterPortAt(sp: BlueprintBuilding, p: { x: number; y: number }): num
     return ly >= 0 ? 0 : 2;
 }
 
+/** 按 index 查找建筑（buildings 数组下标与 index 不一定一致，如测试传入子集） */
+function findByIndex(
+    buildings: readonly BlueprintBuilding[],
+    index: number,
+): BlueprintBuilding | null {
+    if (index < 0) return null;
+    for (const b of buildings)
+        if (b.index === index) return b;
+    return null;
+}
+
 /**
- * 收集四向分流器上已被其他分拣器占用的口（按端点几何位置反推口编号，
+ * 收集四向分流器上已被其他分拣器占用的口（按 partner 方向反推口编号，
  * 不依赖蓝图 wire 字段——直连分拣器在游戏数据中 slot 恒为 -1）。
  */
 function collectOccupiedSplitterPorts(
@@ -189,22 +225,22 @@ function collectOccupiedSplitterPorts(
     splitterIndex: number,
 ): Set<number> {
     const occ = new Set<number>();
-    const sp = buildings[splitterIndex];
+    const sp = findByIndex(buildings, splitterIndex);
     if (!sp || !isSplitter(sp.itemId)) return occ;
     for (const b of buildings) {
         if (!isInserter(b.itemId)) continue;
-        if (b.inputObjIdx === splitterIndex)
-            occ.add(splitterPortAt(sp, b.localOffset[0]));
-        if (b.outputObjIdx === splitterIndex)
-            occ.add(splitterPortAt(sp, b.localOffset[1]));
+        if (b.inputObjIdx === splitterIndex) {
+            const port = splitterPortAt(
+                sp, findByIndex(buildings, b.outputObjIdx), b.localOffset[0]);
+            if (port >= 0) occ.add(port);
+        }
+        if (b.outputObjIdx === splitterIndex) {
+            const port = splitterPortAt(
+                sp, findByIndex(buildings, b.inputObjIdx), b.localOffset[1]);
+            if (port >= 0) occ.add(port);
+        }
     }
-    occ.delete(-1);
     return occ;
-}
-
-/** 分拣器端点身份键：同一对象 + 同一 slot（皮带再叠 offset）才算同一位置 */
-function endpointKey(objIdx: number, slot: number, offset: number): string {
-    return `${objIdx}:${slot}:${offset}`;
 }
 
 /**
@@ -231,8 +267,8 @@ function isDuplicateSorter(
 const SORTER_HALF_WIDTH = 0.15;
 
 function collinearSorterOverlap(
-    a0: { x: number; y: number }, a1: { x: number; y: number },
-    b0: { x: number; y: number }, b1: { x: number; y: number },
+    a0: GridPoint, a1: GridPoint,
+    b0: GridPoint, b1: GridPoint,
 ): boolean {
     const d1x = a1.x - a0.x, d1y = a1.y - a0.y;
     const l1 = Math.hypot(d1x, d1y);
@@ -240,12 +276,13 @@ function collinearSorterOverlap(
     const l2 = Math.hypot(d2x, d2y);
     if (l1 < 1e-9 || l2 < 1e-9) return false;
     // 夹角正弦：非共线（垂直交叉等）不算"重叠"
-    if (Math.abs(d1x * d2y - d1y * d2x) / (l1 * l2) > AXIS_ALIGN_TOL) return false;
+    const SINE = Math.sin(5 * Math.PI / 180);
+    if (Math.abs(d1x * d2y - d1y * d2x) / (l1 * l2) > SINE) return false;
     // b0 到 a 所在直线的垂直距离
     if (Math.abs(d1x * (a0.y - b0.y) - d1y * (a0.x - b0.x)) / l1 > SORTER_HALF_WIDTH)
         return false;
     // b 在 a 主轴上的投影区间与 a 的 [0,1] 是否相交
-    const t = (p: { x: number; y: number }) =>
+    const t = (p: GridPoint) =>
         ((p.x - a0.x) * d1x + (p.y - a0.y) * d1y) / (l1 * l1);
     const lo = Math.min(t(b0), t(b1));
     const hi = Math.max(t(b0), t(b1));
@@ -276,31 +313,37 @@ function overlapsExistingSorter(
 }
 
 /**
+ * 分拣器一端（建筑端 / 皮带端 / 无 slot 建筑端）。
+ * @param slot 建筑 slot 编号；皮带与无 slot 建筑端为 -1
+ * @param offset 皮带端分段 offset；建筑端恒 0
+ * @param lat 端点在"垂直轴向"方向的网格坐标（用于两端横向一致性校验）
+ */
+interface SorterEnd {
+    point: GridPoint;
+    slot: number;
+    offset: number;
+    lat: number;
+}
+
+/**
  * 在两个已有建筑/皮带之间构造一个分拣器（尚未入库）。
- * 端点取中心连线与各建筑连接面交点后内缩 {@link ENDPOINT_INSET}；
- * len = round(端点间距)，范围 1-3，否则返回 null（拒绝放置）。
- * yaw[0] 沿运动主轴，yaw[1] 恒 0（由真实蓝图标定的 DSP 固定特征）。
  *
- * 连接字段写入规则（来自 BuildTool_Inserter.cs）：
- * - inputObjIdx = src.index, outputObjIdx = dst.index
- * - inputFromSlot = srcSlot（建筑端 0-11，皮带端 -1）
- * - outputToSlot = dstSlot（建筑端 0-11，皮带端 -1）
- * - inputToSlot = 1（分拣器固定输入 slot）
- * - outputFromSlot = 0（分拣器固定输出 slot）
- * - inputOffset = 皮带端 segIndex 偏移（建筑端为 0）
- * - outputOffset = 皮带端 segIndex 偏移（建筑端为 0）
+ * 端点规则（真实蓝图标定，见文件头注释）：
+ * - 建筑端：端点 = 朝向对端的面上的 slot 坐标（可用锚点指定横向位置；被占用时
+ *   在同面内切换最近的空闲 slot）
+ * - 皮带端：端点 = 轴线（过对端端点、沿主轴）与皮带中心线的交点；
+ *   offset = floor(main × 21)，若该 offset 已被其他分拣器占用则平移到最近空闲分段中心
+ * - 无 slot 数据的建筑（分流器 / 监测器等）：端点 = 轴线与连接面的交点（slot 写 -1）
  *
- * slot 唯一占用约束：建筑每个 slot 只允许连接一个分拣器。
- * 目标 slot 已被占用时，自动切换到同侧（坐标矢量平行）最近的空闲 slot；
- * 平行组内无空闲 slot 时返回 null（拒绝放置）。
+ * 拒绝放置（返回 null）的情况：
+ * - 两端同对象 / 主轴无法确定（中心差为 45° 斜向、两点重合）
+ * - 建筑 slot 面已被全部占用、分流器口已被引用
+ * - 皮带端落在皮带格之外（|main| 或横向 > 半格）
+ * - 长度不在 1-3 格、两端 slot 横向偏差过大（会架成斜向）
+ * - 与已有分拣器端点完全相同或共线压叠
  *
- * 其他放置约束（返回 null = 拒绝放置，UI 预览红线）：
- * - 只能沿网格主轴架接（每 90°），45° 等斜向一律拒绝
- * - 四向分流器按口占用：一字形(39)仅 A/B 两端开口且每端一个分拣器，
- *   十字形(38/40)四口各自唯一；同口重复引用拒绝
- * - 两个端点与已有分拣器完全相同（含反向）= 重复放置，拒绝
- * - 与已有分拣器共线压叠（非同对象对的并行 slot 情况）= 重叠，拒绝
- * @param buildings 已入库建筑列表，用于检测 slot 占用（缺省视为无占用）
+ * @param buildings 已入库建筑列表，用于 slot / offset / 分流器口占用检测
+ * @param anchors 两端点击锚点（网格坐标，可只给一端）
  */
 export function createSorterBetween(
     src: BlueprintBuilding,
@@ -308,107 +351,280 @@ export function createSorterBetween(
     itemId: number,
     modelIndex: number,
     buildings: readonly BlueprintBuilding[] = [],
+    anchors: SorterAnchors = {},
 ): BlueprintBuilding | null {
-    const c0 = src.localOffset[0], c1 = dst.localOffset[0];
-    const sx = c1.x - c0.x, sy = c1.y - c0.y;
-    const L = Math.hypot(sx, sy);
-    if (L < 1e-6) return null;
-    const dux = sx / L, duy = sy / L;
+    const preferred = buildSorter(src, dst, itemId, modelIndex, buildings, anchors, true);
+    if (preferred !== null || (anchors.src === undefined && anchors.dst === undefined))
+        return preferred;
+    // 按锚点无解时忽略锚点重试一次：用户点击位置可能偏离能连上的 slot 行
+    // （例如点在源建筑正中，而目标皮带在相邻一行），此时退回"对端中心"基准。
+    return buildSorter(src, dst, itemId, modelIndex, buildings, anchors, false);
+}
 
-    // 分拣器只能每 90° 沿主轴架接：拒绝 45° 斜向（球面噪声 5° 内容差）
-    if (!isAxisAligned(dux, duy)) return null;
+function buildSorter(
+    src: BlueprintBuilding,
+    dst: BlueprintBuilding,
+    itemId: number,
+    modelIndex: number,
+    buildings: readonly BlueprintBuilding[],
+    anchors: SorterAnchors,
+    useAnchors: boolean,
+): BlueprintBuilding | null {
+    if (src.index === dst.index)
+        return null;
+    const c0 = src.localOffset[0];
+    const c1 = dst.localOffset[0];
+
+    // ---- 主轴：由两端中心的整格差主分量决定（分拣器只能沿网格主轴架接）----
+    let ax = Math.round(c1.x) - Math.round(c0.x);
+    let ay = Math.round(c1.y) - Math.round(c0.y);
+    if (ax === 0 && ay === 0) {
+        ax = c1.x - c0.x;
+        ay = c1.y - c0.y;
+    }
+    if (ax === 0 && ay === 0)
+        return null;
+    if (Math.abs(ax) === Math.abs(ay))
+        return null;                       // 45° 斜向：主轴不唯一
+    const alongX = Math.abs(ax) > Math.abs(ay);
+    const axis: GridPoint = alongX
+        ? { x: Math.sign(ax), y: 0 }
+        : { x: 0, y: Math.sign(ay) };
+    /** 垂直轴向的单位向量（横向坐标基准） */
+    const perp: GridPoint = { x: -axis.y, y: axis.x };
+    const latOf = (p: GridPoint, ref: GridPoint) =>
+        (p.x - ref.x) * perp.x + (p.y - ref.y) * perp.y;
 
     const srcIsBelt = isBelt(src.itemId);
-    const dstIsBelt = isBelt(dst.itemId);
+    const srcSlots = getBuildingSlots(src.itemId);
+    const dstSlots = getBuildingSlots(dst.itemId);
     const srcIsSplitter = isSplitter(src.itemId);
     const dstIsSplitter = isSplitter(dst.itemId);
 
-    // 端点计算（真实蓝图 0.10.35 验证）：
-    // - 皮带端：端点 = 皮带中心（游戏不做内缩），len 直接 = round(中心距)
-    //   例：(1,3)→(1,0) 中心距 3 → len 3；两端内缩会得到 2，与游戏不符
-    // - 建筑端：中心到连接面再内缩 ENDPOINT_INSET（端点埋进建筑内）
-    const [fx0, fy0] = getFaceRadius(src.modelIndex);
-    const [fx1, fy1] = getFaceRadius(dst.modelIndex);
-    const o0 = srcIsBelt ? 0 : Math.max(0, rayFace(dux, duy, fx0, fy0) - ENDPOINT_INSET);
-    const o1 = dstIsBelt ? 0 : Math.max(0, rayFace(dux, duy, fx1, fy1) - ENDPOINT_INSET);
+    /**
+     * 建筑端 slot 选择：候选 = 朝向对端的面上的 slot（局部主分量符号一致），
+     * 按横向坐标与 targetLat 的距离升序，跳过已被占用的 slot。
+     */
+    const chooseSlot = (
+        b: BlueprintBuilding,
+        toward: GridPoint,
+        targetLat: number,
+        occupied: ReadonlySet<number>,
+    ): SorterEnd | null => {
+        const slots = getBuildingSlots(b.itemId);
+        const c = b.localOffset[0];
+        // 朝向面：把轴向转到建筑局部系后取主分量所在的面（同面 slot 共享该分组）
+        const [ltx, lty] = toSlotLocal(b, toward.x, toward.y);
+        const faceGroup = Math.abs(ltx) >= Math.abs(lty)
+            ? (ltx >= 0 ? 0 : 1)
+            : (lty >= 0 ? 2 : 3);
+        const candidates: { slot: number; end: SorterEnd }[] = [];
+        for (let i = 0; i < slots.length; i++) {
+            if (slotGroup(slots[i]) !== faceGroup)
+                continue;
+            const [gx, gy] = fromSlotLocal(b, slots[i].x, slots[i].y);
+            const point = { x: c.x + gx, y: c.y + gy };
+            candidates.push({
+                slot: i,
+                end: { point, slot: i, offset: 0, lat: latOf(point, c0) },
+            });
+        }
+        if (candidates.length === 0)
+            return null;
+        candidates.sort((a, b2) =>
+            Math.abs(a.end.lat - targetLat) - Math.abs(b2.end.lat - targetLat)
+            || a.slot - b2.slot);
+        return candidates.find(cd => !occupied.has(cd.slot))?.end ?? null;
+    };
 
-    const p0 = { x: c0.x + dux * o0, y: c0.y + duy * o0 };
-    const p1 = { x: c1.x - dux * o1, y: c1.y - duy * o1 };
-    const edgeDist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
-    const len = Math.round(edgeDist);
-    if (len < 1 || len > 3) return null;
+    /**
+     * 无 slot 数据的建筑端（分流器 / 监测器 / 集装机等）：
+     * 端点 = 轴线（过 refPoint、沿 axis）与连接面的交点，内缩 {@link ENDPOINT_INSET}。
+     * @param sign +1 表示端点在建筑朝对端的一侧（源端），-1 表示对侧（目标端）
+     */
+    const slotlessEnd = (
+        b: BlueprintBuilding,
+        refPoint: GridPoint,
+        sign: number,
+    ): SorterEnd => {
+        const c = b.localOffset[0];
+        const [lax, lay] = toSlotLocal(b, axis.x, axis.y);
+        const [hx, hy] = faceHalfSize(b.modelIndex);
+        const d = Math.max(0, rayFace(lax, lay, hx, hy) - ENDPOINT_INSET);
+        // 端点在轴线上的位置：使其相对建筑中心的轴向坐标为 sign·d
+        const t = sign * d
+            - ((refPoint.x - c.x) * axis.x + (refPoint.y - c.y) * axis.y);
+        const point = {
+            x: refPoint.x + axis.x * t,
+            y: refPoint.y + axis.y * t,
+        };
+        return { point, slot: -1, offset: 0, lat: latOf(point, c0) };
+    };
 
-    // 起点朝向沿运动主轴（朝向表与传送带一致）
-    let yaw0: number;
-    if (Math.abs(dux) >= Math.abs(duy)) yaw0 = dux > 0 ? 90 : 270;
-    else yaw0 = duy > 0 ? 0 : 180;
+    /**
+     * 皮带端：端点 = refPoint 在皮带中心线上的投影（轴线与皮带垂直时的交点）。
+     * 轴线与皮带方向平行时（如皮带正对建筑进料）投影退化，端点取皮带格中心。
+     * 校验端点落在皮带格内（|main| 与横向均 ≤ 半格）；offset 被占用时平移到最近空闲分段。
+     */
+    const beltEnd = (
+        belt: BlueprintBuilding,
+        refPoint: GridPoint,
+        occupied: ReadonlySet<number>,
+    ): SorterEnd | null => {
+        const c = belt.localOffset[0];
+        const d = beltDir(belt);
+        const beltPerp: GridPoint = { x: -d.y, y: d.x };
+        // 轴线与皮带方向近似平行（夹角 < ~26°）→ 投影退化，取皮带中心（真实蓝图实测）
+        const parallel = Math.abs(axis.x * d.x + axis.y * d.y) > 0.9;
+        /** 校验 + 生成端点；main 为该点在皮带方向上的投影 */
+        const make = (p: GridPoint): { end: SorterEnd; main: number } | null => {
+            const rx = p.x - c.x, ry = p.y - c.y;
+            const main = rx * d.x + ry * d.y;
+            const lateral = rx * beltPerp.x + ry * beltPerp.y;
+            if (Math.abs(main) > BELT_CELL_HALF || Math.abs(lateral) > BELT_CELL_HALF)
+                return null;
+            return {
+                end: {
+                    point: p,
+                    slot: -1,
+                    offset: beltOffsetFromMain(main),
+                    lat: latOf(p, c0),
+                },
+                main,
+            };
+        };
+        const target = parallel ? { x: c.x, y: c.y } : projectOnBelt(belt, refPoint);
+        const first = make(target);
+        if (first === null)
+            return null;
+        if (!occupied.has(first.end.offset))
+            return first.end;
+        // offset 被占用：在 [-10, 10] 内按距离找最近空闲分段，并把端点移到该分段中心
+        const candidates: number[] = [];
+        for (let o = BELT_OFFSET_MIN; o <= BELT_OFFSET_MAX; o++) {
+            if (!occupied.has(o))
+                candidates.push(o);
+        }
+        candidates.sort((a, b) =>
+            Math.abs(a - first.end.offset) - Math.abs(b - first.end.offset) || a - b);
+        for (const o of candidates) {
+            const main = mainForOffset(o);
+            const shifted = make({ x: c.x + d.x * main, y: c.y + d.y * main });
+            if (shifted === null)
+                continue;
+            shifted.end.offset = o;
+            return shifted.end;
+        }
+        return null;
+    };
 
-    const building = createBuilding(itemId, modelIndex, p0, yaw0);
-    building.localOffset[1] = { x: p1.x, y: p1.y, z: 0 };
+    // ---- 驱动端：优先"带 slot 且给了点击锚点"的一端，其次任一带 slot 的一端 ----
+    let driver: 'src' | 'dst' | 'none' = 'none';
+    if (srcSlots.length > 0 && useAnchors && anchors.src !== undefined) driver = 'src';
+    else if (dstSlots.length > 0 && useAnchors && anchors.dst !== undefined) driver = 'dst';
+    else if (srcSlots.length > 0) driver = 'src';
+    else if (dstSlots.length > 0) driver = 'dst';
+
+    let srcEnd: SorterEnd | null = null;
+    let dstEnd: SorterEnd | null = null;
+    if (driver === 'src') {
+        const targetLat = useAnchors && anchors.src !== undefined ? latOf(anchors.src, c0) : latOf(c1, c0);
+        srcEnd = chooseSlot(src, axis, targetLat, collectOccupiedSlots(buildings, src.index));
+        if (srcEnd === null)
+            return null;
+    } else if (driver === 'dst') {
+        // 缺省（无锚点）时轴线过源对象中心 → 全局横向目标 0
+        const targetLat = useAnchors && anchors.dst !== undefined ? latOf(anchors.dst, c0) : 0;
+        const towardSrc: GridPoint = { x: -axis.x, y: -axis.y };
+        dstEnd = chooseSlot(dst, towardSrc, targetLat, collectOccupiedSlots(buildings, dst.index));
+        if (dstEnd === null)
+            return null;
+    }
+
+    // 轴线参考点：已确定端点的位置，或目标对象中心（两端都无 slot 时）
+    const refPoint: GridPoint = srcEnd !== null ? srcEnd.point
+        : dstEnd !== null ? dstEnd.point
+            : { x: c1.x, y: c1.y };
+
+    /**
+     * 补全未确定的一端：皮带端取轴线与皮带中心线交点；
+     * 有 slot 数据的建筑端按"朝向对端的面 + 横向坐标（= 已定端点的横向）"选 slot；
+     * 其余（分流器等无 slot 建筑）取轴线与连接面交点。
+     */
+    const completeEnd = (b: BlueprintBuilding, isSrc: boolean): SorterEnd | null => {
+        if (isBelt(b.itemId))
+            return beltEnd(b, refPoint, collectOccupiedBeltOffsets(buildings, b.index));
+        if (getBuildingSlots(b.itemId).length > 0) {
+            const toward: GridPoint = isSrc ? axis : { x: -axis.x, y: -axis.y };
+            return chooseSlot(
+                b, toward, latOf(refPoint, c0),
+                collectOccupiedSlots(buildings, b.index),
+            );
+        }
+        return slotlessEnd(b, refPoint, isSrc ? 1 : -1);
+    };
+
+    // ---- 补全另一端 ----
+    if (srcEnd === null) {
+        srcEnd = completeEnd(src, true);
+        if (srcEnd === null)
+            return null;
+    }
+    if (dstEnd === null) {
+        dstEnd = completeEnd(dst, false);
+        if (dstEnd === null)
+            return null;
+    }
+
+    // ---- 校验：两端 slot 横向一致（建筑↔建筑不能架成斜向）+ 长度 1-3 ----
+    if (srcEnd.slot >= 0 && dstEnd.slot >= 0
+        && Math.abs(srcEnd.lat - dstEnd.lat) > SLOT_LATERAL_TOLERANCE)
+        return null;
+
+    const dx = dstEnd.point.x - srcEnd.point.x;
+    const dy = dstEnd.point.y - srcEnd.point.y;
+    const len = Math.round(Math.hypot(dx, dy));
+    if (len < 1 || len > 3)
+        return null;
+
+    // ---- 分流器口唯一性（直连分拣器 slot 恒 -1，口按对端方向反推）----
+    if (srcIsSplitter) {
+        const port = splitterPortAt(src, dst, srcEnd.point);
+        if (port < 0 || collectOccupiedSplitterPorts(buildings, src.index).has(port))
+            return null;
+    }
+    if (dstIsSplitter) {
+        const port = splitterPortAt(dst, src, dstEnd.point);
+        if (port < 0 || collectOccupiedSplitterPorts(buildings, dst.index).has(port))
+            return null;
+    }
+
+    // ---- 组装分拣器记录（yaw[0] 沿运动主轴，yaw[1]/tilt 恒 0）----
+    const yaw0 = alongX ? (axis.x > 0 ? 90 : 270) : (axis.y > 0 ? 0 : 180);
+    const building = createBuilding(itemId, modelIndex, srcEnd.point, yaw0);
+    building.localOffset[1] = { x: dstEnd.point.x, y: dstEnd.point.y, z: 0 };
     building.yaw = [yaw0, 0];
     building.tilt = 0;
     (building.parameters as { length: number }).length = len;
 
-    // ========== 写入连接字段 ==========
     building.inputObjIdx = src.index;
     building.outputObjIdx = dst.index;
-
-    // slot 编号
-    if (srcIsBelt) {
-        building.inputFromSlot = -1;  // 皮带端固定 -1
-        const preferred = computeBeltOffset(p0, src);
-        const occupied = collectOccupiedBeltOffsets(buildings, src.index);
-        const offset = findNearestFreeBeltOffset(preferred, occupied);
-        if (offset === null) return null;  // 皮带可连位置全被占用
-        building.inputOffset = offset;
-    } else if (srcIsSplitter) {
-        // 四向分流器端：按几何位置定口；一字形短边封闭 / 该口已被引用 → 拒绝
-        const port = splitterPortAt(src, p0);
-        if (port < 0 || collectOccupiedSplitterPorts(buildings, src.index).has(port))
-            return null;
-        building.inputFromSlot = -1;
-        building.inputOffset = 0;
-    } else {
-        // 建筑端：端点偏移逆旋到 yaw=0 局部系，找最近空闲 slot（被占则切同侧平行 slot）
-        const [localX, localY] = toSlotLocal(src, p0.x - c0.x, p0.y - c0.y);
-        const slot = findNearestFreeSlot(
-            src.itemId, localX, localY,
-            collectOccupiedSlots(buildings, src.index),
-        );
-        // 有 slot 数据但全被占用：拒绝放置（无数据建筑保持旧行为写 -1）
-        if (slot < 0 && hasSlots(src.itemId)) return null;
-        building.inputFromSlot = slot;
-        building.inputOffset = 0;
-    }
-
-    if (dstIsBelt) {
-        building.outputToSlot = -1;  // 皮带端固定 -1
-        const preferred = computeBeltOffset(p1, dst);
-        const occupied = collectOccupiedBeltOffsets(buildings, dst.index);
-        const offset = findNearestFreeBeltOffset(preferred, occupied);
-        if (offset === null) return null;  // 皮带可连位置全被占用
-        building.outputOffset = offset;
-    } else if (dstIsSplitter) {
-        // 四向分流器端：A/B（一字形）或四口（十字形）各自唯一，不可重复引用
-        const port = splitterPortAt(dst, p1);
-        if (port < 0 || collectOccupiedSplitterPorts(buildings, dst.index).has(port))
-            return null;
-        building.outputToSlot = -1;
-        building.outputOffset = 0;
-    } else {
-        const [localX, localY] = toSlotLocal(dst, p1.x - c1.x, p1.y - c1.y);
-        const slot = findNearestFreeSlot(
-            dst.itemId, localX, localY,
-            collectOccupiedSlots(buildings, dst.index),
-        );
-        if (slot < 0 && hasSlots(dst.itemId)) return null;
-        building.outputToSlot = slot;
-        building.outputOffset = 0;
-    }
-
-    // 分拣器固定 slot
-    building.inputToSlot = 1;
+    building.inputFromSlot = srcEnd.slot;     // 建筑端 0-11，皮带/无 slot 端 -1
+    building.inputOffset = srcEnd.offset;     // 皮带端分段 offset，建筑端 0
+    building.inputToSlot = 1;                 // 分拣器自身固定 slot
+    building.outputToSlot = dstEnd.slot;
+    building.outputOffset = dstEnd.offset;
     building.outputFromSlot = 0;
+    // 第二端姿态：pose[0] 复现游戏"输入端为建筑时 ≈0.20118"的固定值
+    building.v2ExtraPose = [
+        srcIsBelt ? 0 : ROOT_HAND_REST_OFFSET,
+        dstEnd.point.x,
+        dstEnd.point.y,
+        0,
+        yaw0,
+        0,
+        0,
+    ];
 
     // 重复放置：两端点身份与已有分拣器完全相同（含反向）→ 拒绝
     if (isDuplicateSorter(building, buildings)) return null;

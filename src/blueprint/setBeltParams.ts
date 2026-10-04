@@ -19,13 +19,20 @@ export class SetBeltParamsCommand implements Command {
         private readonly field: BeltParamField,
         private value: number,
     ) {
-        const p = building.parameters as BeltParameters;
+        const p = this.ensureParams();
         this.oldIconId = p.iconId;
         this.oldCount = p.count;
     }
 
+    /** 确保传送带参数存在（游戏默认无参数，首次修改时初始化为 {iconId:0, count:0}） */
+    private ensureParams(): BeltParameters {
+        if (this.building.parameters === null)
+            this.building.parameters = { iconId: 0, count: 0 };
+        return this.building.parameters as BeltParameters;
+    }
+
     do(_data: BlueprintData, updater: Updater): void {
-        const p = this.building.parameters as BeltParameters;
+        const p = this.ensureParams();
         if (this.field === "iconId")
             p.iconId = this.value;
         else
@@ -36,7 +43,7 @@ export class SetBeltParamsCommand implements Command {
     }
 
     undo(_data: BlueprintData, updater: Updater): void {
-        const p = this.building.parameters as BeltParameters;
+        const p = this.ensureParams();
         p.iconId = this.oldIconId;
         p.count = this.oldCount;
         updater.updateBeltIcon.dispatch(this.building);
