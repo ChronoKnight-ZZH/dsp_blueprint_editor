@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-var-requires -- CLI 脚本需先注册 @/ 钩子再 require parser */
 /// <reference types="node" />
 /**
  * Compact building dump for a blueprint file: one line per building with the fields

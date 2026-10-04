@@ -445,26 +445,33 @@
 
 `createSorterBetween(src, dst, itemId, modelIndex, buildings?, anchors?)`：在两端已有对象之间构造一根分拣器（尚未入库，由 `CreateBuildingCommand` 落地）。
 
-**真实蓝图标定的连接规则**（标定样本：`tests/tools/分拣器.txt`，0.10.35，29 根分拣器；另有 `starting_base_01029` / `sorter_belt_replay` 共 122 条皮带端样本）：
+**真实蓝图标定的连接规则**（标定样本：`tests/tools/分拣器.txt`（0.10.35，29 根）、`tests/tools/分拣器示例.txt`（0.10.35，长皮带线 + 12 种建筑 × 输入/输出两个方向、长度 1/2 共 23 根）、`starting_base_01029` / `sorter_belt_replay` 共 122 条皮带端样本）：
 
 | 量 | 规则 |
 | --- | --- |
 | 主轴 | 由两端对象**整格差**的主分量决定（如制造台 (13,11) → 皮带 (11,12)：Δ=(-2,+1) → 沿 -x）；整格差为 45° 时主轴不唯一 → 拒绝 |
-| 建筑端端点 | = 该建筑某个 **slot 的坐标**（`buildingSlots`，按建筑 yaw 旋转）。slot = 朝向对端的面 + 横向坐标离目标最近者；被占用时同面切换到最近空闲 slot |
+| 方向 | 输入（`inputObjIdx`，取料端，端点写在 `localOffset[0]`）与输出（`outputObjIdx`，放料端，端点写在 `localOffset[1]`）由调用方给的 src/dst 决定，两个方向规则完全对称 |
+| 建筑端端点 | = 该建筑某个 **slot 的坐标**（`buildingSlots`，按建筑 yaw 旋转）。slot = 朝向对端的面上的候选里横向坐标离目标最近者；被占用时同面切换到最近空闲 slot |
+| 面归属 | slot 坐标投影到面法线后与该方向**极值**之差 ≤ `FACE_TOL = 0.03` 即属于该面（`faceSlotIndices`）。不用"主轴取大"：方建筑（电弧熔炉 3.2×3.2）与模型在选盒内偏移的建筑（火力发电厂）角 slot 横纵几乎相等，主轴分组会归错面——真实蓝图里从 -y 侧接入熔炉挂的是角 slot 8 而非中间 slot 7 |
 | 皮带端端点 | = **轴线与皮带中心线的交点**（把对端端点投影到皮带中心线上）；轴线与皮带方向近似平行（<26°）时投影退化，取皮带格中心 |
 | 皮带 `offset` | `floor(main × 21)`，`main` = 端点在皮带方向上相对皮带中心的投影（格），合法区间 −10..10（±半格）；≈0 的浮点噪声归零，被占用时平移到最近空闲分段中心 |
 | `length` | `round(两端点距离)`，必须落在 1–3 |
-| `yaw` | `yaw[0]` = 主轴整数角（0/90/180/270），`yaw[1]`/`tilt` = 0（游戏值带 ±0.3° 球面噪声） |
+| `yaw` | `yaw[0]` = 主轴整数角（0/90/180/270），`yaw[1]`/`tilt` = 0（游戏值带 ±0.9° 球面噪声） |
 | slot 字段 | 分拣器自身 `inputToSlot=1 / outputFromSlot=0`；建筑端 slot 0–11 且 offset 0；皮带/分流器端 slot −1 |
-| `v2ExtraPose` | `[pose0, tip.x, tip.y, tip.z, yaw0, tilt, yaw1]`，`pose0` 复现游戏"输入端为建筑时 ≈0.20118，为皮带时 ≈0" |
+| `v2ExtraPose` | `[pose0, tip.x, tip.y, tip.z, yaw0, tilt, yaw1]`，`pose0`（语义未公开，游戏自身在 −0.7..0.22 间跳变）按启发式写：输入端为建筑 → 0.20118，为皮带 → 0 |
 
 **点击锚点**（`SorterAnchors`，`src`/`dst` 为连续网格坐标）：与游戏一致，光标落在哪一列/哪一行就决定挂哪个 slot。缺省时以"对端中心"为横向基准。按锚点无解时会**忽略锚点重试一次**（例如点源建筑正中、而目标皮带在相邻一行）。
 
 **拒绝放置**（返回 `null`，编辑器预览显示红线）：两端同对象 / 45° 斜向 / 建筑 slot 面全占用 / 分流器口已被引用 / 皮带端落在皮带格之外 / 长度超出 1–3 / 建筑↔建筑两端 slot 横向偏差 > 0.35 格 / 端点重复（含反向）或与已有分拣器共线压叠。
 
-**相关常量**：`BELT_SEGMENTS_PER_CELL = 21`、`ROOT_HAND_REST_OFFSET ≈ 0.20118`、`SLOT_LATERAL_TOLERANCE = 0.35`、`FACE_CAP = 0.9`、`ENDPOINT_INSET = 0.2`（后两者用于无 slot 数据的建筑端）。`collectOccupiedSlots` 供 UI 给 slot 标记染色。
+**相关常量**：`BELT_SEGMENTS_PER_CELL = 21`、`ROOT_HAND_REST_OFFSET ≈ 0.20118`、`SLOT_LATERAL_TOLERANCE = 0.35`、`FACE_TOL = 0.03`、`FACE_CAP = 0.9`、`ENDPOINT_INSET = 0.2`（后两者用于无 slot 数据的建筑端）。`collectOccupiedSlots` 供 UI 给 slot 标记染色。
 
-**UI 接入**（`BlueprintEditor.vue`）：`anchorOffset(e)` 把屏幕位置转成连续网格坐标（命中建筑时用建筑表面命中点径向投影回球面），第一次点击记下 `sorterSourceAnchor`、悬停时记下 `sorterHoverAnchor`，预演与实际放置都把它们传给 `createSorterBetween`。
+**slot 表**（`data/buildingSlots.ts`）：数组**下标即游戏 slot 编号**，未标定的 slot 用 `null` 占位（部分标定的建筑如原油精炼厂 2308 只有 −y 面 3 个 slot 有值，其余返回 null，调用方跳过）。标定工具 `tests/tools/deriveSlots.ts` 用 `slot_local = R_Z(+yaw)·(端点 − 中心)` 从真实蓝图反推并逐项比对现有表。要点：
+- 表内 **x 为赤道基准值**：蓝图的经向格宽 ∝ cos(纬度)，从高纬度蓝图反推的 x 会偏大，本表统一换算到赤道（y 不受影响）。因此复现任意蓝图时端点会有 ≤2% 的经向差异（测试容差 0.02 格）。
+- 火力发电厂 2204 早期的表整体转了 180°（从 yaw=90/270 蓝图反推时逆变换用反了），已用 0.10.35 样本修正；微型聚变发电站 2211 与它同款模型，直接别名复用。
+- 同款模型别名：2304/2305/2318 → 2303（制造台各等级）、2315/2319 → 2302（熔炉）、2902 → 2901（研究站）、2211 → 2204。
+
+**UI 接入**（`BlueprintEditor.vue`）：`anchorOffset(e)` 把屏幕位置转成连续网格坐标（命中建筑时用建筑表面命中点径向投影回球面），第一次点击记下 `sorterSourceAnchor`、悬停时记下 `sorterHoverAnchor`，预演与实际放置都把它们传给 `createSorterBetween`；slot 标记只渲染已标定（非 null）的 slot。
 
 ---
 
@@ -669,10 +676,10 @@ python3 i18n.py ... -o ../locales     # 生成 zh/en locale
 | `setBuildingRecipe.spec.ts` | 单体配方/研究模式命令的 do/undo 与 silent 性质、merge 行为。 |
 | `normalizeArea.spec.ts` | `normalizeBlueprintAreas`：远处成簇收缩、跨 0 经线取最小弧、北半球赤道居中、单建筑 1×1；校验入参不被修改。 |
 | `stats.spec.ts` | `calculateProductionStats`：分馏塔特例、普通配方建筑、增产剂各等级倍率与自身消耗、研究站科研模式。 |
-| `sorter.spec.ts` | 分拣器连接：slot 表与同款模型复用、slot 占用切换、皮带 `offset = floor(main×21)` 编码、建筑↔皮带 / 建筑↔建筑端点、主轴与 45° 拒绝、分流器口唯一性、重复/重叠拒绝、点击锚点选 slot。 |
-| `sorter_replay.spec.ts` | 真实蓝图全量复现：`sorter_belt_replay`（3 根皮带↔皮带）与 `sorter_building_belt_replay`（29 根建筑/皮带混合，`tests/tools/分拣器.txt` 的副本）逐字段比对。 |
+| `sorter.spec.ts` | 分拣器连接：slot 表与同款模型复用、slot 占用切换、皮带 `offset = floor(main×21)` 编码、建筑↔皮带 / 建筑↔建筑端点、主轴与 45° 拒绝、分流器口唯一性、重复/重叠拒绝、点击锚点选 slot、方建筑角 slot 面归属、分拣器姿态字段启发式。 |
+| `sorter_replay.spec.ts` | 真实蓝图全量复现：`sorter_belt_replay`（3 根皮带↔皮带）、`sorter_building_belt_replay`（29 根建筑/皮带混合，`tests/tools/分拣器.txt` 副本）、`sorter_multi_building_replay`（23 根、12 种建筑 × 输入/输出两个方向 + 长度 1/2，`tests/tools/分拣器示例.txt` 副本）逐字段比对。 |
 
-fixtures 位于 `tests/unit/blueprint/fixtures/`：除原有蓝图外新增 `starting_base_01029.txt`（0.10.29 老版本基地）、`foundation_only_99.txt`、`facilities_with_foundation_320.txt`、`sorter_belt_replay.txt`、`sorter_building_belt_replay.txt`。调试/标定脚本位于 `tests/tools/`（`parseBlueprint.ts` 蓝图→JSON、`sorterReplay.ts` 分拣器连接复现比对、`dumpBuildings.ts` 紧凑建筑表、`fitBeltOffset.ts` 皮带 offset 分段数拟合），样本 `分拣器.txt` 为游戏 0.10.35 实测蓝图。
+fixtures 位于 `tests/unit/blueprint/fixtures/`：除原有蓝图外新增 `starting_base_01029.txt`（0.10.29 老版本基地）、`foundation_only_99.txt`、`facilities_with_foundation_320.txt`、`sorter_belt_replay.txt`、`sorter_building_belt_replay.txt`、`sorter_multi_building_replay.txt`。调试/标定脚本位于 `tests/tools/`（`parseBlueprint.ts` 蓝图→JSON、`sorterReplay.ts` 分拣器连接复现比对、`dumpBuildings.ts` 紧凑建筑表、`deriveSlots.ts` slot 表反推/校验、`slotScaleProbe.ts` 分区尺度诊断、`fitBeltOffset.ts` 皮带 offset 分段数拟合），样本 `分拣器.txt` / `分拣器示例.txt` 为游戏 0.10.35 实测蓝图。
 
 ### 12.3 运行
 
@@ -789,6 +796,7 @@ cat blueprint.txt | yarn cli > bp.json
 | `createSorterBetween` | 分拣器连接构造（§6.12）：主轴取两端整格差的主分量，建筑端端点落 slot、皮带端落在轴线与皮带中心线交点，皮带 `offset = floor(main × 21)`，`length = round(端点距)`。 |
 | `BELT_SEGMENTS_PER_CELL` | 21：皮带每格内部分段数（真实蓝图反推）；皮带端 offset 合法区间 −10..10（±半格）。 |
 | `SorterAnchors` | 分拣器点击锚点：光标所在列/行决定挂哪个建筑 slot；按锚点无解时忽略锚点重试一次（退回对端中心基准）。 |
+| `faceSlotIndices` | 建筑 slot 的**面归属**：slot 投影到面法线后接近该方向极值（≤ `FACE_TOL = 0.03`）即属于该面，角 slot 可同属两面。`SlotTable` 的数组下标 = slot 编号，未标定 slot 为 `null`。 |
 
 ---
 

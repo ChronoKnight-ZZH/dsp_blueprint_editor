@@ -49,31 +49,30 @@ describe('buildingSlots', () => {
 });
 
 describe('findNearestFreeSlot', () => {
-    // 火力发电厂 2204（非四条边建筑，5 slot）：
-    // slot 0/1/2 在 +x 列（1.686, -0.81/0/0.81），slot 3/4 在 -x 列
+    // 火力发电厂 2204（非四条边建筑，5 slot，模型在选盒内偏移）：
+    // slot 0/1/2 在 -x 侧（-1.686, 0.80/0/-0.80），slot 3/4 在 +x 侧（0.69, 0/0.80）
 
     test('no occupancy behaves like findNearestSlot', () => {
-        expect(findNearestFreeSlot(2204, 1.68, 0, new Set())).toBe(1);
+        expect(findNearestFreeSlot(2204, 1.68, 0, new Set())).toBe(3);
     });
 
-    test('occupied nearest slot switches to nearest parallel slot', () => {
-        // slot 1 被占 → 同侧 +x 列 slot 0/2 等距，稳定排序取小编号 0
-        expect(findNearestFreeSlot(2204, 1.68, 0, new Set([1]))).toBe(0);
+    test('occupied nearest slot switches within the same face', () => {
+        // slot 3（+x 面）被占 → 同一面内的 slot 4
+        expect(findNearestFreeSlot(2204, 1.68, 0, new Set([3]))).toBe(4);
     });
 
-    test('occupied nearest slot picks closer parallel slot', () => {
-        // 点击偏下 (1.68, -0.5)：slot 0 被占 → 切同列最近的 slot 1
-        expect(findNearestFreeSlot(2204, 1.68, -0.5, new Set([0]))).toBe(1);
+    test('click near a slot picks that slot; occupied switches to same face', () => {
+        // 点击 (0.6, 0.80) 贴近 slot 4
+        expect(findNearestFreeSlot(2204, 0.6, 0.8, new Set())).toBe(4);
+        // 点击 -x 侧偏下贴近 slot 2：被占 → 同面最近的 slot 1
+        expect(findNearestFreeSlot(2204, -1.68, -0.5, new Set([2]))).toBe(1);
     });
 
-    test('does not switch to non-parallel group', () => {
-        // slot 1（+x 列）被占，slot 3（-x 列）空闲但方向不平行 → 仍选 +x 列
-        const r = findNearestFreeSlot(2204, 1.68, 0, new Set([1]));
-        expect([0, 2]).toContain(r);
-    });
-
-    test('returns -1 when whole parallel group occupied', () => {
-        expect(findNearestFreeSlot(2204, 1.68, 0, new Set([0, 1, 2]))).toBe(-1);
+    test('does not switch to another face', () => {
+        // 点击 +x 侧，+x 面（slot 3/4）全占 → 不切到 -x 侧，返回 -1
+        expect(findNearestFreeSlot(2204, 1.68, 0, new Set([3, 4]))).toBe(-1);
+        // 点击 -x 侧，-x 面全占 → 也不切到 +x 侧
+        expect(findNearestFreeSlot(2204, -1.68, 0, new Set([0, 1, 2]))).toBe(-1);
     });
 
     test('returns -1 for unknown building', () => {
@@ -742,6 +741,126 @@ describe('blueprint-calibrated rules (分拣器.txt)', () => {
             expect(s!.inputFromSlot).toBe(3);    // +x 面偏上 slot
             expect(s!.outputToSlot).toBe(10);    // -x 面中间 slot
         });
+    });
+
+    describe('v2ExtraPose 首字段（根端为建筑时游戏固定值）', () => {
+        test('building root → ≈0.20118；belt root → 0', () => {
+            const asm = assembler(13, 11);
+            const dst = belt(11, 12, 180);
+            asm.index = 0; dst.index = 1;
+            const fromBuilding = createSorterBetween(asm, dst, 2011, 41, [asm, dst])!;
+            expect(fromBuilding.v2ExtraPose![0]).toBeCloseTo(0.20118311047554016, 6);
+
+            const beltSrc = belt(4, 11, 180);
+            const target = assembler(2, 11);
+            beltSrc.index = 0; target.index = 1;
+            const fromBelt = createSorterBetween(beltSrc, target, 2011, 41, [beltSrc, target])!;
+            expect(fromBelt.v2ExtraPose![0]).toBe(0);
+        });
+    });
+});
+
+/**
+ * 以下用例取自 tests/tools/分拣器示例.txt（游戏 0.10.35，长皮带线 + 12 种建筑 ×
+ * 输入/输出两个方向 + 长度 1/2）。它同时验证：
+ * - 方建筑（电弧熔炉 3.2×3.2）的角 slot 面归属：从 -y 接入要挂 slot 8 而不是中间的 slot 7
+ * - 大建筑（火力发电厂）slot 表在早期版本里整体转了 180°（现已修正）
+ * - 只标定了一部分 slot 的建筑（原油精炼厂）仍能连对已标定的 slot
+ */
+describe('blueprint-calibrated rules (分拣器示例.txt)', () => {
+    test('square building: -y side sorter picks the corner slot 8 (#88)', () => {
+        const beltSrc = makeBuildingAt(2001, 35, 16, 4, 90);
+        const smelter = makeBuildingAt(2302, 62, 17, 6, 0);
+        beltSrc.index = 0; smelter.index = 1;
+
+        const s = createSorterBetween(beltSrc, smelter, 2011, 41, [beltSrc, smelter], {
+            src: { x: 16, y: 4 }, dst: { x: 16, y: 5 },
+        })!;
+        expect(s).not.toBeNull();
+        expect(s.outputToSlot).toBe(8);          // 角 slot（不是 -y 面中间的 7）
+        expect(s.inputFromSlot).toBe(-1);
+        expect(s.inputOffset).toBe(4);           // main = 0.199 → floor(0.199×21) = 4
+        expect(s.localOffset[1].x).toBeCloseTo(16.199, 3);
+        expect(s.localOffset[1].y).toBeCloseTo(5.205, 3);
+        expect((s.parameters as { length: number }).length).toBe(1);
+    });
+
+    test('thermal power plant slot table is no longer rotated 180° (#80/#81)', () => {
+        // 皮带 (2,4) yaw=90 → 发电厂 (2,6) yaw=90：slot 3 在 -y 侧（旧表会算到 +y 侧）
+        const beltSrc = makeBuildingAt(2001, 35, 2, 4, 90);
+        const plant = makeBuildingAt(2204, 54, 2, 6, 90);
+        beltSrc.index = 0; plant.index = 1;
+
+        const s = createSorterBetween(beltSrc, plant, 2011, 41, [beltSrc, plant], {
+            src: { x: 2, y: 4 }, dst: { x: 2, y: 5 },
+        })!;
+        expect(s).not.toBeNull();
+        expect(s.outputToSlot).toBe(3);
+        expect(s.localOffset[1].x).toBeCloseTo(2.0, 3);
+        expect(s.localOffset[1].y).toBeCloseTo(5.308, 3);
+        expect((s.parameters as { length: number }).length).toBe(1);
+
+        // 反向（发电厂输出到皮带）：slot 4
+        const plantSrc = makeBuildingAt(2204, 54, 2, 6, 90);
+        const beltDst = makeBuildingAt(2001, 35, 3, 4, 90);
+        plantSrc.index = 0; beltDst.index = 1;
+        const back = createSorterBetween(plantSrc, beltDst, 2011, 41, [plantSrc, beltDst], {
+            src: { x: 3, y: 5 }, dst: { x: 3, y: 4 },
+        })!;
+        expect(back).not.toBeNull();
+        expect(back.inputFromSlot).toBe(4);
+        expect(back.outputOffset).toBe(-5);
+        expect((back.parameters as { length: number }).length).toBe(1);
+    });
+
+    test('fusion power station (2211) shares the thermal plant slot layout', () => {
+        expect(getBuildingSlots(2211)).toEqual(getBuildingSlots(2204));
+    });
+
+    test('partially calibrated building (oil refinery 2308) connects its known slots', () => {
+        // slot 0..5 未标定 → null 占位；slot 6/7/8 已标定
+        const slots = getBuildingSlots(2308);
+        expect(slots[6]).not.toBeNull();
+        expect(slots[7]).not.toBeNull();
+        expect(slots[0]).toBeNull();
+
+        // #102：皮带 (64,4) → 精炼厂 (64,8)，挂 -y 面中间 slot 7
+        const beltSrc = makeBuildingAt(2001, 35, 64, 4, 90);
+        const refinery = makeBuildingAt(2308, 63, 64, 8, 0);
+        beltSrc.index = 0; refinery.index = 1;
+        const s = createSorterBetween(beltSrc, refinery, 2011, 41, [beltSrc, refinery], {
+            src: { x: 64, y: 4 }, dst: { x: 64, y: 5 },
+        })!;
+        expect(s).not.toBeNull();
+        expect(s.outputToSlot).toBe(7);
+        expect(s.localOffset[1].y).toBeCloseTo(5.138, 3);
+        expect((s.parameters as { length: number }).length).toBe(1);
+
+        // #103：精炼厂输出到皮带 (63,4)，挂 -y 面角 slot 6
+        const refinerySrc = makeBuildingAt(2308, 63, 64, 8, 0);
+        const beltDst = makeBuildingAt(2001, 35, 63, 4, 90);
+        refinerySrc.index = 0; beltDst.index = 1;
+        const back = createSorterBetween(refinerySrc, beltDst, 2011, 41,
+            [refinerySrc, beltDst], { src: { x: 63, y: 5 }, dst: { x: 63, y: 4 } })!;
+        expect(back).not.toBeNull();
+        expect(back.inputFromSlot).toBe(6);
+        expect(back.outputOffset).toBe(4);
+        expect((back.parameters as { length: number }).length).toBe(1);
+    });
+
+    test('longer connection (length 2) across the belt line (#91/#92)', () => {
+        // 皮带 (20,4) → 战场分析基站 (21,0)：长度 2，挂 slot 3
+        const beltSrc = makeBuildingAt(2001, 35, 20, 4, 90);
+        const base = makeBuildingAt(3009, 453, 21, 0, 180);
+        beltSrc.index = 0; base.index = 1;
+        const s = createSorterBetween(beltSrc, base, 2011, 41, [beltSrc, base], {
+            src: { x: 20, y: 4 }, dst: { x: 20, y: 2 },
+        })!;
+        expect(s).not.toBeNull();
+        expect(s.outputToSlot).toBe(3);
+        expect((s.parameters as { length: number }).length).toBe(2);
+        expect(s.localOffset[1].x).toBeCloseTo(20.20, 1);
+        expect(s.localOffset[1].y).toBeCloseTo(1.83, 1);
     });
 });
 

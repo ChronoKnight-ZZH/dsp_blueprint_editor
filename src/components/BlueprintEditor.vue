@@ -791,20 +791,25 @@ function refreshSorterOverlay() {
     }
 
     const slots = getBuildingSlots(hoverBuilding.itemId);
-    if (slots.length > 0) {
-        // 建筑：全部 slot 染色显示
+    if (slots.some(s => s !== null)) {
+        // 建筑：已标定 slot 全部染色显示（未标定 slot 为 null，不显示标记）
         const occupied = collectOccupiedSlots(data.buildings, hover);
         const targetSlot = preview ? preview.outputToSlot : -1;
-        for (let i = 0; i < slots.length && i < SLOT_MARKER_CAP; i++) {
-            overlayLift.makeTranslation(slots[i].x, slots[i].y, 0.35);
+        let count = 0;
+        for (let i = 0; i < slots.length && count < SLOT_MARKER_CAP; i++) {
+            const slot = slots[i];
+            if (slot === null)
+                continue;
+            overlayLift.makeTranslation(slot.x, slot.y, 0.35);
             overlayM.multiplyMatrices(trans[0], overlayLift);
-            slotMarkers.setMatrixAt(i, overlayM);
-            slotMarkers.setColorAt(i,
+            slotMarkers.setMatrixAt(count, overlayM);
+            slotMarkers.setColorAt(count,
                 i === targetSlot ? SLOT_COLORS.target
                 : occupied.has(i) ? SLOT_COLORS.used
                 : SLOT_COLORS.free);
+            count++;
         }
-        slotMarkers.count = Math.min(slots.length, SLOT_MARKER_CAP);
+        slotMarkers.count = count;
         slotMarkers.instanceMatrix.needsUpdate = true;
         if (slotMarkers.instanceColor)
             slotMarkers.instanceColor.needsUpdate = true;

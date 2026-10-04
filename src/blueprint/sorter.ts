@@ -2,7 +2,7 @@ import { BlueprintBuilding } from "./parser";
 import { buildingBoxes } from "@/data/building";
 import { createBuilding } from "./create";
 import { isBelt, isInserter, isSplitter } from "@/data/items";
-import { getBuildingSlots, slotGroup } from "@/data/buildingSlots";
+import { faceSlotIndices, getBuildingSlots } from "@/data/buildingSlots";
 
 /**
  * 分拣器（inserter）连接构造：按真实蓝图（游戏 0.10.29 / 0.10.35 实测）标定的规则，
@@ -402,8 +402,8 @@ function buildSorter(
     const dstIsSplitter = isSplitter(dst.itemId);
 
     /**
-     * 建筑端 slot 选择：候选 = 朝向对端的面上的 slot（局部主分量符号一致），
-     * 按横向坐标与 targetLat 的距离升序，跳过已被占用的 slot。
+     * 建筑端 slot 选择：候选 = **朝向对端那个面**上的 slot（面归属规则见
+     * {@link faceSlotIndices}），按横向坐标与 targetLat 的距离升序，跳过已被占用的 slot。
      */
     const chooseSlot = (
         b: BlueprintBuilding,
@@ -413,16 +413,15 @@ function buildSorter(
     ): SorterEnd | null => {
         const slots = getBuildingSlots(b.itemId);
         const c = b.localOffset[0];
-        // 朝向面：把轴向转到建筑局部系后取主分量所在的面（同面 slot 共享该分组）
+        // 朝向面法线（建筑 yaw=0 局部系，slot 表就在该系下）
         const [ltx, lty] = toSlotLocal(b, toward.x, toward.y);
-        const faceGroup = Math.abs(ltx) >= Math.abs(lty)
-            ? (ltx >= 0 ? 0 : 1)
-            : (lty >= 0 ? 2 : 3);
+        const onFace = new Set(faceSlotIndices(b.itemId, { x: ltx, y: lty }));
         const candidates: { slot: number; end: SorterEnd }[] = [];
         for (let i = 0; i < slots.length; i++) {
-            if (slotGroup(slots[i]) !== faceGroup)
+            const s = slots[i];
+            if (s === null || !onFace.has(i))   // null = 该 slot 未标定
                 continue;
-            const [gx, gy] = fromSlotLocal(b, slots[i].x, slots[i].y);
+            const [gx, gy] = fromSlotLocal(b, s.x, s.y);
             const point = { x: c.x + gx, y: c.y + gy };
             candidates.push({
                 slot: i,

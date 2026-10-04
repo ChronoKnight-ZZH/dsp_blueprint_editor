@@ -1,4 +1,5 @@
 /// <reference types="node" />
+/* eslint-disable @typescript-eslint/no-var-requires -- CLI 脚本需先注册 @/ 钩子再 require parser */
 /**
  * 用项目自身的 fromStr 解析 DSP 蓝图文件，输出格式化 JSON（调试/标定用工具）。
  *

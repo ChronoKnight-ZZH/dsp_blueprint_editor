@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-var-requires -- CLI 脚本需先注册 @/ 钩子再 require parser */
 /// <reference types="node" />
 /**
  * Fit the belt-attachment offset model: offset = floor(main / (1/N)) for integer N.
