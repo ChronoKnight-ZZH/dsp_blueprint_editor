@@ -14,26 +14,28 @@ export function createEmptyBlueprint(): BlueprintData {
             layout: 10,
             icons: [0, 0, 0, 0, 0],
             time: new Date(),
-            gameVersion: '0.10.35.29104',
-            shortDesc: '新蓝图',
-            author: '',
-            blueprintVersion: '',
-            properties: '',
-            desc: '',
+            gameVersion: "0.10.35.29104",
+            shortDesc: "新蓝图",
+            author: "",
+            blueprintVersion: "",
+            properties: "",
+            desc: "",
         },
         version: 2,
         cursorOffset: { x: 0, y: 0 },
         cursorTargetArea: 0,
         dragBoxSize: { x: 0, y: 0 },
         primaryAreaIdx: 0,
-        areas: [{
-            index: 0,
-            parentIndex: -1,
-            tropicAnchor: 0,
-            areaSegments: 200,
-            anchorLocalOffset: { x: 0, y: 0 },
-            size: { x: 10, y: 161 },
-        }],
+        areas: [
+            {
+                index: 0,
+                parentIndex: -1,
+                tropicAnchor: 0,
+                areaSegments: 200,
+                anchorLocalOffset: { x: 0, y: 0 },
+                size: { x: 10, y: 161 },
+            },
+        ],
         buildings: [],
         patch: 1,
         reformData: null,
@@ -48,8 +50,8 @@ export function createEmptyBlueprint(): BlueprintData {
 export function createBuilding(
     itemId: number,
     modelIndex: number,
-    offset: { x: number, y: number },
-    yaw: number,
+    offset: { x: number; y: number },
+    yaw: number
 ): BlueprintBuilding {
     return {
         index: 0,
@@ -90,8 +92,7 @@ export class CreateBuildingCommand implements Command {
         const root = data.areas[0];
         this.prevSizeX = root.size.x;
         const areaIndex = ensureAreaFor(data, this.building.localOffset[0]);
-        if (areaIndex < 0)
-            throw new Error('Placement outside equator band');
+        if (areaIndex < 0) throw new Error("Placement outside equator band");
         this.building.areaIndex = areaIndex;
         this.building.index = data.buildings.length;
         data.buildings.push(this.building);
@@ -102,5 +103,7 @@ export class CreateBuildingCommand implements Command {
         data.areas[0].size.x = this.prevSizeX;
     }
 
-    merge() { return false; }
+    merge() {
+        return false;
+    }
 }

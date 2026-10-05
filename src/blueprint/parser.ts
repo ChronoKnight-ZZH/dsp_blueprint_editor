@@ -1,7 +1,7 @@
-import { allAssemblers } from '@/data/items';
-import pako from 'pako';
-import { digest } from './md5';
-import { normalizeBlueprintAreas } from './area';
+import { allAssemblers } from "@/data/items";
+import pako from "pako";
+import { digest } from "./md5";
+import { normalizeBlueprintAreas } from "./area";
 
 export interface BlueprintArea {
     index: number;
@@ -19,57 +19,59 @@ export interface BlueprintArea {
 }
 
 interface XYZ {
-    x: number, y: number, z: number,
+    x: number;
+    y: number;
+    z: number;
 }
 export interface BlueprintBuilding {
-    index: number,
-    areaIndex: number,
-    localOffset: [ XYZ, XYZ ],
-    yaw: [ number, number ],
-    tilt: number,
-    itemId: number,
-    modelIndex: number,
-    outputObjIdx: number,
-    inputObjIdx: number,
-    outputToSlot: number,
-    inputFromSlot: number,
-    outputFromSlot: number,
-    inputToSlot: number,
-    outputOffset: number,
-    inputOffset: number,
-    recipeId: number,
-    filterId: number,
-    parameters: null | AllParameters,
+    index: number;
+    areaIndex: number;
+    localOffset: [XYZ, XYZ];
+    yaw: [number, number];
+    tilt: number;
+    itemId: number;
+    modelIndex: number;
+    outputObjIdx: number;
+    inputObjIdx: number;
+    outputToSlot: number;
+    inputFromSlot: number;
+    outputFromSlot: number;
+    inputToSlot: number;
+    outputOffset: number;
+    inputOffset: number;
+    recipeId: number;
+    filterId: number;
+    parameters: null | AllParameters;
     /** v2 body：分拣器(2011-2014)在 yaw/tilt 之后附带的 7 个 float，语义未完全明确，字节级原样保留 */
-    v2ExtraPose?: number[],
+    v2ExtraPose?: number[];
     /** v2 body（-102 记录，0.10.34+）：信标等建筑的自定义文本，空则不存在该语义字段 */
-    content?: string,
+    content?: string;
     /** v2 body：已知字段（content 等）与下一记录起始标记之间的未知扩展字节，正常蓝图不存在，字节级原样保留 */
-    extraBytes?: Uint8Array,
+    extraBytes?: Uint8Array;
 }
 
 /** 地基（地形改造）矩形区域，每个 9 字节 */
 export interface BlueprintReformRect {
     /** 预留字节，原值保留 */
-    reserved: number,
-    x: number,
-    y: number,
-    w: number,
-    h: number,
+    reserved: number;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
     /** 地基装饰类型（data 高 3 位）：0 无地基 / 1 默认工字铺 / 2 直铺 / 7 无装饰；1、2 的小方格均为带金属光泽的金属板样式 */
-    type: number,
+    type: number;
     /** 颜色索引（data 低 5 位） */
-    color: number,
-    areaIndex: number,
+    color: number;
+    areaIndex: number;
 }
 
 /** v2 body 尾部的地基数据（reformData） */
 export interface BlueprintReformData {
     /** 预留字节，原值保留 */
-    reserved: number,
-    rects: BlueprintReformRect[],
-    customReformColorMask: number,
-    customReformColors: number[],
+    reserved: number;
+    rects: BlueprintReformRect[];
+    customReformColorMask: number;
+    customReformColors: number[];
 }
 
 export interface BlueprintData {
@@ -88,9 +90,9 @@ export interface BlueprintData {
         desc: string;
     };
     version: number;
-    cursorOffset: { x: number, y: number };
+    cursorOffset: { x: number; y: number };
     cursorTargetArea: number;
-    dragBoxSize: { x: number, y: number };
+    dragBoxSize: { x: number; y: number };
     primaryAreaIdx: number;
     areas: BlueprintArea[];
     buildings: BlueprintBuilding[];
@@ -104,14 +106,19 @@ export interface BlueprintData {
 
 abstract class BufferIO {
     protected pos = 0;
-    constructor(protected view: DataView) { }
+    constructor(protected view: DataView) {}
 
     getView(length: number) {
         if (length < 0 || this.pos + length > this.view.byteLength)
             throw new Error(
-                `蓝图数据读取越界：位置 ${this.pos}，请求 ${length} 字节，`
-                + `剩余 ${this.view.byteLength - this.pos} 字节`);
-        const r = new DataView(this.view.buffer, this.view.byteOffset + this.pos, length);
+                `蓝图数据读取越界：位置 ${this.pos}，请求 ${length} 字节，` +
+                    `剩余 ${this.view.byteLength - this.pos} 字节`
+            );
+        const r = new DataView(
+            this.view.buffer,
+            this.view.byteOffset + this.pos,
+            length
+        );
         this.pos += length;
         return r;
     }
@@ -121,18 +128,51 @@ class BufferReader extends BufferIO {
     private check(n: number) {
         if (this.pos + n > this.view.byteLength)
             throw new Error(
-                `蓝图数据读取越界：位置 ${this.pos}，请求 ${n} 字节，`
-                + `剩余 ${this.view.byteLength - this.pos} 字节`);
+                `蓝图数据读取越界：位置 ${this.pos}，请求 ${n} 字节，` +
+                    `剩余 ${this.view.byteLength - this.pos} 字节`
+            );
     }
-    getUint8() { this.check(1); const v = this.view.getUint8(this.pos);       this.pos += 1; return v }
-    getInt8()  { this.check(1); const v = this.view.getInt8(this.pos);        this.pos += 1; return v }
-    getInt16() { this.check(2); const v = this.view.getInt16(this.pos, true); this.pos += 2; return v }
-    getInt32() { this.check(4); const v = this.view.getInt32(this.pos, true); this.pos += 4; return v }
-    getUint32() { this.check(4); const v = this.view.getUint32(this.pos, true); this.pos += 4; return v }
+    getUint8() {
+        this.check(1);
+        const v = this.view.getUint8(this.pos);
+        this.pos += 1;
+        return v;
+    }
+    getInt8() {
+        this.check(1);
+        const v = this.view.getInt8(this.pos);
+        this.pos += 1;
+        return v;
+    }
+    getInt16() {
+        this.check(2);
+        const v = this.view.getInt16(this.pos, true);
+        this.pos += 2;
+        return v;
+    }
+    getInt32() {
+        this.check(4);
+        const v = this.view.getInt32(this.pos, true);
+        this.pos += 4;
+        return v;
+    }
+    getUint32() {
+        this.check(4);
+        const v = this.view.getUint32(this.pos, true);
+        this.pos += 4;
+        return v;
+    }
 
-    getFloat32() { this.check(4); const v = this.view.getFloat32(this.pos, true); this.pos += 4; return v }
+    getFloat32() {
+        this.check(4);
+        const v = this.view.getFloat32(this.pos, true);
+        this.pos += 4;
+        return v;
+    }
 
-    get position() { return this.pos; }
+    get position() {
+        return this.pos;
+    }
 
     getBytes(length: number) {
         this.check(length);
@@ -147,27 +187,42 @@ class BufferReader extends BufferIO {
         let shift = 0;
         for (;;) {
             const b = this.getUint8();
-            len |= (b & 0x7F) << shift;
-            if ((b & 0x80) === 0)
-                break;
+            len |= (b & 0x7f) << shift;
+            if ((b & 0x80) === 0) break;
             shift += 7;
-            if (shift > 35)
-                throw new Error('字符串长度前缀解析错误');
+            if (shift > 35) throw new Error("字符串长度前缀解析错误");
         }
-        if (len === 0)
-            return '';
-        return new TextDecoder('utf-8').decode(this.getView(len));
+        if (len === 0) return "";
+        return new TextDecoder("utf-8").decode(this.getView(len));
     }
 }
 
 class BufferWriter extends BufferIO {
-    setUint8(value: number) { this.view.setUint8(this.pos, value);       this.pos += 1; }
-    setInt8(value: number)  { this.view.setInt8(this.pos, value);        this.pos += 1; }
-    setInt16(value: number) { this.view.setInt16(this.pos, value, true); this.pos += 2; }
-    setInt32(value: number) { this.view.setInt32(this.pos, value, true); this.pos += 4; }
-    setUint32(value: number) { this.view.setUint32(this.pos, value, true); this.pos += 4; }
+    setUint8(value: number) {
+        this.view.setUint8(this.pos, value);
+        this.pos += 1;
+    }
+    setInt8(value: number) {
+        this.view.setInt8(this.pos, value);
+        this.pos += 1;
+    }
+    setInt16(value: number) {
+        this.view.setInt16(this.pos, value, true);
+        this.pos += 2;
+    }
+    setInt32(value: number) {
+        this.view.setInt32(this.pos, value, true);
+        this.pos += 4;
+    }
+    setUint32(value: number) {
+        this.view.setUint32(this.pos, value, true);
+        this.pos += 4;
+    }
 
-    setFloat32(value: number) { this.view.setFloat32(this.pos, value, true); this.pos += 4; }
+    setFloat32(value: number) {
+        this.view.setFloat32(this.pos, value, true);
+        this.pos += 4;
+    }
 
     setBytes(bytes: Uint8Array) {
         const start = this.view.byteOffset + this.pos;
@@ -180,10 +235,10 @@ class BufferWriter extends BufferIO {
         const bytes = new TextEncoder().encode(value);
         let len = bytes.length >>> 0;
         while (len >= 0x80) {
-            this.setUint8((len & 0x7F) | 0x80);
+            this.setUint8((len & 0x7f) | 0x80);
             len >>>= 7;
         }
-        this.setUint8(len & 0x7F);
+        this.setUint8(len & 0x7f);
         this.setBytes(bytes);
     }
 }
@@ -208,7 +263,7 @@ function btoUint8Array(b: string) {
 }
 
 function Uint8ArrayTob(a: Uint8Array) {
-    let out = '';
+    let out = "";
     for (let i = 0; i < a.length; i++) {
         out += String.fromCharCode(a[i]);
     }
@@ -217,7 +272,7 @@ function Uint8ArrayTob(a: Uint8Array) {
 
 const uint8ToHex = new Array(0x100);
 for (let i = 0; i < uint8ToHex.length; i++) {
-    uint8ToHex[i] = i.toString(16).toUpperCase().padStart(2, '0');
+    uint8ToHex[i] = i.toString(16).toUpperCase().padStart(2, "0");
 }
 function hex(buffer: ArrayBuffer) {
     const view = new Uint8Array(buffer);
@@ -225,7 +280,7 @@ function hex(buffer: ArrayBuffer) {
     for (let i = 0; i < view.length; i++) {
         hexBytes[i] = uint8ToHex[view[i]];
     }
-    return hexBytes.join('');
+    return hexBytes.join("");
 }
 
 function importArea(r: BufferReader): BlueprintArea {
@@ -242,7 +297,7 @@ function importArea(r: BufferReader): BlueprintArea {
             x: r.getInt16(),
             y: r.getInt16(),
         },
-    }
+    };
 }
 
 function exportArea(w: BufferWriter, area: BlueprintArea) {
@@ -266,7 +321,7 @@ function getParam(v: DataView, pos: number, defaultValue?: number) {
     const p = pos * Int32Array.BYTES_PER_ELEMENT;
     if (p >= v.byteLength) {
         if (defaultValue === undefined) {
-            throw new Error('参数解析错误：数据段太短');
+            throw new Error("参数解析错误：数据段太短");
         } else {
             return defaultValue;
         }
@@ -290,8 +345,16 @@ const AdvancedMiningMachineDesc = {
     numSlots: 9,
 };
 
-export enum IODir { None, Output, Input, }
-export enum LogisticRole { None, Supply, Demand, }
+export enum IODir {
+    None,
+    Output,
+    Input,
+}
+export enum LogisticRole {
+    None,
+    Supply,
+    Demand,
+}
 export interface StationParameters {
     storage: {
         itemId: number;
@@ -328,9 +391,13 @@ const stationParamsMeta = {
     storage: { base: 0, stride: 6 },
     slots: { base: 192, stride: 4 },
 } as const;
-function stationParamsParser(desc: typeof stationDesc): ParamParser<StationParameters> {
+function stationParamsParser(
+    desc: typeof stationDesc
+): ParamParser<StationParameters> {
     return {
-        encodedSize() { return 2048; },
+        encodedSize() {
+            return 2048;
+        },
         encode(p, a) {
             const base = stationParamsMeta.base;
             setParam(a, base + 0, p.workEnergyPerTick);
@@ -345,7 +412,7 @@ function stationParamsParser(desc: typeof stationDesc): ParamParser<StationParam
             setParam(a, base + 10, p.droneAutoReplenish ? 1 : 0);
             setParam(a, base + 11, p.shipAutoReplenish ? 1 : 0);
             {
-                const {base, stride} = stationParamsMeta.storage;
+                const { base, stride } = stationParamsMeta.storage;
                 for (let i = 0; i < desc.maxItemKind; i++) {
                     const s = p.storage[i];
                     setParam(a, base + i * stride + 0, s.itemId);
@@ -354,8 +421,9 @@ function stationParamsParser(desc: typeof stationDesc): ParamParser<StationParam
                     setParam(a, base + i * stride + 3, s.max);
                     setParam(a, base + i * stride + 4, s.keepMode);
                 }
-            } {
-                const {base, stride} = stationParamsMeta.slots;
+            }
+            {
+                const { base, stride } = stationParamsMeta.slots;
                 for (let i = 0; i < 12; i++) {
                     const s = p.slots[i];
                     setParam(a, base + i * stride + 0, s.dir);
@@ -368,41 +436,42 @@ function stationParamsParser(desc: typeof stationDesc): ParamParser<StationParam
             const result: StationParameters = {
                 storage: [],
                 slots: [],
-                workEnergyPerTick:      getParam(a, base + 0),
-                tripRangeOfDrones:      getParam(a, base + 1) / 100000000.0,
-                tripRangeOfShips:       getParam(a, base + 2) * 100.0,
-                includeOrbitCollector:  getParam(a, base + 3) > 0,
-                warpEnableDistance:     getParam(a, base + 4),
-                warperNecessary:        getParam(a, base + 5) > 0,
+                workEnergyPerTick: getParam(a, base + 0),
+                tripRangeOfDrones: getParam(a, base + 1) / 100000000.0,
+                tripRangeOfShips: getParam(a, base + 2) * 100.0,
+                includeOrbitCollector: getParam(a, base + 3) > 0,
+                warpEnableDistance: getParam(a, base + 4),
+                warperNecessary: getParam(a, base + 5) > 0,
                 deliveryAmountOfDrones: getParam(a, base + 6),
-                deliveryAmountOfShips:  getParam(a, base + 7),
-                pilerCount:             getParam(a, base + 8),
-                droneAutoReplenish:     getParam(a, base + 10) > 0,
-                shipAutoReplenish:      getParam(a, base + 11) > 0,
+                deliveryAmountOfShips: getParam(a, base + 7),
+                pilerCount: getParam(a, base + 8),
+                droneAutoReplenish: getParam(a, base + 10) > 0,
+                shipAutoReplenish: getParam(a, base + 11) > 0,
             };
             {
-                const {base, stride} = stationParamsMeta.storage;
+                const { base, stride } = stationParamsMeta.storage;
                 for (let i = 0; i < desc.maxItemKind; i++) {
                     result.storage.push({
-                        itemId:     getParam(a, base + i * stride + 0),
-                        localLogic:  getParam(a, base + i * stride + 1),
+                        itemId: getParam(a, base + i * stride + 0),
+                        localLogic: getParam(a, base + i * stride + 1),
                         remoteLogic: getParam(a, base + i * stride + 2),
-                        max:        getParam(a, base + i * stride + 3),
-                        keepMode:   getParam(a, base + i * stride + 4),
+                        max: getParam(a, base + i * stride + 3),
+                        keepMode: getParam(a, base + i * stride + 4),
                     });
                 }
-            } {
-                const {base, stride} = stationParamsMeta.slots;
+            }
+            {
+                const { base, stride } = stationParamsMeta.slots;
                 for (let i = 0; i < 12; i++) {
                     result.slots.push({
-                        dir:        getParam(a, base + i * stride + 0),
+                        dir: getParam(a, base + i * stride + 0),
                         storageIdx: getParam(a, base + i * stride + 1),
-                    })
+                    });
                 }
             }
             return result;
-        }
-    }
+        },
+    };
 }
 
 function advancedMiningMachineParamParser(): ParamParser<AdvancedMiningMachineParameters> {
@@ -420,8 +489,8 @@ function advancedMiningMachineParamParser(): ParamParser<AdvancedMiningMachinePa
             return Object.assign(p, {
                 miningSpeed: getParam(a, base + 9),
             });
-        }
-    }
+        },
+    };
 }
 
 export interface SplitterParameters {
@@ -431,7 +500,9 @@ export interface SplitterParameters {
 }
 
 const splitterParamParser: ParamParser<SplitterParameters> = {
-    encodedSize(_p, version = 1) { return version >= 2 ? 6 : 4; },
+    encodedSize(_p, version = 1) {
+        return version >= 2 ? 6 : 4;
+    },
     encode(p, a) {
         for (let i = 0; i < 4; i++) {
             setParam(a, i, p.priority[i] ? 1 : 0);
@@ -450,22 +521,31 @@ const splitterParamParser: ParamParser<SplitterParameters> = {
             result.priority[i] = getParam(a, i) > 0;
         }
         return result;
-    }
+    },
+};
+
+export enum AcceleratorMode {
+    ExtraOutput,
+    Accelerate,
+}
+export enum ResearchMode {
+    None,
+    Compose,
+    Research,
 }
 
-export enum AcceleratorMode { ExtraOutput, Accelerate }
-export enum ResearchMode { None, Compose, Research }
-
 export interface AssembleParamerters {
-    acceleratorMode: AcceleratorMode,
+    acceleratorMode: AcceleratorMode;
 }
 
 export interface LabParamerters extends AssembleParamerters {
-    researchMode: ResearchMode,
+    researchMode: ResearchMode;
 }
 
 const labParamParser: ParamParser<LabParamerters> = {
-    encodedSize() { return 2; },
+    encodedSize() {
+        return 2;
+    },
     encode(p, a) {
         setParam(a, 0, p.researchMode);
         setParam(a, 1, p.acceleratorMode);
@@ -474,12 +554,14 @@ const labParamParser: ParamParser<LabParamerters> = {
         return {
             researchMode: getParam(a, 0),
             acceleratorMode: getParam(a, 1),
-        }
-    }
-}
+        };
+    },
+};
 
 const assembleParamParser: ParamParser<AssembleParamerters> = {
-    encodedSize() { return 1; },
+    encodedSize() {
+        return 1;
+    },
     encode(p, a) {
         setParam(a, 0, p.acceleratorMode);
     },
@@ -488,7 +570,7 @@ const assembleParamParser: ParamParser<AssembleParamerters> = {
             acceleratorMode: getParam(a, 0),
         };
     },
-}
+};
 
 export interface BeltParameters {
     iconId: number;
@@ -496,7 +578,9 @@ export interface BeltParameters {
 }
 
 const beltParamParser: ParamParser<BeltParameters> = {
-    encodedSize() { return 2; },
+    encodedSize() {
+        return 2;
+    },
     encode(p, a) {
         setParam(a, 0, p.iconId);
         setParam(a, 1, p.count);
@@ -507,14 +591,16 @@ const beltParamParser: ParamParser<BeltParameters> = {
             count: getParam(a, 1, 0),
         };
     },
-}
+};
 
 export interface InserterParameters {
     length: number;
 }
 
 const inserterParamParser: ParamParser<InserterParameters> = {
-    encodedSize() { return 1; },
+    encodedSize() {
+        return 1;
+    },
     encode(p, a) {
         setParam(a, 0, p.length);
     },
@@ -523,7 +609,7 @@ const inserterParamParser: ParamParser<InserterParameters> = {
             length: getParam(a, 0),
         };
     },
-}
+};
 
 export interface TankParameters {
     input: boolean;
@@ -531,7 +617,9 @@ export interface TankParameters {
 }
 
 const tankParamParser: ParamParser<TankParameters> = {
-    encodedSize() { return 2; },
+    encodedSize() {
+        return 2;
+    },
     encode(p, a) {
         setParam(a, 0, p.output ? 1 : -1);
         setParam(a, 1, p.input ? 1 : -1);
@@ -542,7 +630,7 @@ const tankParamParser: ParamParser<TankParameters> = {
             input: getParam(a, 1) > 0,
         };
     },
-}
+};
 
 export enum StorageType {
     DEFAULT = 0,
@@ -557,12 +645,11 @@ export interface StorageParameters {
     grids: StorageGrid[];
 }
 
-function storageParamParser(size: number): ParamParser<StorageParameters>{
+function storageParamParser(size: number): ParamParser<StorageParameters> {
     return {
         encodedSize() {
             const s = 10 + size;
-            if (s < 110)
-                return 110;
+            if (s < 110) return 110;
             return s;
         },
         encode(p, a) {
@@ -575,7 +662,7 @@ function storageParamParser(size: number): ParamParser<StorageParameters>{
             }
         },
         decode(a) {
-            const type = getParam(a, 1, StorageType.DEFAULT)
+            const type = getParam(a, 1, StorageType.DEFAULT);
             const grids: StorageGrid[] = [];
             if (type === StorageType.FILTERED) {
                 for (let i = 0; i < size; i++) {
@@ -590,7 +677,7 @@ function storageParamParser(size: number): ParamParser<StorageParameters>{
                 grids,
             };
         },
-    }
+    };
 }
 
 export enum BattleBaseDroneConstructPriority {
@@ -621,9 +708,9 @@ function battleBaseParamParser(): ParamParser<BattleBaseParameters> {
             case StorageType.FILTERED:
                 return 10 + 60;
             default:
-                throw new Error('参数解析错误：未知的储存类型');
+                throw new Error("参数解析错误：未知的储存类型");
         }
-    }
+    };
     return {
         encodedSize() {
             return 110;
@@ -662,7 +749,7 @@ function battleBaseParamParser(): ParamParser<BattleBaseParameters> {
                 fighters,
             });
         },
-    }
+    };
 }
 
 export interface EjectorParameters {
@@ -671,7 +758,9 @@ export interface EjectorParameters {
 }
 
 const ejectorParamParser: ParamParser<EjectorParameters> = {
-    encodedSize() { return 2; },
+    encodedSize() {
+        return 2;
+    },
     encode(p, a) {
         setParam(a, 0, p.orbitId);
         setParam(a, 1, p.boost ? 1 : 0);
@@ -682,14 +771,16 @@ const ejectorParamParser: ParamParser<EjectorParameters> = {
             boost: getParam(a, 1, 0) > 0,
         };
     },
-}
+};
 
 export interface PowerGeneratorParameters {
     productId: number;
 }
 
 const powerGeneratorParamParser: ParamParser<PowerGeneratorParameters> = {
-    encodedSize() { return 1; },
+    encodedSize() {
+        return 1;
+    },
     encode(p, a) {
         setParam(a, 0, p.productId);
     },
@@ -698,14 +789,16 @@ const powerGeneratorParamParser: ParamParser<PowerGeneratorParameters> = {
             productId: getParam(a, 0),
         };
     },
-}
+};
 
 export interface ArtifacialStarParameters {
     boost: boolean;
 }
 
 const artifacialStarParamParser: ParamParser<ArtifacialStarParameters> = {
-    encodedSize() { return 1; },
+    encodedSize() {
+        return 1;
+    },
     encode(p, a) {
         setParam(a, 0, p.boost ? 1 : 0);
     },
@@ -714,7 +807,7 @@ const artifacialStarParamParser: ParamParser<ArtifacialStarParameters> = {
             boost: getParam(a, 0, 0) > 0,
         };
     },
-}
+};
 
 export enum EnergyExchangerMode {
     Discharge = -1,
@@ -727,7 +820,9 @@ export interface EnergyExchangerParameters {
 }
 
 const energyExchangerParamParser: ParamParser<EnergyExchangerParameters> = {
-    encodedSize() { return 1; },
+    encodedSize() {
+        return 1;
+    },
     encode(p, a) {
         setParam(a, 0, p.mode);
     },
@@ -736,7 +831,7 @@ const energyExchangerParamParser: ParamParser<EnergyExchangerParameters> = {
             mode: getParam(a, 0),
         };
     },
-}
+};
 
 export enum SpawnItemOperator {
     NONE = 0,
@@ -765,7 +860,9 @@ export interface MonitorParameters {
 }
 
 const MonitorParamParser: ParamParser<MonitorParameters> = {
-    encodedSize() { return 128; },
+    encodedSize() {
+        return 128;
+    },
     encode(p, a) {
         setParam(a, 0, p.targetBeltId);
         setParam(a, 1, p.offset);
@@ -813,9 +910,9 @@ const MonitorParamParser: ParamParser<MonitorParameters> = {
             alarmMode: getParam(a, 12),
 
             spawnItemOperator: getParam(a, 20),
-        }
-    }
-}
+        };
+    },
+};
 
 export enum DispenserPlayerMode {
     NONE = 0,
@@ -836,7 +933,9 @@ export interface DispenserParameters {
 }
 
 const dispenserParamParser: ParamParser<DispenserParameters> = {
-    encodedSize() { return 128; },
+    encodedSize() {
+        return 128;
+    },
     encode(p, a) {
         setParam(a, 0, p.playerMode);
         setParam(a, 1, p.storageMode);
@@ -849,35 +948,52 @@ const dispenserParamParser: ParamParser<DispenserParameters> = {
             storageMode: getParam(a, 1),
             workEnergyPerTick: getParam(a, 2),
             courierAutoReplenish: getParam(a, 3) > 0,
-        }
-    }
-}
+        };
+    },
+};
 
 export interface UnknownParamerters {
-    parameters: Int32Array,
+    parameters: Int32Array;
 }
 
 const unknownParamParser: ParamParser<UnknownParamerters> = {
-    encodedSize(p) { return p.parameters.length; },
+    encodedSize(p) {
+        return p.parameters.length;
+    },
     encode(p, a) {
         for (let i = 0; i < p.parameters.length; i++)
             setParam(a, i, p.parameters[i]);
     },
     decode(a) {
         const p: UnknownParamerters = {
-            parameters: new Int32Array(a.byteLength / Int32Array.BYTES_PER_ELEMENT),
+            parameters: new Int32Array(
+                a.byteLength / Int32Array.BYTES_PER_ELEMENT
+            ),
         };
         for (let i = 0; i < p.parameters.length; i++)
             p.parameters[i] = getParam(a, i);
         return p;
     },
-}
+};
 
-export type AllParameters = AssembleParamerters | StationParameters | AdvancedMiningMachineParameters |
-    SplitterParameters | LabParamerters | BeltParameters | InserterParameters |
-    TankParameters | StorageParameters | EjectorParameters |
-    PowerGeneratorParameters | ArtifacialStarParameters | EnergyExchangerParameters |
-    MonitorParameters | BattleBaseParameters | DispenserParameters | UnknownParamerters;
+export type AllParameters =
+    | AssembleParamerters
+    | StationParameters
+    | AdvancedMiningMachineParameters
+    | SplitterParameters
+    | LabParamerters
+    | BeltParameters
+    | InserterParameters
+    | TankParameters
+    | StorageParameters
+    | EjectorParameters
+    | PowerGeneratorParameters
+    | ArtifacialStarParameters
+    | EnergyExchangerParameters
+    | MonitorParameters
+    | BattleBaseParameters
+    | DispenserParameters
+    | UnknownParamerters;
 
 const parameterParsers = new Map<number, ParamParser<AllParameters>>([
     [2103, stationParamsParser(stationDesc)],
@@ -911,8 +1027,7 @@ for (const id of allAssemblers) {
 
 function parserFor(itemId: number) {
     const parser = parameterParsers.get(itemId);
-    if (parser !== undefined)
-        return parser;
+    if (parser !== undefined) return parser;
     return unknownParamParser;
 }
 
@@ -922,7 +1037,7 @@ function importBuilding(r: BufferReader): BlueprintBuilding {
             x: r.getFloat32(),
             y: r.getFloat32(),
             z: r.getFloat32(),
-        }
+        };
     }
     const index = r.getInt32();
     const v2 = index <= -100;
@@ -956,33 +1071,39 @@ function importBuilding(r: BufferReader): BlueprintBuilding {
 
 // ===== body version 2（游戏 0.10.34+）=====
 
-const V2_RECORD_MARKER = -102;          // 导出时使用的记录起始标记（0.10.34 格式）
-const V2_RECORD_MARKER_MIN = -100;      // 导入时接受的标记下限（0.10.33 用 -101，0.10.34 用 -102）
+const V2_RECORD_MARKER = -102; // 导出时使用的记录起始标记（0.10.34 格式）
+const V2_RECORD_MARKER_MIN = -100; // 导入时接受的标记下限（0.10.33 用 -101，0.10.34 用 -102）
 const V2_BELT_ITEM_IDS = new Set([2001, 2002, 2003]);
 const V2_INSERTER_ITEM_IDS = new Set([2011, 2012, 2013, 2014]);
 
 function isV2RecordMarkerAt(bytes: Uint8Array, off: number): boolean {
-    if (off + 8 > bytes.length)
-        return false;
+    if (off + 8 > bytes.length) return false;
     // 小端 int32：值 <= -100 即视为记录起始标记
-    const marker = bytes[off] | (bytes[off + 1] << 8) | (bytes[off + 2] << 16) | (bytes[off + 3] << 24);
-    if (marker > V2_RECORD_MARKER_MIN)
-        return false;
+    const marker =
+        bytes[off] |
+        (bytes[off + 1] << 8) |
+        (bytes[off + 2] << 16) |
+        (bytes[off + 3] << 24);
+    if (marker > V2_RECORD_MARKER_MIN) return false;
     // 随后的 index 为非负 int32（小端最高字节 < 0x80）
     return bytes[off + 7] < 0x80;
 }
 
-function importBuildingV2(r: BufferReader, bytes: Uint8Array, last: boolean): BlueprintBuilding {
+function importBuildingV2(
+    r: BufferReader,
+    bytes: Uint8Array,
+    last: boolean
+): BlueprintBuilding {
     function readXYZ(): XYZ {
         return {
             x: r.getFloat32(),
             y: r.getFloat32(),
             z: r.getFloat32(),
-        }
+        };
     }
     const marker = r.getInt32();
     if (marker > V2_RECORD_MARKER_MIN)
-        throw new Error('v2 建筑记录起始标记错误');
+        throw new Error("v2 建筑记录起始标记错误");
     const index = r.getInt32();
     const itemId = r.getInt16();
     const modelIndex = r.getInt16();
@@ -997,8 +1118,7 @@ function importBuildingV2(r: BufferReader, bytes: Uint8Array, last: boolean): Bl
         tilt = r.getFloat32();
     if (V2_INSERTER_ITEM_IDS.has(itemId)) {
         const pose: number[] = [];
-        for (let i = 0; i < 7; i++)
-            pose.push(r.getFloat32());
+        for (let i = 0; i < 7; i++) pose.push(r.getFloat32());
         v2ExtraPose = pose;
         // 7 个浮点结构：[reserved, tip.x, tip.y, tip.z, rot.x, rot.y, tip.yaw]
         // 分拣器第二端（尖端）位置位于索引 1..3
@@ -1025,8 +1145,7 @@ function importBuildingV2(r: BufferReader, bytes: Uint8Array, last: boolean): Bl
         filterId: r.getInt16(),
         parameters: null,
     };
-    if (v2ExtraPose !== undefined)
-        b.v2ExtraPose = v2ExtraPose;
+    if (v2ExtraPose !== undefined) b.v2ExtraPose = v2ExtraPose;
     const length = r.getInt16();
     if (length > 0) {
         const p = r.getView(length * Int32Array.BYTES_PER_ELEMENT);
@@ -1036,8 +1155,7 @@ function importBuildingV2(r: BufferReader, bytes: Uint8Array, last: boolean): Bl
     // -101/-100 记录（0.10.30-0.10.33）无此字段
     if (marker <= V2_RECORD_MARKER) {
         const contentLength = r.getInt32();
-        if (contentLength > 0)
-            b.content = r.getString();
+        if (contentLength > 0) b.content = r.getString();
     }
     // 非最后一条记录：已知字段结束后必须紧接下一记录的起始标记；
     // 若存在未知扩展间隙，则在有限范围内定位下一标记并把间隙作为不透明字节保留
@@ -1051,8 +1169,7 @@ function importBuildingV2(r: BufferReader, bytes: Uint8Array, last: boolean): Bl
                     break;
                 }
             }
-            if (next < 0)
-                throw new Error('v2 建筑记录存在未知的尾部扩展');
+            if (next < 0) throw new Error("v2 建筑记录存在未知的尾部扩展");
             b.extraBytes = r.getBytes(next - pos);
         }
     }
@@ -1063,15 +1180,17 @@ function importBuildingV2(r: BufferReader, bytes: Uint8Array, last: boolean): Bl
 const V2_RECORD_GAP_LIMIT = 64;
 
 function exportBuilding(w: BufferWriter, b: BlueprintBuilding) {
-    function writeXYZ(v: {x: number, y: number, z: number}) {
+    function writeXYZ(v: { x: number; y: number; z: number }) {
         w.setFloat32(v.x);
         w.setFloat32(v.y);
         w.setFloat32(v.z);
     }
     w.setInt32(b.index);
     w.setInt8(b.areaIndex);
-    writeXYZ(b.localOffset[0]); writeXYZ(b.localOffset[1]);
-    w.setFloat32(b.yaw[0]); w.setFloat32(b.yaw[1]);
+    writeXYZ(b.localOffset[0]);
+    writeXYZ(b.localOffset[1]);
+    w.setFloat32(b.yaw[0]);
+    w.setFloat32(b.yaw[1]);
     w.setInt16(b.itemId);
     w.setInt16(b.modelIndex);
     w.setInt32(b.outputObjIdx);
@@ -1089,7 +1208,10 @@ function exportBuilding(w: BufferWriter, b: BlueprintBuilding) {
         const parser = parserFor(b.itemId);
         const length = parser.encodedSize(b.parameters);
         w.setInt16(length);
-        parser.encode(b.parameters, w.getView(length * Int32Array.BYTES_PER_ELEMENT));
+        parser.encode(
+            b.parameters,
+            w.getView(length * Int32Array.BYTES_PER_ELEMENT)
+        );
     } else {
         w.setInt16(0);
     }
@@ -1100,27 +1222,26 @@ function v2BuildingSize(b: BlueprintBuilding): number {
     let result = 29;
     if (V2_BELT_ITEM_IDS.has(b.itemId) || V2_INSERTER_ITEM_IDS.has(b.itemId))
         result += 4; // tilt
-    if (V2_INSERTER_ITEM_IDS.has(b.itemId))
-        result += 7 * 4; // 不透明的第二姿态浮点
+    if (V2_INSERTER_ITEM_IDS.has(b.itemId)) result += 7 * 4; // 不透明的第二姿态浮点
     result += 20; // out/in 8 + slots 6 + recipe 2 + filter 2 + plen 2
     if (b.parameters !== null)
-        result += parserFor(b.itemId).encodedSize(b.parameters, 2) * Int32Array.BYTES_PER_ELEMENT;
+        result +=
+            parserFor(b.itemId).encodedSize(b.parameters, 2) *
+            Int32Array.BYTES_PER_ELEMENT;
     result += v2ContentSize(b.content); // content 长度前缀（必有）+ 字符串
-    if (b.extraBytes !== undefined)
-        result += b.extraBytes.length;
+    if (b.extraBytes !== undefined) result += b.extraBytes.length;
     return result;
 }
 
 /** -102 记录 content 段大小：int32 长度，非空时再追加 7-bit 前缀 + UTF-8 字节 */
 function v2ContentSize(content: string | undefined): number {
-    if (content === undefined || content.length === 0)
-        return 4;
+    if (content === undefined || content.length === 0) return 4;
     const byteLen = new TextEncoder().encode(content).length;
     return 4 + encoded7BitLength(byteLen) + byteLen;
 }
 
 function exportBuildingV2(w: BufferWriter, b: BlueprintBuilding) {
-    function writeXYZ(v: {x: number, y: number, z: number}) {
+    function writeXYZ(v: { x: number; y: number; z: number }) {
         w.setFloat32(v.x);
         w.setFloat32(v.y);
         w.setFloat32(v.z);
@@ -1137,7 +1258,15 @@ function exportBuildingV2(w: BufferWriter, b: BlueprintBuilding) {
     if (V2_INSERTER_ITEM_IDS.has(b.itemId)) {
         let pose = b.v2ExtraPose;
         if (!pose || pose.length !== 7)
-            pose = [0, b.localOffset[1].x, b.localOffset[1].y, b.localOffset[1].z, 0, 0, b.yaw[1]];
+            pose = [
+                0,
+                b.localOffset[1].x,
+                b.localOffset[1].y,
+                b.localOffset[1].z,
+                0,
+                0,
+                b.yaw[1],
+            ];
         else {
             pose = pose.slice();
             pose[1] = b.localOffset[1].x;
@@ -1145,8 +1274,7 @@ function exportBuildingV2(w: BufferWriter, b: BlueprintBuilding) {
             pose[3] = b.localOffset[1].z;
             pose[6] = b.yaw[1];
         }
-        for (const f of pose)
-            w.setFloat32(f);
+        for (const f of pose) w.setFloat32(f);
     }
     w.setInt32(b.outputObjIdx);
     w.setInt32(b.inputObjIdx);
@@ -1163,7 +1291,10 @@ function exportBuildingV2(w: BufferWriter, b: BlueprintBuilding) {
         const parser = parserFor(b.itemId);
         const length = parser.encodedSize(b.parameters, 2);
         w.setInt16(length);
-        parser.encode(b.parameters, w.getView(length * Int32Array.BYTES_PER_ELEMENT));
+        parser.encode(
+            b.parameters,
+            w.getView(length * Int32Array.BYTES_PER_ELEMENT)
+        );
     } else {
         w.setInt16(0);
     }
@@ -1174,15 +1305,16 @@ function exportBuildingV2(w: BufferWriter, b: BlueprintBuilding) {
     } else {
         w.setInt32(0);
     }
-    if (b.extraBytes !== undefined)
-        w.setBytes(b.extraBytes);
+    if (b.extraBytes !== undefined) w.setBytes(b.extraBytes);
 }
 
 // ===== v2 body 尾部：patch(int32) + reformDataFlag(u8) + reformData（0.10.33+）=====
 
 const REFORM_COUNT_LIMIT = 2930400; // 星球最大格点数量级，用于合理性校验
 
-function hasReformData(bp: BlueprintData): bp is BlueprintData & { reformData: BlueprintReformData } {
+function hasReformData(
+    bp: BlueprintData
+): bp is BlueprintData & { reformData: BlueprintReformData } {
     return bp.reformData != null && bp.reformData.rects.length > 0;
 }
 
@@ -1190,7 +1322,7 @@ function importReformData(r: BufferReader): BlueprintReformData {
     const reserved = r.getUint8();
     const rectLen = r.getInt32();
     if (rectLen < 0 || rectLen > REFORM_COUNT_LIMIT)
-        throw new Error('地基数据解析错误：rectLen 超出合法范围');
+        throw new Error("地基数据解析错误：rectLen 超出合法范围");
     const rects: BlueprintReformRect[] = [];
     for (let i = 0; i < rectLen; i++) {
         const rectReserved = r.getUint8();
@@ -1202,20 +1334,24 @@ function importReformData(r: BufferReader): BlueprintReformData {
         const areaIndex = r.getUint8();
         rects.push({
             reserved: rectReserved,
-            x, y, w, h,
+            x,
+            y,
+            w,
+            h,
             // data 高 3 位为地基装饰类型，低 5 位为颜色索引
             type: data >> 5,
-            color: data & 0x1F,
+            color: data & 0x1f,
             areaIndex,
         });
     }
     const customReformColorMask = r.getUint32();
     const colorLen = r.getInt32();
     if (colorLen < 0 || colorLen > REFORM_COUNT_LIMIT)
-        throw new Error('地基数据解析错误：customReformColors 长度超出合法范围');
+        throw new Error(
+            "地基数据解析错误：customReformColors 长度超出合法范围"
+        );
     const customReformColors: number[] = [];
-    for (let i = 0; i < colorLen; i++)
-        customReformColors.push(r.getUint32());
+    for (let i = 0; i < colorLen; i++) customReformColors.push(r.getUint32());
     return { reserved, rects, customReformColorMask, customReformColors };
 }
 
@@ -1228,13 +1364,12 @@ function exportReformData(w: BufferWriter, d: BlueprintReformData) {
         w.setInt16(rect.y);
         w.setUint8(rect.w);
         w.setUint8(rect.h);
-        w.setUint8(((rect.type & 0x07) << 5) | (rect.color & 0x1F));
+        w.setUint8(((rect.type & 0x07) << 5) | (rect.color & 0x1f));
         w.setUint8(rect.areaIndex);
     }
     w.setUint32(d.customReformColorMask >>> 0);
     w.setInt32(d.customReformColors.length);
-    for (const color of d.customReformColors)
-        w.setUint32(color >>> 0);
+    for (const color of d.customReformColors) w.setUint32(color >>> 0);
 }
 
 function reformDataSize(d: BlueprintReformData): number {
@@ -1246,50 +1381,45 @@ function importTailV2(r: BufferReader, bodyEnd: number) {
     const patch = r.getInt32();
     const reformDataFlag = r.getUint8();
     let reformData: BlueprintReformData | null = null;
-    if (reformDataFlag !== 0)
-        reformData = importReformData(r);
+    if (reformDataFlag !== 0) reformData = importReformData(r);
     const remain = bodyEnd - r.position;
     if (remain < 0)
-        throw new Error('蓝图尾部数据解析错误：地基数据超出 body 范围');
+        throw new Error("蓝图尾部数据解析错误：地基数据超出 body 范围");
     // 0.10.33 早期版本在 flag 之后仍有预留字节（实测 5 字节），语义未知，原样保留
     let tailExtraBytes: Uint8Array | undefined;
-    if (remain > 0)
-        tailExtraBytes = r.getBytes(remain);
+    if (remain > 0) tailExtraBytes = r.getBytes(remain);
     return { patch, reformData, tailExtraBytes };
 }
 
-const START = 'BLUEPRINT:';
+const START = "BLUEPRINT:";
 const TIME_BASE = new Date(0).setUTCFullYear(1);
 
 export function fromStr(strData: string): BlueprintData {
-    if (!strData.startsWith(START))
-        throw Error('Invalid start');
+    if (!strData.startsWith(START)) throw Error("Invalid start");
 
     const p1 = strData.indexOf('"', START.length);
-    const cells = strData.substring(START.length, p1).split(',');
+    const cells = strData.substring(START.length, p1).split(",");
     // cells[0] 为头部格式标记：0=旧版 12 字段；1=新版 15 字段（短描述后增加作者/蓝图版本/属性）
-    const headerFormatV2 = cells[0] === '1';
+    const headerFormatV2 = cells[0] === "1";
     if (headerFormatV2 ? cells.length < 15 : cells.length < 12)
-        throw Error('Header too short');
+        throw Error("Header too short");
     const header = {
         layout: parseInt(cells[1]),
-        icons: cells.slice(2, 7).map(s => parseInt(s)),
+        icons: cells.slice(2, 7).map((s) => parseInt(s)),
         time: new Date(TIME_BASE + parseInt(cells[8]) / 10000),
         gameVersion: cells[9],
         shortDesc: decodeURIComponent(cells[10]),
-        author: headerFormatV2 ? decodeURIComponent(cells[11]) : '',
-        blueprintVersion: headerFormatV2 ? decodeURIComponent(cells[12]) : '',
-        properties: headerFormatV2 ? decodeURIComponent(cells[13]) : '',
+        author: headerFormatV2 ? decodeURIComponent(cells[11]) : "",
+        blueprintVersion: headerFormatV2 ? decodeURIComponent(cells[12]) : "",
+        properties: headerFormatV2 ? decodeURIComponent(cells[13]) : "",
         desc: decodeURIComponent(headerFormatV2 ? cells[14] : cells[11]),
-    }
+    };
 
     const p2 = strData.length - 33;
-    if (strData[p2] !== '"')
-        throw Error('Checksum not found')
+    if (strData[p2] !== '"') throw Error("Checksum not found");
     const d = hex(digest(btoUint8Array(strData.substring(0, p2)).buffer));
     const expectedD = strData.substring(p2 + 1);
-    if (d !== expectedD)
-        throw Error('Checksum mismatch')
+    if (d !== expectedD) throw Error("Checksum mismatch");
 
     const encoded = strData.substring(p1 + 1, p2);
     const decoded = pako.ungzip(btoUint8Array(atob(encoded)));
@@ -1311,8 +1441,7 @@ export function fromStr(strData: string): BlueprintData {
 
     const numAreas = reader.getUint8();
     const areas: Array<BlueprintArea> = [];
-    for (let i = 0; i < numAreas; i++)
-        areas.push(importArea(reader));
+    for (let i = 0; i < numAreas; i++) areas.push(importArea(reader));
 
     const numBuildings = reader.getInt32();
     const buildings: Array<BlueprintBuilding> = [];
@@ -1321,7 +1450,9 @@ export function fromStr(strData: string): BlueprintData {
     let tailExtraBytes: Uint8Array | undefined;
     if (meta.version >= 2) {
         for (let i = 0; i < numBuildings; i++)
-            buildings.push(importBuildingV2(reader, decoded, i === numBuildings - 1));
+            buildings.push(
+                importBuildingV2(reader, decoded, i === numBuildings - 1)
+            );
         // 建筑数组之后：patch + reformDataFlag + reformData（+ 0.10.33 预留尾部）
         const tail = importTailV2(reader, decoded.length);
         patch = tail.patch;
@@ -1344,27 +1475,25 @@ export function fromStr(strData: string): BlueprintData {
 }
 
 function encodedSize(bp: BlueprintData): number {
-    let result = 28 // meta
-        + 1 // numAreas
-        + 14 * bp.areas.length
-        + 4; // numBuildings
+    let result =
+        28 + // meta
+        1 + // numAreas
+        14 * bp.areas.length +
+        4; // numBuildings
     if (bp.version >= 2) {
-        for (const b of bp.buildings)
-            result += v2BuildingSize(b);
+        for (const b of bp.buildings) result += v2BuildingSize(b);
         result += 4; // patch
         result += 1; // reformDataFlag
-        if (hasReformData(bp))
-            result += reformDataSize(bp.reformData);
-        if (bp.tailExtraBytes !== undefined)
-            result += bp.tailExtraBytes.length;
+        if (hasReformData(bp)) result += reformDataSize(bp.reformData);
+        if (bp.tailExtraBytes !== undefined) result += bp.tailExtraBytes.length;
         return result;
     }
     result += 61 * bp.buildings.length;
     for (const b of bp.buildings) {
-        if (b.parameters === null)
-            continue;
+        if (b.parameters === null) continue;
         const parser = parserFor(b.itemId);
-        result += parser.encodedSize(b.parameters) * Int32Array.BYTES_PER_ELEMENT;
+        result +=
+            parser.encodedSize(b.parameters) * Int32Array.BYTES_PER_ELEMENT;
     }
     return result;
 }
@@ -1374,28 +1503,28 @@ export function toStr(bp: BlueprintData): string {
     bp = normalizeBlueprintAreas(bp);
     const headerFormatV2 = bp.version >= 2;
     let result = START;
-    result += headerFormatV2 ? '1,' : '0,';
+    result += headerFormatV2 ? "1," : "0,";
     result += bp.header.layout;
-    result += ',';
+    result += ",";
     for (const i of bp.header.icons) {
         result += i;
-        result += ',';
+        result += ",";
     }
-    result += '0,';
+    result += "0,";
     result += (bp.header.time.getTime() - TIME_BASE) * 10000;
-    result += ',';
+    result += ",";
     result += bp.header.gameVersion;
-    result += ',';
+    result += ",";
     result += encodeURIComponent(bp.header.shortDesc);
     if (headerFormatV2) {
-        result += ',';
+        result += ",";
         result += encodeURIComponent(bp.header.author);
-        result += ',';
+        result += ",";
         result += encodeURIComponent(bp.header.blueprintVersion);
-        result += ',';
+        result += ",";
         result += encodeURIComponent(bp.header.properties);
     }
-    result += ',';
+    result += ",";
     result += encodeURIComponent(bp.header.desc);
     result += '"';
 
@@ -1410,15 +1539,12 @@ export function toStr(bp: BlueprintData): string {
     writer.setInt32(bp.primaryAreaIdx);
 
     writer.setUint8(bp.areas.length);
-    for (const a of bp.areas)
-        exportArea(writer, a);
+    for (const a of bp.areas) exportArea(writer, a);
 
     writer.setInt32(bp.buildings.length);
     for (const b of bp.buildings) {
-        if (bp.version >= 2)
-            exportBuildingV2(writer, b);
-        else
-            exportBuilding(writer, b);
+        if (bp.version >= 2) exportBuildingV2(writer, b);
+        else exportBuilding(writer, b);
     }
 
     if (bp.version >= 2) {
@@ -1430,14 +1556,13 @@ export function toStr(bp: BlueprintData): string {
         } else {
             writer.setUint8(0);
         }
-        if (bp.tailExtraBytes !== undefined)
-            writer.setBytes(bp.tailExtraBytes);
+        if (bp.tailExtraBytes !== undefined) writer.setBytes(bp.tailExtraBytes);
     }
 
     result += btoa(Uint8ArrayTob(pako.gzip(decoded)));
     const d = hex(digest(btoUint8Array(result).buffer));
 
-    result += '"'
+    result += '"';
     result += d;
 
     return result;

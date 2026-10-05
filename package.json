@@ -9,7 +9,8 @@
         "lint": "vue-cli-service lint",
         "build-cli": "tsc --module commonjs --outDir cli",
         "cli": "ts-node -O '{\"module\": \"commonjs\"}' src/cli.ts",
-        "i18n:report": "vue-cli-service i18n:report --src \"./src/**/*.?(js|vue)\" --locales \"./src/locales/**/*.json\""
+        "i18n:report": "vue-cli-service i18n:report --src \"./src/**/*.?(js|vue)\" --locales \"./src/locales/**/*.json\"",
+        "format": "prettier --write \"src/**/*.{js,ts,jsx,tsx,vue,json,css,scss,md}\""
     },
     "dependencies": {
         "core-js": "^3.25.5",

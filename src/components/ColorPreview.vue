@@ -1,10 +1,14 @@
 <template>
-    <span class="color-preview" :style="{backgroundColor: cssColor}" :title="colorId.toString()"></span>
+    <span
+        class="color-preview"
+        :style="{ backgroundColor: cssColor }"
+        :title="colorId.toString()"
+    ></span>
 </template>
 
 <script lang="ts" setup>
-import { computed } from 'vue';
-import { colorPalette256 } from '@/data/color';
+import { computed } from "vue";
+import { colorPalette256 } from "@/data/color";
 
 const props = defineProps<{
     colorId: number;

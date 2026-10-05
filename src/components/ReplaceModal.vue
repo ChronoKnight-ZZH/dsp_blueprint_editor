@@ -1,70 +1,140 @@
 <template>
     <Modal v-model:open="open">
-        <h2>{{t('批量替换')}}</h2>
+        <h2>{{ t("批量替换") }}</h2>
         <div>
-            {{t('范围：')}}
+            {{ t("范围：") }}
             <span class="replace-scope">
-                <input type="checkbox" id="replace-recipe" v-model="r.scope.recipe" @change="onScopeChange('recipe')"><label for="replace-recipe">{{t('配方')}}</label>
+                <input
+                    type="checkbox"
+                    id="replace-recipe"
+                    v-model="r.scope.recipe"
+                    @change="onScopeChange('recipe')"
+                /><label for="replace-recipe">{{ t("配方") }}</label>
             </span>
             <span class="replace-scope">
-                <input type="checkbox" id="replace-filter" v-model="r.scope.filter" @change="onScopeChange('filter')"><label for="replace-filter">{{t('分拣器筛选')}}</label>
+                <input
+                    type="checkbox"
+                    id="replace-filter"
+                    v-model="r.scope.filter"
+                    @change="onScopeChange('filter')"
+                /><label for="replace-filter">{{ t("分拣器筛选") }}</label>
             </span>
             <span class="replace-scope">
-                <input type="checkbox" id="replace-station" v-model="r.scope.station" @change="onScopeChange('station')"><label for="replace-station">{{t('物流塔栏位')}}</label>
+                <input
+                    type="checkbox"
+                    id="replace-station"
+                    v-model="r.scope.station"
+                    @change="onScopeChange('station')"
+                /><label for="replace-station">{{ t("物流塔栏位") }}</label>
             </span>
             <span class="replace-scope">
-                <input type="checkbox" id="replace-band-icon" v-model="r.scope.beltIcon" @change="onScopeChange('beltIcon')"><label for="replace-band-icon">{{t('传送带图标')}}</label>
+                <input
+                    type="checkbox"
+                    id="replace-band-icon"
+                    v-model="r.scope.beltIcon"
+                    @change="onScopeChange('beltIcon')"
+                /><label for="replace-band-icon">{{ t("传送带图标") }}</label>
             </span>
             <span class="replace-scope">
-                <input type="checkbox" id="replace-bp-icon" v-model="r.scope.blueprintIcon" @change="onScopeChange('blueprintIcon')"><label for="replace-bp-icon">{{t('蓝图图标')}}</label>
+                <input
+                    type="checkbox"
+                    id="replace-bp-icon"
+                    v-model="r.scope.blueprintIcon"
+                    @change="onScopeChange('blueprintIcon')"
+                /><label for="replace-bp-icon">{{ t("蓝图图标") }}</label>
             </span>
             <span class="replace-scope">
-                <input type="checkbox" id="replace-building-level" v-model="r.scope.buildingLevel" @change="onScopeChange('buildingLevel')"><label for="replace-building-level">{{t('升降建筑等级')}}</label>
+                <input
+                    type="checkbox"
+                    id="replace-building-level"
+                    v-model="r.scope.buildingLevel"
+                    @change="onScopeChange('buildingLevel')"
+                /><label for="replace-building-level">{{
+                    t("升降建筑等级")
+                }}</label>
             </span>
         </div>
         <template v-if="r.scope.buildingLevel">
-            <div>{{t('源建筑：')}}</div>
+            <div>{{ t("源建筑：") }}</div>
             <div class="icon-row">
-                <span v-for="id in sourceOptions" :key="id" class="icon-cell"
-                      :class="{selected: r.sourceItemId === id}"
-                      :title="itemName(id)" @click="r.sourceItemId = id">
-                    <BuildingIcon :icon-id="itemIconId(id)" :alt="itemName(id)"/>
+                <span
+                    v-for="id in sourceOptions"
+                    :key="id"
+                    class="icon-cell"
+                    :class="{ selected: r.sourceItemId === id }"
+                    :title="itemName(id)"
+                    @click="r.sourceItemId = id"
+                >
+                    <BuildingIcon
+                        :icon-id="itemIconId(id)"
+                        :alt="itemName(id)"
+                    />
                 </span>
             </div>
-            <div>{{t('目标建筑：')}}</div>
+            <div>{{ t("目标建筑：") }}</div>
             <div class="icon-row">
-                <span v-if="targetOptions.length === 0" class="empty-hint">{{t('请选择源建筑')}}</span>
-                <span v-for="id in targetOptions" :key="id" class="icon-cell"
-                      :class="{selected: r.targetItemId === id}"
-                      :title="itemName(id)" @click="r.targetItemId = id">
-                    <BuildingIcon :icon-id="itemIconId(id)" :alt="itemName(id)"/>
+                <span v-if="targetOptions.length === 0" class="empty-hint">{{
+                    t("请选择源建筑")
+                }}</span>
+                <span
+                    v-for="id in targetOptions"
+                    :key="id"
+                    class="icon-cell"
+                    :class="{ selected: r.targetItemId === id }"
+                    :title="itemName(id)"
+                    @click="r.targetItemId = id"
+                >
+                    <BuildingIcon
+                        :icon-id="itemIconId(id)"
+                        :alt="itemName(id)"
+                    />
                 </span>
             </div>
         </template>
         <template v-else>
-            <div>{{t('搜索：')}} <RecipeSelect v-model:recipeId="r.searchRecipe"/></div>
-            <div>{{t('替换：')}} <RecipeSelect v-model:recipeId="r.replaceRecipe"/></div>
+            <div>
+                {{ t("搜索：") }}
+                <RecipeSelect v-model:recipeId="r.searchRecipe" />
+            </div>
+            <div>
+                {{ t("替换：") }}
+                <RecipeSelect v-model:recipeId="r.replaceRecipe" />
+            </div>
         </template>
-                    <!-- 生产模式（仅配方范围勾选时显示） -->
-            <section v-if="r.scope.recipe" class="modal-section">
-                <div class="section-label">{{ t('生产模式：') }}</div>
-                <div class="radio-group">
-                    <label class="radio-option">
-                        <input type="radio" :value="null" v-model="r.acceleratorMode" />
-                        <span>{{ t('不改变') }}</span>
-                    </label>
-                    <label class="radio-option">
-                        <input type="radio" :value="AcceleratorMode.ExtraOutput" v-model="r.acceleratorMode" />
-                        <span>{{ t('额外产出') }}</span>
-                    </label>
-                    <label class="radio-option">
-                        <input type="radio" :value="AcceleratorMode.Accelerate" v-model="r.acceleratorMode" />
-                        <span>{{ t('生产加速') }}</span>
-                    </label>
-                </div>
-            </section>
+        <!-- 生产模式（仅配方范围勾选时显示） -->
+        <section v-if="r.scope.recipe" class="modal-section">
+            <div class="section-label">{{ t("生产模式：") }}</div>
+            <div class="radio-group">
+                <label class="radio-option">
+                    <input
+                        type="radio"
+                        :value="null"
+                        v-model="r.acceleratorMode"
+                    />
+                    <span>{{ t("不改变") }}</span>
+                </label>
+                <label class="radio-option">
+                    <input
+                        type="radio"
+                        :value="AcceleratorMode.ExtraOutput"
+                        v-model="r.acceleratorMode"
+                    />
+                    <span>{{ t("额外产出") }}</span>
+                </label>
+                <label class="radio-option">
+                    <input
+                        type="radio"
+                        :value="AcceleratorMode.Accelerate"
+                        v-model="r.acceleratorMode"
+                    />
+                    <span>{{ t("生产加速") }}</span>
+                </label>
+            </div>
+        </section>
         <div>
-            <button @click="execute" :disabled="!canExecute">{{t('全部替换')}}</button>
+            <button @click="execute" :disabled="!canExecute">
+                {{ t("全部替换") }}
+            </button>
         </div>
     </Modal>
 </template>
@@ -74,7 +144,11 @@ import { computed, inject, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 import { ReplaceCommand, ReplaceParams } from "@/blueprint/replace";
-import { UpgradeCommand, upgradeableItems, reachableTargets } from "@/blueprint/upgrade";
+import {
+    UpgradeCommand,
+    upgradeableItems,
+    reachableTargets,
+} from "@/blueprint/upgrade";
 import { AcceleratorMode, BlueprintData } from "@/blueprint/parser";
 import { SetAcceleratorCommand } from "@/blueprint/setAccelerator";
 import Modal from "./ModalDSP.vue";
@@ -105,8 +179,8 @@ defineExpose({
             buildingLevel: false,
         };
     },
-    open: () => open.value = true,
-})
+    open: () => (open.value = true),
+});
 
 const r = reactive({
     searchRecipe: null as null | number,
@@ -126,92 +200,130 @@ const r = reactive({
 });
 
 // ③ 取消勾选“配方”时清空生产模式选择
-watch(() => r.scope.recipe, (on) => {
-    if (!on)
-        r.acceleratorMode = null;
-});
+watch(
+    () => r.scope.recipe,
+    (on) => {
+        if (!on) r.acceleratorMode = null;
+    }
+);
 
-
-const props = defineProps<{ blueprint: BlueprintData }>()
+const props = defineProps<{ blueprint: BlueprintData }>();
 
 // 升降级：源建筑候选 = 全部可升降级建筑
-const targetItemOrder: number[] = [2001, 2002, 2003, 2011, 2012, 2013, 2014, 2303, 2304, 2305, 2318, 2302, 2315, 2319, 2309, 2317, 2901, 2902]
+const targetItemOrder: number[] = [
+    2001, 2002, 2003, 2011, 2012, 2013, 2014, 2303, 2304, 2305, 2318, 2302,
+    2315, 2319, 2309, 2317, 2901, 2902,
+];
 const sourceOptions = computed(() => {
-    return upgradeableItems.filter(id => targetItemOrder.includes(id)).sort((a, b) => targetItemOrder.indexOf(a) - targetItemOrder.indexOf(b));
+    return upgradeableItems
+        .filter((id) => targetItemOrder.includes(id))
+        .sort(
+            (a, b) => targetItemOrder.indexOf(a) - targetItemOrder.indexOf(b)
+        );
 });
 // 目标建筑候选 = 从源建筑可达的全部节点（升级 + 降级，含跳级）
 const targetOptions = computed(() => {
-    if (r.sourceItemId === null)
-        return [];
+    if (r.sourceItemId === null) return [];
     return reachableTargets(r.sourceItemId);
 });
 
 // 切换源建筑时清空已选目标，避免出现非法组合
-watch(() => r.sourceItemId, () => { r.targetItemId = null; });
+watch(
+    () => r.sourceItemId,
+    () => {
+        r.targetItemId = null;
+    }
+);
 
 /**
  * 范围多选组的互斥逻辑：
  * “升降建筑等级”与其余所有选项互斥——勾选它时清空其它，勾选任意其它时清空它。
  */
-const otherScopes = ['recipe', 'filter', 'station', 'beltIcon', 'blueprintIcon'] as const;
-const onScopeChange = (key: typeof otherScopes[number] | 'buildingLevel') => {
-    if (key === 'buildingLevel') {
+const otherScopes = [
+    "recipe",
+    "filter",
+    "station",
+    "beltIcon",
+    "blueprintIcon",
+] as const;
+const onScopeChange = (key: (typeof otherScopes)[number] | "buildingLevel") => {
+    if (key === "buildingLevel") {
         if (r.scope.buildingLevel)
-            for (const k of otherScopes)
-                r.scope[k] = false;
+            for (const k of otherScopes) r.scope[k] = false;
     } else {
-        if (r.scope[key])
-            r.scope.buildingLevel = false;
+        if (r.scope[key]) r.scope.buildingLevel = false;
     }
 };
 
 // 切回非升降级模式时清空升降级选择，避免脏数据
-watch(() => r.scope.buildingLevel, (lv) => {
-    if (!lv) {
-        r.sourceItemId = null;
-        r.targetItemId = null;
+watch(
+    () => r.scope.buildingLevel,
+    (lv) => {
+        if (!lv) {
+            r.sourceItemId = null;
+            r.targetItemId = null;
+        }
     }
-});
+);
 
 // 取消勾选“配方”时，同时关闭“切换生产模式”，避免残留状态
-watch(() => r.scope.recipe, (on) => {
-    if (!on)
-        r.acceleratorMode = null;
-});
+watch(
+    () => r.scope.recipe,
+    (on) => {
+        if (!on) r.acceleratorMode = null;
+    }
+);
 
 const canExecute = computed(() => {
     if (r.scope.buildingLevel)
         return r.sourceItemId !== null && r.targetItemId !== null;
 
-    const hasReplaceScope = r.scope.recipe || r.scope.filter || r.scope.station || r.scope.beltIcon || r.scope.blueprintIcon;
+    const hasReplaceScope =
+        r.scope.recipe ||
+        r.scope.filter ||
+        r.scope.station ||
+        r.scope.beltIcon ||
+        r.scope.blueprintIcon;
     const hasValidRecipe = r.searchRecipe !== null && r.replaceRecipe !== null;
 
     // 有替换范围且配方有效 → 可以执行替换
-    if (hasReplaceScope && hasValidRecipe)
-        return true;
+    if (hasReplaceScope && hasValidRecipe) return true;
 
     // 勾选了配方范围但配方无效（为空），只要选了加速模式 → 仅执行加速模式
-    if (r.scope.recipe && r.acceleratorMode !== null)
-        return true;
+    if (r.scope.recipe && r.acceleratorMode !== null) return true;
 
     return false;
 });
 
 const execute = () => {
-    if (!canExecute.value)
-        return;
+    if (!canExecute.value) return;
 
     if (r.scope.buildingLevel) {
-        commandQueue.push(new UpgradeCommand(props.blueprint, r.sourceItemId!, r.targetItemId!));
+        commandQueue.push(
+            new UpgradeCommand(
+                props.blueprint,
+                r.sourceItemId!,
+                r.targetItemId!
+            )
+        );
     } else {
-        const hasReplaceScope = r.scope.recipe || r.scope.filter || r.scope.station || r.scope.beltIcon || r.scope.blueprintIcon;
-        const hasValidRecipe = r.searchRecipe !== null && r.replaceRecipe !== null;
+        const hasReplaceScope =
+            r.scope.recipe ||
+            r.scope.filter ||
+            r.scope.station ||
+            r.scope.beltIcon ||
+            r.scope.blueprintIcon;
+        const hasValidRecipe =
+            r.searchRecipe !== null && r.replaceRecipe !== null;
 
         let replaceCmd: ReplaceCommand | null = null;
 
         // 仅当有替换范围且配方完整时，才执行替换
         if (hasReplaceScope && hasValidRecipe) {
-            replaceCmd = new ReplaceCommand(props.blueprint, r as ReplaceParams);
+            replaceCmd = new ReplaceCommand(
+                props.blueprint,
+                r as ReplaceParams
+            );
             commandQueue.push(replaceCmd);
         }
 
@@ -219,19 +331,23 @@ const execute = () => {
         if (r.acceleratorMode !== null) {
             if (r.scope.recipe && replaceCmd) {
                 // 勾选了配方且执行了替换：只作用于被替换的建筑
-                const indexes = replaceCmd.recipeBuildings.map(b => b.index);
+                const indexes = replaceCmd.recipeBuildings.map((b) => b.index);
                 if (indexes.length > 0) {
-                    commandQueue.push(new SetAcceleratorCommand(props.blueprint, {
-                        mode: r.acceleratorMode,
-                        buildingIndexes: indexes,
-                    }));
+                    commandQueue.push(
+                        new SetAcceleratorCommand(props.blueprint, {
+                            mode: r.acceleratorMode,
+                            buildingIndexes: indexes,
+                        })
+                    );
                 }
                 // 若 indexes 为空，则不推送加速命令（与原逻辑一致）
             } else {
                 // 未执行替换，或未勾选配方：作用于全部建筑
-                commandQueue.push(new SetAcceleratorCommand(props.blueprint, {
-                    mode: r.acceleratorMode,
-                }));
+                commandQueue.push(
+                    new SetAcceleratorCommand(props.blueprint, {
+                        mode: r.acceleratorMode,
+                    })
+                );
             }
         }
     }

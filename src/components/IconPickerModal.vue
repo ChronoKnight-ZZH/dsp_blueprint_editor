@@ -1,68 +1,104 @@
 <template>
     <Modal v-model:open="open">
-        <h2>{{ t('选择图标') }}</h2>
+        <h2>{{ t("选择图标") }}</h2>
         <div class="icon-picker-tabs">
-            <div v-for="tab of tabs" :key="tab.id" class="icon-picker-tab"
-                 :class="{ active: category === tab.id }"
-                 @click="category = tab.id">{{ t(tab.label) }}</div>
+            <div
+                v-for="tab of tabs"
+                :key="tab.id"
+                class="icon-picker-tab"
+                :class="{ active: category === tab.id }"
+                @click="category = tab.id"
+            >
+                {{ t(tab.label) }}
+            </div>
         </div>
         <div class="icon-picker-grid">
-            <button type="button" v-for="id of iconIds" :key="id" class="icon-cell"
-                    :title="nameOf(id)" @click="choose(id)">
-                <BuildingIcon :icon-id="id" :alt="nameOf(id)"/>
+            <button
+                type="button"
+                v-for="id of iconIds"
+                :key="id"
+                class="icon-cell"
+                :title="nameOf(id)"
+                @click="choose(id)"
+            >
+                <BuildingIcon :icon-id="id" :alt="nameOf(id)" />
             </button>
         </div>
         <div class="icon-picker-actions">
-            <button type="button" class="clear-btn" @click="clear">{{ t('清除图标') }}</button>
+            <button type="button" class="clear-btn" @click="clear">
+                {{ t("清除图标") }}
+            </button>
         </div>
     </Modal>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import { useI18n } from 'vue-i18n';
+import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
 
-import Modal from './ModalDSP.vue';
-import BuildingIcon from './BuildingIcon.vue';
-import { itemsMap } from '@/data/items';
-import { recipesMap } from '@/data/recipes';
-import { signal } from '@/data/signalIconsData';
-import { tech } from '@/data/techIconsData';
-import { itemIconId, recipeIconId, signalIconId, techIconId } from '@/data/icons';
-import { itemName, recipeName } from '@/i18n';
+import Modal from "./ModalDSP.vue";
+import BuildingIcon from "./BuildingIcon.vue";
+import { itemsMap } from "@/data/items";
+import { recipesMap } from "@/data/recipes";
+import { signal } from "@/data/signalIconsData";
+import { tech } from "@/data/techIconsData";
+import {
+    itemIconId,
+    recipeIconId,
+    signalIconId,
+    techIconId,
+} from "@/data/icons";
+import { itemName, recipeName } from "@/i18n";
 
 const { t } = useI18n();
 
 const open = ref(false);
 
 defineExpose({
-    open: () => open.value = true,
-})
+    open: () => (open.value = true),
+});
 
 const emit = defineEmits<{
-    (event: 'select', iconId: number): void,
+    (event: "select", iconId: number): void;
 }>();
 
-type Category = 'item' | 'building' | 'recipe' | 'signal' | 'tech' | 'upgrade1' | 'upgrade2';
-const category = ref<Category>('item');
+type Category =
+    | "item"
+    | "building"
+    | "recipe"
+    | "signal"
+    | "tech"
+    | "upgrade1"
+    | "upgrade2";
+const category = ref<Category>("item");
 
-const tabs: { id: Category, label: string }[] = [
-    { id: 'item',     label: '物品' },
-    { id: 'building', label: '建筑' },
-    { id: 'recipe',   label: '配方' },
-    { id: 'signal',   label: '信号' },
-    { id: 'tech',     label: '科技' },
-    { id: 'upgrade1', label: '升级I' },
-    { id: 'upgrade2', label: '升级II' },
+const tabs: { id: Category; label: string }[] = [
+    { id: "item", label: "物品" },
+    { id: "building", label: "建筑" },
+    { id: "recipe", label: "配方" },
+    { id: "signal", label: "信号" },
+    { id: "tech", label: "科技" },
+    { id: "upgrade1", label: "升级I" },
+    { id: "upgrade2", label: "升级II" },
 ];
 
-const itemIds = [...itemsMap.values()].filter(i => i.productive).map(i => itemIconId(i.id));
-const buildingIds = [...itemsMap.values()].filter(i => !i.productive).map(i => itemIconId(i.id));
-const recipeIds = [...recipesMap.values()].filter(r => r.icon).map(r => recipeIconId(r.id));
-const signalIds = signal.map(s => signalIconId(s.id));
-const techIds = tech.filter(x => x.id < 2000).map(x => techIconId(x.id));
-const upgrade1Ids = tech.filter(x => x.id >= 2000 && x.id < 3000).map(x => techIconId(x.id));
-const upgrade2Ids = tech.filter(x => x.id >= 3000).map(x => techIconId(x.id));
+const itemIds = [...itemsMap.values()]
+    .filter((i) => i.productive)
+    .map((i) => itemIconId(i.id));
+const buildingIds = [...itemsMap.values()]
+    .filter((i) => !i.productive)
+    .map((i) => itemIconId(i.id));
+const recipeIds = [...recipesMap.values()]
+    .filter((r) => r.icon)
+    .map((r) => recipeIconId(r.id));
+const signalIds = signal.map((s) => signalIconId(s.id));
+const techIds = tech.filter((x) => x.id < 2000).map((x) => techIconId(x.id));
+const upgrade1Ids = tech
+    .filter((x) => x.id >= 2000 && x.id < 3000)
+    .map((x) => techIconId(x.id));
+const upgrade2Ids = tech
+    .filter((x) => x.id >= 3000)
+    .map((x) => techIconId(x.id));
 
 const iconsByCategory: Record<Category, number[]> = {
     item: itemIds,
@@ -76,24 +112,21 @@ const iconsByCategory: Record<Category, number[]> = {
 const iconIds = computed(() => iconsByCategory[category.value]);
 
 const nameOf = (id: number): string => {
-    if (id < 1000)
-        return `${t('信号')} ${id}`;
-    if (id < 20000)
-        return itemName(id);
-    if (id < 40000)
-        return recipeName(id - 20000);
-    return `${t('科技')} ${id - 40000}`;
-}
+    if (id < 1000) return `${t("信号")} ${id}`;
+    if (id < 20000) return itemName(id);
+    if (id < 40000) return recipeName(id - 20000);
+    return `${t("科技")} ${id - 40000}`;
+};
 
 const choose = (id: number) => {
     open.value = false;
-    emit('select', id);
-}
+    emit("select", id);
+};
 
 const clear = () => {
     open.value = false;
-    emit('select', 0);
-}
+    emit("select", 0);
+};
 </script>
 
 <style lang="scss">

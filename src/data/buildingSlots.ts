@@ -25,34 +25,34 @@ export type SlotTable = (SlotPos | null)[];
 
 /** 储物仓·小 (2101) 12 slot */
 const storage2101: SlotTable = [
-    { x: -0.7991, y: 0.7955 },   // slot 0
-    { x: 0.0000, y: 0.7950 },    // slot 1
-    { x: 0.7992, y: 0.7955 },    // slot 2
-    { x: 0.7992, y: 0.7955 },    // slot 3
-    { x: 0.8001, y: 0.0005 },    // slot 4
-    { x: 0.8012, y: -0.7945 },   // slot 5
-    { x: 0.8012, y: -0.7945 },   // slot 6
-    { x: 0.0000, y: -0.7950 },   // slot 7
-    { x: -0.8012, y: -0.7947 },  // slot 8（反推）
-    { x: -0.8012, y: -0.7945 },  // slot 9
-    { x: -0.8001, y: 0.0005 },   // slot 10
-    { x: -0.7991, y: 0.7955 },   // slot 11
+    { x: -0.7991, y: 0.7955 }, // slot 0
+    { x: 0.0, y: 0.795 }, // slot 1
+    { x: 0.7992, y: 0.7955 }, // slot 2
+    { x: 0.7992, y: 0.7955 }, // slot 3
+    { x: 0.8001, y: 0.0005 }, // slot 4
+    { x: 0.8012, y: -0.7945 }, // slot 5
+    { x: 0.8012, y: -0.7945 }, // slot 6
+    { x: 0.0, y: -0.795 }, // slot 7
+    { x: -0.8012, y: -0.7947 }, // slot 8（反推）
+    { x: -0.8012, y: -0.7945 }, // slot 9
+    { x: -0.8001, y: 0.0005 }, // slot 10
+    { x: -0.7991, y: 0.7955 }, // slot 11
 ];
 
 /** 储物仓·大 (2102) 12 slot */
 const storage2102: SlotTable = [
-    { x: -0.8028, y: 0.8750 },   // slot 0
-    { x: 0.0000, y: 0.8745 },    // slot 1
-    { x: 0.8027, y: 0.8748 },    // slot 2（反推）
-    { x: 1.8466, y: 0.7978 },    // slot 3
-    { x: 1.8490, y: 0.0028 },    // slot 4
-    { x: 1.8514, y: -0.7922 },   // slot 5
-    { x: 0.8050, y: -0.8740 },   // slot 6
-    { x: 0.0000, y: -0.8745 },   // slot 7
-    { x: -0.8050, y: -0.8740 },  // slot 8
-    { x: -1.8515, y: -0.7922 },  // slot 9
-    { x: -1.8491, y: 0.0028 },   // slot 10
-    { x: -1.8466, y: 0.7978 },   // slot 11
+    { x: -0.8028, y: 0.875 }, // slot 0
+    { x: 0.0, y: 0.8745 }, // slot 1
+    { x: 0.8027, y: 0.8748 }, // slot 2（反推）
+    { x: 1.8466, y: 0.7978 }, // slot 3
+    { x: 1.849, y: 0.0028 }, // slot 4
+    { x: 1.8514, y: -0.7922 }, // slot 5
+    { x: 0.805, y: -0.874 }, // slot 6
+    { x: 0.0, y: -0.8745 }, // slot 7
+    { x: -0.805, y: -0.874 }, // slot 8
+    { x: -1.8515, y: -0.7922 }, // slot 9
+    { x: -1.8491, y: 0.0028 }, // slot 10
+    { x: -1.8466, y: 0.7978 }, // slot 11
 ];
 
 /**
@@ -61,133 +61,133 @@ const storage2102: SlotTable = [
  * 0.10.35 样本（分拣器示例）证实真实值是其相反数，此处已修正。
  */
 const powerPlant2204: SlotTable = [
-    { x: -1.6857, y: 0.8029 },   // slot 0（slot 2 的镜像）
-    { x: -1.6854, y: 0.0000 },   // slot 1（反推）
-    { x: -1.6857, y: -0.8029 },  // slot 2（反推）
-    { x: 0.6916, y: 0.0000 },    // slot 3（反推）
-    { x: 0.6914, y: 0.8011 },    // slot 4（反推）
+    { x: -1.6857, y: 0.8029 }, // slot 0（slot 2 的镜像）
+    { x: -1.6854, y: 0.0 }, // slot 1（反推）
+    { x: -1.6857, y: -0.8029 }, // slot 2（反推）
+    { x: 0.6916, y: 0.0 }, // slot 3（反推）
+    { x: 0.6914, y: 0.8011 }, // slot 4（反推）
 ];
 
 /** 人造恒星 (2210) 4 slot */
 const artificialStar2210: SlotTable = [
-    { x: 0.0000, y: 1.7888 },    // slot 0
-    { x: 1.9012, y: 0.0036 },    // slot 1
-    { x: 0.0000, y: -1.7888 },   // slot 2
-    { x: -1.9012, y: 0.0036 },   // slot 3
+    { x: 0.0, y: 1.7888 }, // slot 0
+    { x: 1.9012, y: 0.0036 }, // slot 1
+    { x: 0.0, y: -1.7888 }, // slot 2
+    { x: -1.9012, y: 0.0036 }, // slot 3
 ];
 
 /** 电弧熔炉 (2302) 12 slot（3.2×3.2 方建筑：角 slot 与相邻面的边界 slot 位置重合，故成对相同） */
 const smelter2302: SlotTable = [
-    { x: -0.7996, y: 0.7954 },   // slot 0
-    { x: 0.0000, y: 0.7950 },    // slot 1
-    { x: 0.7996, y: 0.7954 },    // slot 2
-    { x: 0.7996, y: 0.7954 },    // slot 3
-    { x: 0.8004, y: 0.0004 },    // slot 4
-    { x: 0.8012, y: -0.7946 },   // slot 5
-    { x: 0.8012, y: -0.7946 },   // slot 6
-    { x: 0.0000, y: -0.7950 },   // slot 7
-    { x: -0.8012, y: -0.7947 },  // slot 8（反推）
-    { x: -0.8012, y: -0.7946 },  // slot 9
-    { x: -0.8004, y: 0.0004 },   // slot 10
-    { x: -0.7996, y: 0.7954 },   // slot 11
+    { x: -0.7996, y: 0.7954 }, // slot 0
+    { x: 0.0, y: 0.795 }, // slot 1
+    { x: 0.7996, y: 0.7954 }, // slot 2
+    { x: 0.7996, y: 0.7954 }, // slot 3
+    { x: 0.8004, y: 0.0004 }, // slot 4
+    { x: 0.8012, y: -0.7946 }, // slot 5
+    { x: 0.8012, y: -0.7946 }, // slot 6
+    { x: 0.0, y: -0.795 }, // slot 7
+    { x: -0.8012, y: -0.7947 }, // slot 8（反推）
+    { x: -0.8012, y: -0.7946 }, // slot 9
+    { x: -0.8004, y: 0.0004 }, // slot 10
+    { x: -0.7996, y: 0.7954 }, // slot 11
 ];
 
 /** 制造台 MK.I (2303) 12 slot（对 分拣器.txt 逐 slot 验证：误差 0.000） */
 const assembler2303: SlotTable = [
-    { x: -0.8104, y: 0.8749 },   // slot 0: 上方偏左
-    { x: 0.0000, y: 0.8745 },    // slot 1: 上方中间
-    { x: 0.8104, y: 0.8749 },    // slot 2: 上方偏右
-    { x: 0.8916, y: 0.7955 },    // slot 3: 右方偏上
-    { x: 0.8925, y: 0.0005 },    // slot 4: 右方中间
-    { x: 0.8934, y: -0.7945 },   // slot 5: 右方偏下
-    { x: 0.8123, y: -0.8741 },   // slot 6: 下方偏右
-    { x: 0.0000, y: -0.8745 },   // slot 7: 下方中间
-    { x: -0.8122, y: -0.8741 },  // slot 8: 下方偏左
-    { x: -0.8934, y: -0.7945 },  // slot 9: 左方偏下
-    { x: -0.8925, y: 0.0005 },   // slot 10: 左方中间
-    { x: -0.8916, y: 0.7955 },   // slot 11: 左方偏上
+    { x: -0.8104, y: 0.8749 }, // slot 0: 上方偏左
+    { x: 0.0, y: 0.8745 }, // slot 1: 上方中间
+    { x: 0.8104, y: 0.8749 }, // slot 2: 上方偏右
+    { x: 0.8916, y: 0.7955 }, // slot 3: 右方偏上
+    { x: 0.8925, y: 0.0005 }, // slot 4: 右方中间
+    { x: 0.8934, y: -0.7945 }, // slot 5: 右方偏下
+    { x: 0.8123, y: -0.8741 }, // slot 6: 下方偏右
+    { x: 0.0, y: -0.8745 }, // slot 7: 下方中间
+    { x: -0.8122, y: -0.8741 }, // slot 8: 下方偏左
+    { x: -0.8934, y: -0.7945 }, // slot 9: 左方偏下
+    { x: -0.8925, y: 0.0005 }, // slot 10: 左方中间
+    { x: -0.8916, y: 0.7955 }, // slot 11: 左方偏上
 ];
 
 /** 原油精炼厂 (2308)（model 63）：只标定了 -y 面的 3 个 slot，其余待补 */
 const refinery2308: SlotTable = [
-    null,                        // slot 0 未标定
-    null,                        // slot 1
-    null,                        // slot 2
-    null,                        // slot 3
-    null,                        // slot 4
-    null,                        // slot 5
-    { x: -0.8012, y: -2.8620 },  // slot 6（反推）
-    { x: 0.0000, y: -2.8622 },   // slot 7（反推）
-    { x: 0.8012, y: -2.8622 },   // slot 8（按同面镜像推断）
+    null, // slot 0 未标定
+    null, // slot 1
+    null, // slot 2
+    null, // slot 3
+    null, // slot 4
+    null, // slot 5
+    { x: -0.8012, y: -2.862 }, // slot 6（反推）
+    { x: 0.0, y: -2.8622 }, // slot 7（反推）
+    { x: 0.8012, y: -2.8622 }, // slot 8（按同面镜像推断）
 ];
 
 /** 化工厂 (2309) 8 slot */
 const chemicalPlant2309: SlotTable = [
-    { x: -0.7980, y: 1.6701 },   // slot 0
-    { x: 0.0000, y: 1.6696 },    // slot 1
-    { x: 0.7980, y: 1.6701 },    // slot 2
-    { x: 1.6022, y: -0.7134 },   // slot 3
-    { x: 0.8011, y: -0.7150 },   // slot 4
-    { x: 0.0000, y: -0.7155 },   // slot 5
-    { x: -0.8011, y: -0.7153 },  // slot 6（反推）
-    { x: 1.5960, y: 1.6716 },    // slot 7
+    { x: -0.798, y: 1.6701 }, // slot 0
+    { x: 0.0, y: 1.6696 }, // slot 1
+    { x: 0.798, y: 1.6701 }, // slot 2
+    { x: 1.6022, y: -0.7134 }, // slot 3
+    { x: 0.8011, y: -0.715 }, // slot 4
+    { x: 0.0, y: -0.7155 }, // slot 5
+    { x: -0.8011, y: -0.7153 }, // slot 6（反推）
+    { x: 1.596, y: 1.6716 }, // slot 7
 ];
 
 /** 微型粒子对撞机 (2310) 9 slot */
 const collider2310: SlotTable = [
-    { x: -0.7964, y: 1.8290 },   // slot 0
-    { x: -1.5928, y: 1.8305 },   // slot 1
-    { x: -2.3890, y: 1.8330 },   // slot 2
-    { x: -3.8295, y: 0.8071 },   // slot 3
-    { x: -3.8345, y: 0.0121 },   // slot 4
-    { x: -3.8396, y: -0.7830 },  // slot 5
-    { x: -2.4035, y: -1.8263 },  // slot 6（反推）
-    { x: -1.6024, y: -1.8276 },  // slot 7（反推）
-    { x: -0.8013, y: -1.8280 },  // slot 8
+    { x: -0.7964, y: 1.829 }, // slot 0
+    { x: -1.5928, y: 1.8305 }, // slot 1
+    { x: -2.389, y: 1.833 }, // slot 2
+    { x: -3.8295, y: 0.8071 }, // slot 3
+    { x: -3.8345, y: 0.0121 }, // slot 4
+    { x: -3.8396, y: -0.783 }, // slot 5
+    { x: -2.4035, y: -1.8263 }, // slot 6（反推）
+    { x: -1.6024, y: -1.8276 }, // slot 7（反推）
+    { x: -0.8013, y: -1.828 }, // slot 8
 ];
 
 /** 原油萃取站 (2311) 4 slot */
 const oilExtractor2311: SlotTable = [
-    { x: 1.9011, y: 0.0036 },    // slot 0
-    { x: -1.9011, y: 0.0036 },   // slot 1
-    { x: 0.0000, y: 1.7886 },    // slot 2
-    { x: 0.0000, y: -1.7886 },   // slot 3（反推）
+    { x: 1.9011, y: 0.0036 }, // slot 0
+    { x: -1.9011, y: 0.0036 }, // slot 1
+    { x: 0.0, y: 1.7886 }, // slot 2
+    { x: 0.0, y: -1.7886 }, // slot 3（反推）
 ];
 
 /** 垂直发射井 (2312) 3 slot */
 const silo2312: SlotTable = [
-    { x: 0.0000, y: 3.8960 },    // slot 0
-    { x: 4.1315, y: 0.0168 },    // slot 1
-    { x: -4.1315, y: 0.0168 },   // slot 2
+    { x: 0.0, y: 3.896 }, // slot 0
+    { x: 4.1315, y: 0.0168 }, // slot 1
+    { x: -4.1315, y: 0.0168 }, // slot 2
 ];
 
 /** 矩阵研究站 (2901) 12 slot */
 const lab2901: SlotTable = [
-    { x: 0.7946, y: 1.8292 },    // slot 0
-    { x: 0.0000, y: 1.8286 },    // slot 1
-    { x: -0.7946, y: 1.8292 },   // slot 2
-    { x: -1.8318, y: 0.7988 },   // slot 3
-    { x: -1.8351, y: 0.0038 },   // slot 4
-    { x: -1.8384, y: -0.7912 },  // slot 5
-    { x: -0.8012, y: -1.8278 },  // slot 6
-    { x: 0.0000, y: -1.8286 },   // slot 7（反推）
-    { x: 0.8012, y: -1.8283 },   // slot 8（反推）
-    { x: 1.8384, y: -0.7912 },   // slot 9
-    { x: 1.8351, y: 0.0038 },    // slot 10
-    { x: 1.8319, y: 0.7988 },    // slot 11
+    { x: 0.7946, y: 1.8292 }, // slot 0
+    { x: 0.0, y: 1.8286 }, // slot 1
+    { x: -0.7946, y: 1.8292 }, // slot 2
+    { x: -1.8318, y: 0.7988 }, // slot 3
+    { x: -1.8351, y: 0.0038 }, // slot 4
+    { x: -1.8384, y: -0.7912 }, // slot 5
+    { x: -0.8012, y: -1.8278 }, // slot 6
+    { x: 0.0, y: -1.8286 }, // slot 7（反推）
+    { x: 0.8012, y: -1.8283 }, // slot 8（反推）
+    { x: 1.8384, y: -0.7912 }, // slot 9
+    { x: 1.8351, y: 0.0038 }, // slot 10
+    { x: 1.8319, y: 0.7988 }, // slot 11
 ];
 
 /** 战场分析基站 (3009) 9 slot */
 const battleBase3009: SlotTable = [
-    { x: 1.7599, y: 0.7974 },    // slot 0
-    { x: 1.7622, y: 0.0025 },    // slot 1
-    { x: 1.7644, y: -0.7925 },   // slot 2
-    { x: 0.8034, y: -1.8287 },   // slot 3（反推）
-    { x: 0.0000, y: -1.8284 },   // slot 4（反推）
-    { x: -0.8034, y: -1.8278 },  // slot 5
-    { x: -1.7644, y: -0.7925 },  // slot 6
-    { x: -1.7622, y: 0.0025 },   // slot 7
-    { x: -1.7599, y: 0.7974 },   // slot 8
+    { x: 1.7599, y: 0.7974 }, // slot 0
+    { x: 1.7622, y: 0.0025 }, // slot 1
+    { x: 1.7644, y: -0.7925 }, // slot 2
+    { x: 0.8034, y: -1.8287 }, // slot 3（反推）
+    { x: 0.0, y: -1.8284 }, // slot 4（反推）
+    { x: -0.8034, y: -1.8278 }, // slot 5
+    { x: -1.7644, y: -0.7925 }, // slot 6
+    { x: -1.7622, y: 0.0025 }, // slot 7
+    { x: -1.7599, y: 0.7974 }, // slot 8
 ];
 
 /**
@@ -240,7 +240,7 @@ export function getBuildingSlots(itemId: number): SlotTable {
  * 判断建筑是否有 slot（可连接分拣器）
  */
 export function hasSlots(itemId: number): boolean {
-    return getBuildingSlots(itemId).some(s => s !== null);
+    return getBuildingSlots(itemId).some((s) => s !== null);
 }
 
 /**
@@ -268,14 +268,12 @@ export function faceSlotIndices(itemId: number, dir: SlotPos): number[] {
     const proj = (s: SlotPos) => sign * (onX ? s.x : s.y);
     let extreme = -Infinity;
     for (const s of slots) {
-        if (s !== null)
-            extreme = Math.max(extreme, proj(s));
+        if (s !== null) extreme = Math.max(extreme, proj(s));
     }
     const out: number[] = [];
     for (let i = 0; i < slots.length; i++) {
         const s = slots[i];
-        if (s !== null && extreme - proj(s) <= FACE_TOL)
-            out.push(i);
+        if (s !== null && extreme - proj(s) <= FACE_TOL) out.push(i);
     }
     return out;
 }
@@ -284,7 +282,11 @@ export function faceSlotIndices(itemId: number, dir: SlotPos): number[] {
  * 根据点击位置（建筑局部坐标）找最近 slot 编号
  * @returns slot 编号，无 slot 返回 -1
  */
-export function findNearestSlot(itemId: number, localX: number, localY: number): number {
+export function findNearestSlot(
+    itemId: number,
+    localX: number,
+    localY: number
+): number {
     const slots = getBuildingSlots(itemId);
     let best = -1;
     let bestDist = Infinity;
@@ -311,20 +313,25 @@ export function findNearestFreeSlot(
     itemId: number,
     localX: number,
     localY: number,
-    occupied: ReadonlySet<number>,
+    occupied: ReadonlySet<number>
 ): number {
     const slots = getBuildingSlots(itemId);
     // 按距离升序的候选序列（sort 稳定，同距离保持 slot 编号升序）
     const order = slots
-        .map((s, i) => ({ i, d: s === null ? Infinity : (s.x - localX) ** 2 + (s.y - localY) ** 2 }))
-        .filter(o => Number.isFinite(o.d))
+        .map((s, i) => ({
+            i,
+            d:
+                s === null
+                    ? Infinity
+                    : (s.x - localX) ** 2 + (s.y - localY) ** 2,
+        }))
+        .filter((o) => Number.isFinite(o.d))
         .sort((a, b) => a.d - b.d);
     if (order.length === 0) return -1;
     if (!occupied.has(order[0].i)) return order[0].i;
     const onFace = new Set(faceSlotIndices(itemId, { x: localX, y: localY }));
     for (const { i } of order) {
-        if (onFace.has(i) && !occupied.has(i))
-            return i;
+        if (onFace.has(i) && !occupied.has(i)) return i;
     }
     return -1;
 }

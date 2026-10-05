@@ -4,38 +4,47 @@
             <label>{{ label }}</label>
             <span class="v">{{ displayValue }}</span>
         </div>
-        <input type="range" min="0" :max="steps.length - 1" step="1"
+        <input
+            type="range"
+            min="0"
+            :max="steps.length - 1"
+            step="1"
             :value="localIndex"
             :disabled="disabled"
             @input="onInput"
-            @change="onChange" />
+            @change="onChange"
+        />
     </div>
 </template>
 
 <script lang="ts" setup>
-import { computed, ref, watch } from 'vue';
+import { computed, ref, watch } from "vue";
 
 const props = defineProps<{
-    label: string,
+    label: string;
     /** 当前值（滑块单位，必须是 steps 之一或接近） */
-    value: number,
+    value: number;
     /** 刻度数组（滑块单位） */
-    steps: number[],
+    steps: number[];
     /** 显示格式化，缺省直接 String(v) */
-    format?: (v: number) => string,
-    disabled?: boolean,
+    format?: (v: number) => string;
+    disabled?: boolean;
 }>();
 
 const emit = defineEmits<{
-    (e: 'change', value: number): void,
+    (e: "change", value: number): void;
 }>();
 
 /** 找到 value 在 steps 中的最近索引（容忍浮点误差） */
 const valueToIndex = (v: number) => {
-    let best = 0, bestDist = Infinity;
+    let best = 0,
+        bestDist = Infinity;
     for (let j = 0; j < props.steps.length; j++) {
         const d = Math.abs(props.steps[j] - v);
-        if (d < bestDist) { bestDist = d; best = j; }
+        if (d < bestDist) {
+            bestDist = d;
+            best = j;
+        }
     }
     return best;
 };
@@ -43,9 +52,12 @@ const valueToIndex = (v: number) => {
 const localIndex = ref(valueToIndex(props.value));
 
 // 外部数据变化（如 undo/redo）时同步回本地索引
-watch(() => props.value, (v) => {
-    localIndex.value = valueToIndex(v);
-});
+watch(
+    () => props.value,
+    (v) => {
+        localIndex.value = valueToIndex(v);
+    }
+);
 
 const displayValue = computed(() => {
     const v = props.steps[localIndex.value];
@@ -59,7 +71,7 @@ const onInput = (e: Event) => {
 
 const onChange = () => {
     // 松手：提交最终值
-    emit('change', props.steps[localIndex.value]);
+    emit("change", props.steps[localIndex.value]);
 };
 </script>
 
@@ -72,7 +84,7 @@ const onChange = () => {
         flex-direction: row;
         justify-content: space-between;
     }
-    input[type=range] {
+    input[type="range"] {
         width: 100%;
     }
 }

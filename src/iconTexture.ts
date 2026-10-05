@@ -1,5 +1,13 @@
-import { TextureLoader, WebGLRenderer, Texture, RGBAFormat, UnsignedByteType, Vector2, SRGBColorSpace } from 'three';
-import { allIconIds, iconUrl } from './data/icons';
+import {
+    TextureLoader,
+    WebGLRenderer,
+    Texture,
+    RGBAFormat,
+    UnsignedByteType,
+    Vector2,
+    SRGBColorSpace,
+} from "three";
+import { allIconIds, iconUrl } from "./data/icons";
 
 const WIDTH = 24;
 const HEIGHT = 24;
@@ -15,11 +23,11 @@ export class IconTexture {
     private loader = new TextureLoader();
 
     constructor(private renderer: WebGLRenderer) {
-        const emptyCanvas = document.createElement('canvas');
+        const emptyCanvas = document.createElement("canvas");
         emptyCanvas.width = WIDTH * ICON_SIZE;
         emptyCanvas.height = HEIGHT * ICON_SIZE;
         this.texture = new Texture(emptyCanvas);
-        this.texture.name = 'icons';
+        this.texture.name = "icons";
         this.texture.format = RGBAFormat;
         this.texture.type = UnsignedByteType;
         this.texture.flipY = true;
@@ -30,24 +38,22 @@ export class IconTexture {
         let nextIndex = 1; // 0 is reserved for empty icon
         for (const i of allIconIds()) {
             if (nextIndex >= WIDTH * HEIGHT)
-                throw new Error('IconTexture too small');
+                throw new Error("IconTexture too small");
             this.iconIds.set(i, nextIndex);
             nextIndex++;
         }
 
-        for (let i = 0; i < this.loaded.length; i++)
-            this.loaded[i] = false;
+        for (let i = 0; i < this.loaded.length; i++) this.loaded[i] = false;
     }
 
     requestIcon(iconId: number) {
         const index = this.iconIds.get(iconId);
         if (index === undefined) {
-            console.warn(`Unknown icon ${iconId}`)
+            console.warn(`Unknown icon ${iconId}`);
             return 0;
         }
 
-        if (this.loaded[iconId])
-            return index;
+        if (this.loaded[iconId]) return index;
         this.loaded[iconId] = true;
 
         (async () => {

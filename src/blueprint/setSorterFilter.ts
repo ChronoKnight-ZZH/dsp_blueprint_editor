@@ -13,7 +13,7 @@ export class SetSorterFilterCommand implements Command {
 
     constructor(
         private readonly building: BlueprintBuilding,
-        private filterId: number,
+        private filterId: number
     ) {
         this.oldFilterId = building.filterId;
     }
@@ -29,10 +29,8 @@ export class SetSorterFilterCommand implements Command {
     }
 
     merge(c: Command): boolean {
-        if (!(c instanceof SetSorterFilterCommand))
-            return false;
-        if (c.building !== this.building)
-            return false;
+        if (!(c instanceof SetSorterFilterCommand)) return false;
+        if (c.building !== this.building) return false;
         this.filterId = c.filterId;
         return true;
     }

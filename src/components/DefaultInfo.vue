@@ -1,17 +1,28 @@
 <template>
     <div class="building-params">
-        <div><label>itemId</label><span class="v">{{ building.itemId }}</span></div>
-        <div><label>modelIndex</label><span class="v">{{ building.modelIndex }}</span></div>
-        <div><label>{{ t('坐标') }}</label><span class="v">{{ coord }}</span></div>
-        <div><label>{{ t('朝向') }}</label><span class="v">{{ building.yaw[0] }}</span></div>
-        <div class="no-more">{{ t('无更多可配置参数') }}</div>
+        <div>
+            <label>itemId</label><span class="v">{{ building.itemId }}</span>
+        </div>
+        <div>
+            <label>modelIndex</label
+            ><span class="v">{{ building.modelIndex }}</span>
+        </div>
+        <div>
+            <label>{{ t("坐标") }}</label
+            ><span class="v">{{ coord }}</span>
+        </div>
+        <div>
+            <label>{{ t("朝向") }}</label
+            ><span class="v">{{ building.yaw[0] }}</span>
+        </div>
+        <div class="no-more">{{ t("无更多可配置参数") }}</div>
     </div>
 </template>
 
 <script lang="ts" setup>
-import { computed } from 'vue';
-import { useI18n } from 'vue-i18n';
-import { BlueprintBuilding } from '@/blueprint/parser';
+import { computed } from "vue";
+import { useI18n } from "vue-i18n";
+import { BlueprintBuilding } from "@/blueprint/parser";
 
 const { t } = useI18n();
 const props = defineProps<{ building: BlueprintBuilding }>();

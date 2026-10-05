@@ -1,4 +1,9 @@
-import { BlueprintBuilding, BlueprintData, LabParamerters, ResearchMode } from "./parser";
+import {
+    BlueprintBuilding,
+    BlueprintData,
+    LabParamerters,
+    ResearchMode,
+} from "./parser";
 import { Command, Updater } from "@/command";
 
 /**
@@ -31,10 +36,8 @@ export class SetBuildingRecipeCommand implements Command {
 
     merge(c: Command): boolean {
         // 合并连续对同一建筑配方的改写：新命令直接覆盖目标 recipeId
-        if (!(c instanceof SetBuildingRecipeCommand))
-            return false;
-        if (c.building !== this.building)
-            return false;
+        if (!(c instanceof SetBuildingRecipeCommand)) return false;
+        if (c.building !== this.building) return false;
         this.newRecipeId = c.newRecipeId;
         return true;
     }
@@ -59,20 +62,20 @@ export class SetLabResearchModeCommand implements Command {
     }
 
     do(_data: BlueprintData, updater: Updater) {
-        (this.building.parameters as LabParamerters).researchMode = this.newMode;
+        (this.building.parameters as LabParamerters).researchMode =
+            this.newMode;
         updater.updateBuildingIcon.dispatch(this.building);
     }
 
     undo(_data: BlueprintData, updater: Updater) {
-        (this.building.parameters as LabParamerters).researchMode = this.oldMode;
+        (this.building.parameters as LabParamerters).researchMode =
+            this.oldMode;
         updater.updateBuildingIcon.dispatch(this.building);
     }
 
     merge(c: Command): boolean {
-        if (!(c instanceof SetLabResearchModeCommand))
-            return false;
-        if (c.building !== this.building)
-            return false;
+        if (!(c instanceof SetLabResearchModeCommand)) return false;
+        if (c.building !== this.building) return false;
         this.newMode = c.newMode;
         return true;
     }

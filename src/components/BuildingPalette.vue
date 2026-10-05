@@ -1,20 +1,27 @@
 <template>
     <div class="building-palette" :class="{ collapsed }">
         <div class="palette-buildings">
-            <button v-for="(b, i) in currentBuildings" :key="b.itemId" v-show="!collapsed"
+            <button
+                v-for="(b, i) in currentBuildings"
+                :key="b.itemId"
+                v-show="!collapsed"
                 class="palette-building"
                 :class="{ disabled: b.disabled, selected: isSelected(b) }"
                 :title="b.disabled ? t('暂不支持') : t(b.nameKey)"
-                @click="onSelect(b)">
+                @click="onSelect(b)"
+            >
                 <BuildingIcon :iconId="b.itemId" :alt="t(b.nameKey)" />
                 <span class="fn-key">F{{ i + 1 }}</span>
             </button>
         </div>
         <div class="palette-categories">
-            <button v-for="cat in buildingCategories" :key="cat.key"
+            <button
+                v-for="cat in buildingCategories"
+                :key="cat.key"
                 class="palette-category"
                 :class="{ active: placement.categoryIndex === cat.key }"
-                @click="onCategory(cat.key)">
+                @click="onCategory(cat.key)"
+            >
                 <span class="cat-num">{{ cat.key }}</span>
                 <span class="cat-name">{{ t(cat.nameKey) }}</span>
             </button>
@@ -23,28 +30,33 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, ref } from 'vue';
-import { useI18n } from 'vue-i18n';
-import BuildingIcon from './BuildingIcon.vue';
-import { buildingCategories, CategoryBuilding } from '@/data/buildingCategories';
-import { usePlacement, selectBuilding } from '@/editor/placementState';
+import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
+import BuildingIcon from "./BuildingIcon.vue";
+import {
+    buildingCategories,
+    CategoryBuilding,
+} from "@/data/buildingCategories";
+import { usePlacement, selectBuilding } from "@/editor/placementState";
 
 const { t } = useI18n();
 const placement = usePlacement();
 
 const currentBuildings = computed(() => {
-    const cat = buildingCategories.find(c => c.key === placement.categoryIndex);
+    const cat = buildingCategories.find(
+        (c) => c.key === placement.categoryIndex
+    );
     return cat ? cat.buildings : [];
 });
 
 const isSelected = (b: CategoryBuilding) =>
-    placement.selectedItemId === b.itemId && placement.mode === 'placing';
+    placement.selectedItemId === b.itemId && placement.mode === "placing";
 
 const onSelect = (b: CategoryBuilding) => {
     if (b.disabled) return;
     if (isSelected(b)) {
         // Clicking the selected building again exits placing
-        placement.mode = 'idle';
+        placement.mode = "idle";
         placement.selectedItemId = null;
         placement.selectedModelIndex = null;
     } else {
@@ -52,9 +64,13 @@ const onSelect = (b: CategoryBuilding) => {
     }
 };
 
-const collapsed = ref(true);          // 进入编辑模式即折叠
-function collapse() { collapsed.value = true; }
-function expand()   { collapsed.value = false; }
+const collapsed = ref(true); // 进入编辑模式即折叠
+function collapse() {
+    collapsed.value = true;
+}
+function expand() {
+    collapsed.value = false;
+}
 /** 点击分类：切换分类并展开 */
 const onCategory = (key: number) => {
     placement.categoryIndex = key;

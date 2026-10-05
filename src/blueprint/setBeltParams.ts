@@ -17,7 +17,7 @@ export class SetBeltParamsCommand implements Command {
     constructor(
         private readonly building: BlueprintBuilding,
         private readonly field: BeltParamField,
-        private value: number,
+        private value: number
     ) {
         const p = this.ensureParams();
         this.oldIconId = p.iconId;
@@ -33,10 +33,8 @@ export class SetBeltParamsCommand implements Command {
 
     do(_data: BlueprintData, updater: Updater): void {
         const p = this.ensureParams();
-        if (this.field === "iconId")
-            p.iconId = this.value;
-        else
-            p.count = this.value;
+        if (this.field === "iconId") p.iconId = this.value;
+        else p.count = this.value;
         updater.updateBeltIcon.dispatch(this.building);
         if (this.field === "count")
             updater.updateBeltIconSubscript.dispatch(this.building);
@@ -51,8 +49,7 @@ export class SetBeltParamsCommand implements Command {
     }
 
     merge(c: Command): boolean {
-        if (!(c instanceof SetBeltParamsCommand))
-            return false;
+        if (!(c instanceof SetBeltParamsCommand)) return false;
         if (c.building !== this.building || c.field !== this.field)
             return false;
         this.value = c.value;

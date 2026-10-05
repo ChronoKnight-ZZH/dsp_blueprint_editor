@@ -9,7 +9,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watchEffect } from 'vue';
+import { ref, watchEffect } from "vue";
 
 const props = defineProps<{
     open?: boolean;
@@ -26,25 +26,23 @@ watchEffect(() => {
 });
 
 const emit = defineEmits<{
-    (event: 'update:open', value: boolean): void,
+    (event: "update:open", value: boolean): void;
 }>();
 
 const onclose = () => {
-    if (props.open)
-        emit('update:open', false);
-}
+    if (props.open) emit("update:open", false);
+};
 
 const onclick = (e: MouseEvent) => {
     // Enable clicking outside the dialog to close it
-    if (e.target === dialog.value)
-        emit('update:open', false);
-}
+    if (e.target === dialog.value) emit("update:open", false);
+};
 </script>
 
 <style>
 .modal {
     padding: 0;
-    border: #FFFA solid 1px;
+    border: #fffa solid 1px;
 }
 
 .modal-window {

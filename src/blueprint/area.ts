@@ -10,7 +10,10 @@ const ROOT_LATITUDE = -80; // Derived from size.y=161 via findPosForAreas
  * Convert planet grid coordinates (latGrid, lonGrid) to local offsets within the root area.
  * Grid units: 1000 per full circumference (200 segments * 5 grids/segment).
  */
-export function planetToLocal(latGrid: number, lonGrid: number): { x: number, y: number } {
+export function planetToLocal(
+    latGrid: number,
+    lonGrid: number
+): { x: number; y: number } {
     // Wrap longitude to [0, ROOT_GRID_SIZE)
     const x = ((lonGrid % ROOT_GRID_SIZE) + ROOT_GRID_SIZE) % ROOT_GRID_SIZE;
     // Shift latitude so that root area's latitude (-80) maps to offset.y=0
@@ -21,7 +24,10 @@ export function planetToLocal(latGrid: number, lonGrid: number): { x: number, y:
 /**
  * Convert local offsets within the root area to planet grid coordinates.
  */
-export function localToPlanet(offset: { x: number, y: number }): { lat: number, lon: number } {
+export function localToPlanet(offset: { x: number; y: number }): {
+    lat: number;
+    lon: number;
+} {
     return {
         lat: offset.y + ROOT_LATITUDE,
         lon: offset.x,
@@ -32,12 +38,13 @@ export function localToPlanet(offset: { x: number, y: number }): { lat: number, 
  * Ensure the root area covers the given offset. Expands size.x if needed.
  * @returns areaIndex (always 0 for root area), or -1 if offset is outside the equator band
  */
-export function ensureAreaFor(bp: BlueprintData, offset: { x: number, y: number }): number {
-    if (bp.areas.length === 0)
-        return -1;
+export function ensureAreaFor(
+    bp: BlueprintData,
+    offset: { x: number; y: number }
+): number {
+    if (bp.areas.length === 0) return -1;
     const root = bp.areas[0];
-    if (offset.y < 0 || offset.y >= root.size.y)
-        return -1; // Outside equator band
+    if (offset.y < 0 || offset.y >= root.size.y) return -1; // Outside equator band
     if (offset.x < 0 || offset.x >= root.size.x)
         root.size.x = Math.floor(offset.x) + 1;
     return 0;
@@ -57,12 +64,9 @@ function rootAreaLatitude(sizeY: number): number {
  * 导入的蓝图保持字节级不变；不修改入参。
  */
 export function normalizeBlueprintAreas(bp: BlueprintData): BlueprintData {
-    if (bp.areas.length !== 1 || bp.buildings.length === 0)
-        return bp;
-    if (bp.dragBoxSize.x !== 0 || bp.dragBoxSize.y !== 0)
-        return bp;
-    if (bp.reformData != null && bp.reformData.rects.length > 0)
-        return bp;
+    if (bp.areas.length !== 1 || bp.buildings.length === 0) return bp;
+    if (bp.dragBoxSize.x !== 0 || bp.dragBoxSize.y !== 0) return bp;
+    if (bp.reformData != null && bp.reformData.rects.length > 0) return bp;
     const root = bp.areas[0];
     if (root.parentIndex !== -1 || root.areaSegments !== ROOT_SEGMENT)
         return bp;
@@ -80,7 +84,8 @@ export function normalizeBlueprintAreas(bp: BlueprintData): BlueprintData {
     ys.sort((a, b) => a - b);
 
     // x：环形最小覆盖弧 = 最大间隙的补集
-    let maxGap = -1, gapStart = 0;
+    let maxGap = -1,
+        gapStart = 0;
     for (let i = 0; i < xs.length; i++) {
         const next = i + 1 < xs.length ? xs[i + 1] : xs[0] + ROOT_GRID_SIZE;
         if (next - xs[i] > maxGap) {
@@ -88,10 +93,13 @@ export function normalizeBlueprintAreas(bp: BlueprintData): BlueprintData {
             gapStart = xs[i];
         }
     }
-    const arcStart = gapStart + maxGap;              // 覆盖弧起点（未取模）
+    const arcStart = gapStart + maxGap; // 覆盖弧起点（未取模）
     // 左右各留一格边距：originX 左移一格，sizeX 在原基础上 +2
     const originX = Math.floor(arcStart) - 1;
-    const sizeX = Math.max(1, Math.floor(arcStart + (ROOT_GRID_SIZE - maxGap)) - originX + 2);
+    const sizeX = Math.max(
+        1,
+        Math.floor(arcStart + (ROOT_GRID_SIZE - maxGap)) - originX + 2
+    );
 
     // y：赤道居中约束下的最小高度，上下各留一格边距
     const needLo = Math.max(0, -Math.floor(ys[0]) + 1);
@@ -100,12 +108,15 @@ export function normalizeBlueprintAreas(bp: BlueprintData): BlueprintData {
     // 新原点纬度 rootAreaLatitude(sizeY)，y' = 绝对纬度 - 新原点纬度 = y + liveLat - newLat
     const dy = liveLat - rootAreaLatitude(sizeY);
 
-    const shiftX = (x: number) => ((x - originX) % ROOT_GRID_SIZE + ROOT_GRID_SIZE) % ROOT_GRID_SIZE;
-    const buildings = bp.buildings.map(b => ({
+    const shiftX = (x: number) =>
+        (((x - originX) % ROOT_GRID_SIZE) + ROOT_GRID_SIZE) % ROOT_GRID_SIZE;
+    const buildings = bp.buildings.map((b) => ({
         ...b,
-        localOffset: b.localOffset.map(p => ({
-            x: shiftX(p.x), y: p.y + dy, z: p.z,
-        })) as BlueprintData['buildings'][number]['localOffset'],
+        localOffset: b.localOffset.map((p) => ({
+            x: shiftX(p.x),
+            y: p.y + dy,
+            z: p.z,
+        })) as BlueprintData["buildings"][number]["localOffset"],
         // 导出时由 localOffset[1]/yaw[1] 重新生成，避免残留平移前的旧值
         v2ExtraPose: undefined,
     }));
@@ -116,11 +127,13 @@ export function normalizeBlueprintAreas(bp: BlueprintData): BlueprintData {
         cursorTargetArea: 0,
         dragBoxSize: { x: sizeX, y: sizeY },
         primaryAreaIdx: 0,
-        areas: [{
-            ...root,
-            anchorLocalOffset: { x: 0, y: 0 },
-            size: { x: sizeX, y: sizeY },
-        }],
+        areas: [
+            {
+                ...root,
+                anchorLocalOffset: { x: 0, y: 0 },
+                size: { x: sizeX, y: sizeY },
+            },
+        ],
         buildings,
     };
 }

@@ -1,14 +1,19 @@
 <template>
-    <h2>{{ t(buildingItem.name) }} <small>#{{ building.index }}</small></h2>
+    <h2>
+        {{ t(buildingItem.name) }} <small>#{{ building.index }}</small>
+    </h2>
     <RecipeSelect
-    v-if="showRecipeRow"
-    :recipeId="currentRecipeId > 0 ? currentRecipeId : null"
-    @update:recipeId="onRecipeSelected"
-    class="recipe-edit"
->
-    <BuildingRecipe v-if="currentRecipeId > 0" :recipeId="currentRecipeId" />
-    <div v-else class="recipe-placeholder">{{ t('选择配方') }}</div>
-</RecipeSelect>
+        v-if="showRecipeRow"
+        :recipeId="currentRecipeId > 0 ? currentRecipeId : null"
+        @update:recipeId="onRecipeSelected"
+        class="recipe-edit"
+    >
+        <BuildingRecipe
+            v-if="currentRecipeId > 0"
+            :recipeId="currentRecipeId"
+        />
+        <div v-else class="recipe-placeholder">{{ t("选择配方") }}</div>
+    </RecipeSelect>
 
     <SplitterInfo v-if="isSplitter(building.itemId)" :building="building" />
     <StationInfo v-if="isStation(building.itemId)" :building="building" />
@@ -17,67 +22,119 @@
     <StorageInfo v-if="isStorage(building.itemId)" :building="building" />
     <div class="building-params">
         <div v-if="isInserter(building.itemId)" class="filter-row">
-            <label>{{ t('过滤器') }}</label>
-            <ItemSelect :itemId="filterItem ? filterItem.id : null" @update:itemId="onFilter" />
-            <button v-if="filterItem" class="clear-btn" type="button" @click="clearFilter">×</button>
+            <label>{{ t("过滤器") }}</label>
+            <ItemSelect
+                :itemId="filterItem ? filterItem.id : null"
+                @update:itemId="onFilter"
+            />
+            <button
+                v-if="filterItem"
+                class="clear-btn"
+                type="button"
+                @click="clearFilter"
+            >
+                ×
+            </button>
         </div>
-        <div v-if="isLab(building.itemId)" class="editable-row" @click="onLabModeClick">
-            <label>{{ t('模式') }}</label>
+        <div
+            v-if="isLab(building.itemId)"
+            class="editable-row"
+            @click="onLabModeClick"
+        >
+            <label>{{ t("模式") }}</label>
             <span class="v">{{ LabModeText }}</span>
         </div>
         <div v-if="accModeText !== undefined">
-            <label>{{ t('增产剂效果简介') }}</label>
+            <label>{{ t("增产剂效果简介") }}</label>
             <span class="v">{{ accModeText }}</span>
         </div>
         <div v-if="isInserter(building.itemId)">
-            <label>{{ t('分拣长度') }}</label>
+            <label>{{ t("分拣长度") }}</label>
             <span class="v">{{ (bParams as InserterParameters).length }}</span>
         </div>
         <template v-if="isEjector(building.itemId)">
             <div>
-                <label>{{ t('送入轨道') }}</label>
-                <span class="v">{{ (bParams as EjectorParameters).orbitId === 0 ? t('不选轨道') : (bParams as EjectorParameters).orbitId }}</span>
+                <label>{{ t("送入轨道") }}</label>
+                <span class="v">{{
+                    (bParams as EjectorParameters).orbitId === 0
+                        ? t("不选轨道")
+                        : (bParams as EjectorParameters).orbitId
+                }}</span>
             </div>
             <div>
-                <label>{{ t('十倍射速') }}</label>
-                <span class="v">{{ truth((bParams as EjectorParameters).boost) }}</span>
+                <label>{{ t("十倍射速") }}</label>
+                <span class="v">{{
+                    truth((bParams as EjectorParameters).boost)
+                }}</span>
             </div>
         </template>
         <div v-if="isEnergyExchanger(building.itemId)">
-            <label>{{ t('模式') }}</label>
+            <label>{{ t("模式") }}</label>
             <span class="v">{{ energyExchangerMode }}</span>
         </div>
         <div v-if="isRayReciver(building.itemId)">
-            <label>{{ t('模式') }}</label>
-            <span class="v">{{ (bParams as PowerGeneratorParameters).productId > 0 ? t('光子生成') : t('直接发电') }}</span>
+            <label>{{ t("模式") }}</label>
+            <span class="v">{{
+                (bParams as PowerGeneratorParameters).productId > 0
+                    ? t("光子生成")
+                    : t("直接发电")
+            }}</span>
         </div>
         <div v-if="isArtificialStar(building.itemId)">
-            <label>{{ t('百倍发电') }}</label>
-            <span class="v">{{ truth((bParams as ArtifacialStarParameters).boost) }}</span>
+            <label>{{ t("百倍发电") }}</label>
+            <span class="v">{{
+                truth((bParams as ArtifacialStarParameters).boost)
+            }}</span>
         </div>
     </div>
     <div v-if="beltParams" class="belt-edit">
         <div class="belt-row">
-            <label>{{ t('图标') }}</label>
-            <ItemSelect :itemId="beltParams.iconId > 0 ? beltParams.iconId : null" @update:itemId="onBeltIcon" />
-            <button v-if="beltParams.iconId > 0" class="clear-btn" type="button" @click="clearBeltIcon">×</button>
+            <label>{{ t("图标") }}</label>
+            <ItemSelect
+                :itemId="beltParams.iconId > 0 ? beltParams.iconId : null"
+                @update:itemId="onBeltIcon"
+            />
+            <button
+                v-if="beltParams.iconId > 0"
+                class="clear-btn"
+                type="button"
+                @click="clearBeltIcon"
+            >
+                ×
+            </button>
         </div>
         <div class="belt-row">
-            <label>{{ t('数量') }}</label>
-            <input type="number" min="0" class="count-input" :value="beltParams.count" @change="onBeltCount" />
+            <label>{{ t("数量") }}</label>
+            <input
+                type="number"
+                min="0"
+                class="count-input"
+                :value="beltParams.count"
+                @change="onBeltCount"
+            />
         </div>
     </div>
     <div class="tank-io" v-if="isTank(building.itemId)">
-        <SwitchDSP :opened="(bParams as TankParameters).output">{{ t('储液罐输出') }}</SwitchDSP>
-        <SwitchDSP :opened="(bParams as TankParameters).input">{{ t('储液罐输入') }}</SwitchDSP>
+        <SwitchDSP :opened="(bParams as TankParameters).output">{{
+            t("储液罐输出")
+        }}</SwitchDSP>
+        <SwitchDSP :opened="(bParams as TankParameters).input">{{
+            t("储液罐输入")
+        }}</SwitchDSP>
     </div>
     <DispenserInfo v-if="isDispenser(building.itemId)" :building="building" />
     <HoloBeaconInfo v-if="isHoloBeacon(building.itemId)" :building="building" />
     <Modal v-model:open="labModeModalOpen" v-if="isLab(building.itemId)">
-        <h3>{{ t('研究模式') }}</h3>
+        <h3>{{ t("研究模式") }}</h3>
         <div class="mode-list">
             <label v-for="m in labModes" :key="m" class="mode-option">
-                <input type="radio" name="labMode" :value="m" :checked="labResearchMode === m" @change="onLabModeSelected(m)" />
+                <input
+                    type="radio"
+                    name="labMode"
+                    :value="m"
+                    :checked="labResearchMode === m"
+                    @change="onLabModeSelected(m)"
+                />
                 {{ t(labModeTexts.get(m)!) }}
             </label>
         </div>
@@ -85,69 +142,101 @@
     <DefaultInfo v-if="showDefaultInfo" :building="building" />
 </template>
 
-
 <script lang="ts">
-import { ResearchMode, AcceleratorMode, EnergyExchangerMode } from '@/blueprint/parser';
+import {
+    ResearchMode,
+    AcceleratorMode,
+    EnergyExchangerMode,
+} from "@/blueprint/parser";
 
 const labModeTexts = new Map([
-    [ResearchMode.None, '选择模式'],
-    [ResearchMode.Compose, '矩阵合成'],
-    [ResearchMode.Research, '科研模式'],
+    [ResearchMode.None, "选择模式"],
+    [ResearchMode.Compose, "矩阵合成"],
+    [ResearchMode.Research, "科研模式"],
 ]);
 
 const accModeTexts = new Map([
-    [AcceleratorMode.ExtraOutput, '额外产出'],
-    [AcceleratorMode.Accelerate, '加速生产'],
+    [AcceleratorMode.ExtraOutput, "额外产出"],
+    [AcceleratorMode.Accelerate, "加速生产"],
 ]);
 
 const energyExchangerModeTexts = new Map([
-    [EnergyExchangerMode.Discharge, '放电'],
-    [EnergyExchangerMode.StandBy, '待机'],
-    [EnergyExchangerMode.Charge, '充电'],
+    [EnergyExchangerMode.Discharge, "放电"],
+    [EnergyExchangerMode.StandBy, "待机"],
+    [EnergyExchangerMode.Charge, "充电"],
 ]);
-
-
 </script>
 
 <script lang="ts" setup>
-import { computed, defineAsyncComponent, inject, ref } from 'vue';
-import { useI18n } from 'vue-i18n';
+import { computed, defineAsyncComponent, inject, ref } from "vue";
+import { useI18n } from "vue-i18n";
 
-import { truth } from '@/utils';
+import { truth } from "@/utils";
 import {
-    LabParamerters, AssembleParamerters, TankParameters, BlueprintBuilding,
-    BeltParameters, InserterParameters, EjectorParameters,
-    EnergyExchangerParameters, PowerGeneratorParameters, ArtifacialStarParameters,
-} from '@/blueprint/parser';
-import { recipesMap } from '@/data';
-import { commandQueueKey } from '@/define';
-import { SetBuildingRecipeCommand, SetLabResearchModeCommand } from '@/blueprint/setBuildingRecipe';
-import { SetBeltParamsCommand } from '@/blueprint/setBeltParams';
-import { SetSorterFilterCommand } from '@/blueprint/setSorterFilter';
+    LabParamerters,
+    AssembleParamerters,
+    TankParameters,
+    BlueprintBuilding,
+    BeltParameters,
+    InserterParameters,
+    EjectorParameters,
+    EnergyExchangerParameters,
+    PowerGeneratorParameters,
+    ArtifacialStarParameters,
+} from "@/blueprint/parser";
+import { recipesMap } from "@/data";
+import { commandQueueKey } from "@/define";
+import {
+    SetBuildingRecipeCommand,
+    SetLabResearchModeCommand,
+} from "@/blueprint/setBuildingRecipe";
+import { SetBeltParamsCommand } from "@/blueprint/setBeltParams";
+import { SetSorterFilterCommand } from "@/blueprint/setSorterFilter";
 
-import BuildingRecipe from './BuildingRecipe.vue';
-import RecipeSelect from './RecipeSelect.vue';
-import Modal from './ModalDSP.vue';
-import StationInfo from './StationInfo.vue';
-import MonitorInfo from './MonitorInfo.vue';
-import BattleBaseInfo from './BattleBaseInfo.vue';
-import StorageInfo from './StorageInfo.vue';
-import DispenserInfo from './DispenserInfo.vue';
-import HoloBeaconInfo from './HoloBeaconInfo.vue';
-import SwitchDSP from './SwitchDSP.vue';
-import DefaultInfo from './DefaultInfo.vue';
-import ItemSelect from './ItemSelect.vue';
+import BuildingRecipe from "./BuildingRecipe.vue";
+import RecipeSelect from "./RecipeSelect.vue";
+import Modal from "./ModalDSP.vue";
+import StationInfo from "./StationInfo.vue";
+import MonitorInfo from "./MonitorInfo.vue";
+import BattleBaseInfo from "./BattleBaseInfo.vue";
+import StorageInfo from "./StorageInfo.vue";
+import DispenserInfo from "./DispenserInfo.vue";
+import HoloBeaconInfo from "./HoloBeaconInfo.vue";
+import SwitchDSP from "./SwitchDSP.vue";
+import DefaultInfo from "./DefaultInfo.vue";
+import ItemSelect from "./ItemSelect.vue";
 import {
-    isLab, allAssemblers, isBelt, isStation, itemsMap, isInserter, isStorage, isTank,
-    isEjector, isEnergyExchanger, isArtificialStar, isRayReciver, isMonitor, isSplitter,
-    isBattleBase, isDispenser, isHoloBeacon,
-} from '@/data/items';
+    isLab,
+    allAssemblers,
+    isBelt,
+    isStation,
+    itemsMap,
+    isInserter,
+    isStorage,
+    isTank,
+    isEjector,
+    isEnergyExchanger,
+    isArtificialStar,
+    isRayReciver,
+    isMonitor,
+    isSplitter,
+    isBattleBase,
+    isDispenser,
+    isHoloBeacon,
+} from "@/data/items";
 
 const showDefaultInfo = computed(() => {
     const id = props.building.itemId;
     // 专属面板
-    if (isSplitter(id) || isStation(id) || isMonitor(id) || isBattleBase(id)
-        || isStorage(id) || isDispenser(id) || isHoloBeacon(id))
+    if (
+        isSplitter(id) ||
+        isStation(id) ||
+        isMonitor(id) ||
+        isBattleBase(id) ||
+        isStorage(id) ||
+        isDispenser(id) ||
+        isHoloBeacon(id)
+    )
         return false;
     // 内联字段
     if (showRecipeRow.value) return false;
@@ -163,38 +252,37 @@ const showDefaultInfo = computed(() => {
     return true;
 });
 
-const SplitterInfo = defineAsyncComponent(() => import(/* webpackChunkName: "renderer" */'./SpitterInfo.vue'));
+const SplitterInfo = defineAsyncComponent(
+    () => import(/* webpackChunkName: "renderer" */ "./SpitterInfo.vue")
+);
 
 const { t } = useI18n();
 
 const commandQueue = inject(commandQueueKey)!.value!;
 
 const props = defineProps<{
-    building: BlueprintBuilding,
+    building: BlueprintBuilding;
 }>();
 
 const buildingItem = computed(() => {
     return itemsMap.get(props.building.itemId)!;
-})
+});
 const filterVersion = ref(0);
 const filterItem = computed(() => {
     filterVersion.value;
-    if (props.building.filterId <= 0)
-        return null;
+    if (props.building.filterId <= 0) return null;
     return itemsMap.get(props.building.filterId)!;
-})
-commandQueue.updater.updateSorterIcon.onMounted(b => {
-    if (b === props.building)
-        filterVersion.value++;
+});
+commandQueue.updater.updateSorterIcon.onMounted((b) => {
+    if (b === props.building) filterVersion.value++;
 });
 
 // 单体建筑数据变更（配方 / 研究模式）走 updateBuildingIcon 通道：
 // data 是 shallowRef，直接改 building.recipeId / parameters.researchMode 不触发响应式，
 // 需要通过版本号 bump 让下面的 computed 重新求值。
 const buildingVersion = ref(0);
-commandQueue.updater.updateBuildingIcon.onMounted(b => {
-    if (b === props.building)
-        buildingVersion.value++;
+commandQueue.updater.updateBuildingIcon.onMounted((b) => {
+    if (b === props.building) buildingVersion.value++;
 });
 const currentRecipeId = computed(() => {
     buildingVersion.value;
@@ -213,7 +301,11 @@ const labResearchMode = computed(() => {
     buildingVersion.value;
     return (props.building.parameters as LabParamerters).researchMode;
 });
-const labModes = [ResearchMode.None, ResearchMode.Compose, ResearchMode.Research];
+const labModes = [
+    ResearchMode.None,
+    ResearchMode.Compose,
+    ResearchMode.Research,
+];
 const labModeModalOpen = ref(false);
 
 function onRecipeSelected(recipeId: number | null) {
@@ -234,31 +326,27 @@ function onLabModeSelected(mode: ResearchMode) {
 
 const LabModeText = computed(() => {
     return t(labModeTexts.get(labResearchMode.value)!);
-})
+});
 const productive = computed(() => {
     const recipeId = props.building.recipeId;
-    if (recipeId === 0)
-        return undefined;
+    if (recipeId === 0) return undefined;
     const recipe = recipesMap.get(recipeId)!;
-    if (recipe.nonProductive)
-        return false;
+    if (recipe.nonProductive) return false;
     let p = true;
-    for (const i of recipe.to)
-        p &&= i.item.productive === true;
+    for (const i of recipe.to) p &&= i.item.productive === true;
     return p;
-})
+});
 const accModeText = computed(() => {
-    if (!allAssemblers.has(props.building.itemId))
-        return undefined;
+    if (!allAssemblers.has(props.building.itemId)) return undefined;
 
     const p = productive.value;
-    if (p === undefined)
-        return undefined;
+    if (p === undefined) return undefined;
     let mode = AcceleratorMode.Accelerate;
     if (p)
-        mode = (props.building!.parameters as AssembleParamerters).acceleratorMode;
+        mode = (props.building!.parameters as AssembleParamerters)
+            .acceleratorMode;
     return t(accModeTexts.get(mode)!);
-})
+});
 
 const beltVersion = ref(0);
 const beltParams = computed(() => {
@@ -267,9 +355,8 @@ const beltParams = computed(() => {
         return props.building.parameters as BeltParameters;
     return null;
 });
-commandQueue.updater.updateBeltIcon.onMounted(b => {
-    if (b === props.building)
-        beltVersion.value++;
+commandQueue.updater.updateBeltIcon.onMounted((b) => {
+    if (b === props.building) beltVersion.value++;
 });
 
 // 传送带图标：选择物品（null = 关闭弹窗未选，忽略）；× 按钮清零
@@ -308,7 +395,8 @@ const energyExchangerMode = computed(() => {
         margin-bottom: 0;
     }
 
-    >div, .p {
+    > div,
+    .p {
         display: flex;
         flex-direction: row;
         margin-top: 4px;
@@ -456,7 +544,7 @@ const energyExchangerMode = computed(() => {
     border-radius: 4px;
 
     &::before {
-        content: '+';
+        content: "+";
         font-style: normal;
         font-weight: bold;
     }

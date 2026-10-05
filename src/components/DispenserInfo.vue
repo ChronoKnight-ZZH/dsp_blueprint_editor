@@ -2,35 +2,44 @@
     <div class="building-params">
         <div>
             <label>{{ playerModeLabel }}</label>
-            <span class="v">{{ truth(p.playerMode !== DispenserPlayerMode.NONE) }}</span>
+            <span class="v">{{
+                truth(p.playerMode !== DispenserPlayerMode.NONE)
+            }}</span>
         </div>
         <div v-if="p.playerMode === DispenserPlayerMode.RECYCLE">
-            <label>{{ t('不限回收类型') }}</label>
+            <label>{{ t("不限回收类型") }}</label>
             <span class="v">{{ truth(props.building.filterId < 0) }}</span>
         </div>
         <div>
             <label>{{ storageModeLabel }}</label>
-            <span class="v">{{ truth(p.storageMode !== DispenserStorageMode.NONE) }}</span>
+            <span class="v">{{
+                truth(p.storageMode !== DispenserStorageMode.NONE)
+            }}</span>
         </div>
         <div>
-            <label>{{ t('自动补充提示') }}</label>
+            <label>{{ t("自动补充提示") }}</label>
             <span class="v">{{ truth(p.courierAutoReplenish) }}</span>
         </div>
-        <WorkEnergyParam :per-tick="p.workEnergyPerTick"/>
+        <WorkEnergyParam :per-tick="p.workEnergyPerTick" />
     </div>
 </template>
 
 <script lang="ts" setup>
-import { computed } from 'vue';
-import { useI18n } from 'vue-i18n';
-import { BlueprintBuilding, DispenserParameters, DispenserPlayerMode, DispenserStorageMode } from '@/blueprint/parser';
-import { truth } from '@/utils';
-import WorkEnergyParam from './WorkEnergyParam.vue';
+import { computed } from "vue";
+import { useI18n } from "vue-i18n";
+import {
+    BlueprintBuilding,
+    DispenserParameters,
+    DispenserPlayerMode,
+    DispenserStorageMode,
+} from "@/blueprint/parser";
+import { truth } from "@/utils";
+import WorkEnergyParam from "./WorkEnergyParam.vue";
 
 const { t } = useI18n();
 
 const props = defineProps<{
-    building: BlueprintBuilding,
+    building: BlueprintBuilding;
 }>();
 
 const p = computed(() => props.building.parameters as DispenserParameters);
@@ -38,30 +47,30 @@ const p = computed(() => props.building.parameters as DispenserParameters);
 const playerModeLabel = computed(() => {
     switch (p.value.playerMode) {
         case DispenserPlayerMode.NONE:
-            return t('向玩家配送模式0');
+            return t("向玩家配送模式0");
         case DispenserPlayerMode.SUPPLY:
-            return t('向玩家配送模式1');
+            return t("向玩家配送模式1");
         case DispenserPlayerMode.RECYCLE:
-            return t('向玩家配送模式2');
+            return t("向玩家配送模式2");
         case DispenserPlayerMode.BOTH:
-            return t('向玩家配送模式3');
+            return t("向玩家配送模式3");
         default:
-            return '??';
+            return "??";
     }
-})
+});
 
 const storageModeLabel = computed(() => {
     switch (p.value.storageMode) {
         case DispenserStorageMode.NONE:
-            return t('向箱子配送模式0');
+            return t("向箱子配送模式0");
         case DispenserStorageMode.SUPPLY:
-            return t('向箱子配送模式1');
+            return t("向箱子配送模式1");
         case DispenserStorageMode.DEMAND:
-            return t('向箱子配送模式2');
+            return t("向箱子配送模式2");
         default:
-            return '??';
+            return "??";
     }
-})
+});
 </script>
 
 <style lang="scss">
@@ -75,7 +84,7 @@ const storageModeLabel = computed(() => {
     .icon {
         display: block;
         padding: 2px;
-        background: #FFFFFF40;
+        background: #ffffff40;
     }
 }
 </style>

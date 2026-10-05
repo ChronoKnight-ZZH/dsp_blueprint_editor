@@ -77,16 +77,26 @@ function endpointKey(objIdx: number, slot: number, offset: number): string {
 }
 
 /** 网格偏移 → 建筑 yaw=0 局部坐标（calcBuildingTrans 中 P_grid = R_Z(-yaw)·P_local） */
-function toSlotLocal(building: BlueprintBuilding, dx: number, dy: number): [number, number] {
-    const rad = building.yaw[0] * Math.PI / 180;
-    const cos = Math.cos(rad), sin = Math.sin(rad);
+function toSlotLocal(
+    building: BlueprintBuilding,
+    dx: number,
+    dy: number
+): [number, number] {
+    const rad = (building.yaw[0] * Math.PI) / 180;
+    const cos = Math.cos(rad),
+        sin = Math.sin(rad);
     return [dx * cos - dy * sin, dx * sin + dy * cos];
 }
 
 /** 建筑 yaw=0 局部坐标 → 网格偏移（toSlotLocal 的逆变换） */
-function fromSlotLocal(building: BlueprintBuilding, lx: number, ly: number): [number, number] {
-    const rad = building.yaw[0] * Math.PI / 180;
-    const cos = Math.cos(rad), sin = Math.sin(rad);
+function fromSlotLocal(
+    building: BlueprintBuilding,
+    lx: number,
+    ly: number
+): [number, number] {
+    const rad = (building.yaw[0] * Math.PI) / 180;
+    const cos = Math.cos(rad),
+        sin = Math.sin(rad);
     return [lx * cos + ly * sin, -lx * sin + ly * cos];
 }
 
@@ -101,14 +111,13 @@ function rayFace(ux: number, uy: number, hx: number, hy: number) {
 /** 建筑选择盒在 yaw=0 局部系下的半尺寸（x, y），大建筑按 {@link FACE_CAP} 封顶 */
 function faceHalfSize(modelIndex: number): [number, number] {
     const box = buildingBoxes.get(modelIndex);
-    if (!box)
-        return [FACE_CAP, FACE_CAP];
+    if (!box) return [FACE_CAP, FACE_CAP];
     return [Math.min(box[0] / 2, FACE_CAP), Math.min(box[2] / 2, FACE_CAP)];
 }
 
 /** 皮带行进方向（yaw=0 → +y，yaw=90 → +x） */
 function beltDir(belt: BlueprintBuilding): GridPoint {
-    const rad = belt.yaw[0] * Math.PI / 180;
+    const rad = (belt.yaw[0] * Math.PI) / 180;
     return { x: Math.sin(rad), y: Math.cos(rad) };
 }
 
@@ -143,7 +152,7 @@ function projectOnBelt(belt: BlueprintBuilding, p: GridPoint): GridPoint {
  */
 export function collectOccupiedSlots(
     buildings: readonly BlueprintBuilding[],
-    targetIndex: number,
+    targetIndex: number
 ): Set<number> {
     const occ = new Set<number>();
     for (const b of buildings) {
@@ -159,7 +168,7 @@ export function collectOccupiedSlots(
 /** 收集目标皮带上已被其他分拣器占用的 offset（皮带端 slot 固定 -1） */
 function collectOccupiedBeltOffsets(
     buildings: readonly BlueprintBuilding[],
-    beltIndex: number,
+    beltIndex: number
 ): Set<number> {
     const occ = new Set<number>();
     for (const b of buildings) {
@@ -184,7 +193,7 @@ function collectOccupiedBeltOffsets(
 function splitterPortAt(
     sp: BlueprintBuilding,
     partner: BlueprintBuilding | null,
-    fallback?: GridPoint,
+    fallback?: GridPoint
 ): number {
     let dx: number, dy: number;
     if (partner !== null && partner !== undefined) {
@@ -198,7 +207,7 @@ function splitterPortAt(
     }
     const [lx, ly] = toSlotLocal(sp, dx, dy);
     if (sp.modelIndex === 39) {
-        if (Math.abs(lx) >= Math.abs(ly)) return -1;  // 一字形短边：无开口
+        if (Math.abs(lx) >= Math.abs(ly)) return -1; // 一字形短边：无开口
         return ly >= 0 ? 0 : 2;
     }
     if (Math.abs(lx) >= Math.abs(ly)) return lx >= 0 ? 1 : 3;
@@ -208,11 +217,10 @@ function splitterPortAt(
 /** 按 index 查找建筑（buildings 数组下标与 index 不一定一致，如测试传入子集） */
 function findByIndex(
     buildings: readonly BlueprintBuilding[],
-    index: number,
+    index: number
 ): BlueprintBuilding | null {
     if (index < 0) return null;
-    for (const b of buildings)
-        if (b.index === index) return b;
+    for (const b of buildings) if (b.index === index) return b;
     return null;
 }
 
@@ -222,7 +230,7 @@ function findByIndex(
  */
 function collectOccupiedSplitterPorts(
     buildings: readonly BlueprintBuilding[],
-    splitterIndex: number,
+    splitterIndex: number
 ): Set<number> {
     const occ = new Set<number>();
     const sp = findByIndex(buildings, splitterIndex);
@@ -231,12 +239,18 @@ function collectOccupiedSplitterPorts(
         if (!isInserter(b.itemId)) continue;
         if (b.inputObjIdx === splitterIndex) {
             const port = splitterPortAt(
-                sp, findByIndex(buildings, b.outputObjIdx), b.localOffset[0]);
+                sp,
+                findByIndex(buildings, b.outputObjIdx),
+                b.localOffset[0]
+            );
             if (port >= 0) occ.add(port);
         }
         if (b.outputObjIdx === splitterIndex) {
             const port = splitterPortAt(
-                sp, findByIndex(buildings, b.inputObjIdx), b.localOffset[1]);
+                sp,
+                findByIndex(buildings, b.inputObjIdx),
+                b.localOffset[1]
+            );
             if (port >= 0) occ.add(port);
         }
     }
@@ -249,14 +263,18 @@ function collectOccupiedSplitterPorts(
  */
 function isDuplicateSorter(
     n: BlueprintBuilding,
-    buildings: readonly BlueprintBuilding[],
+    buildings: readonly BlueprintBuilding[]
 ): boolean {
     const nIn = endpointKey(n.inputObjIdx, n.inputFromSlot, n.inputOffset);
     const nOut = endpointKey(n.outputObjIdx, n.outputToSlot, n.outputOffset);
     for (const b of buildings) {
         if (!isInserter(b.itemId)) continue;
         const bIn = endpointKey(b.inputObjIdx, b.inputFromSlot, b.inputOffset);
-        const bOut = endpointKey(b.outputObjIdx, b.outputToSlot, b.outputOffset);
+        const bOut = endpointKey(
+            b.outputObjIdx,
+            b.outputToSlot,
+            b.outputOffset
+        );
         if ((bIn === nIn && bOut === nOut) || (bIn === nOut && bOut === nIn))
             return true;
     }
@@ -267,19 +285,26 @@ function isDuplicateSorter(
 const SORTER_HALF_WIDTH = 0.15;
 
 function collinearSorterOverlap(
-    a0: GridPoint, a1: GridPoint,
-    b0: GridPoint, b1: GridPoint,
+    a0: GridPoint,
+    a1: GridPoint,
+    b0: GridPoint,
+    b1: GridPoint
 ): boolean {
-    const d1x = a1.x - a0.x, d1y = a1.y - a0.y;
+    const d1x = a1.x - a0.x,
+        d1y = a1.y - a0.y;
     const l1 = Math.hypot(d1x, d1y);
-    const d2x = b1.x - b0.x, d2y = b1.y - b0.y;
+    const d2x = b1.x - b0.x,
+        d2y = b1.y - b0.y;
     const l2 = Math.hypot(d2x, d2y);
     if (l1 < 1e-9 || l2 < 1e-9) return false;
     // 夹角正弦：非共线（垂直交叉等）不算"重叠"
-    const SINE = Math.sin(5 * Math.PI / 180);
+    const SINE = Math.sin((5 * Math.PI) / 180);
     if (Math.abs(d1x * d2y - d1y * d2x) / (l1 * l2) > SINE) return false;
     // b0 到 a 所在直线的垂直距离
-    if (Math.abs(d1x * (a0.y - b0.y) - d1y * (a0.x - b0.x)) / l1 > SORTER_HALF_WIDTH)
+    if (
+        Math.abs(d1x * (a0.y - b0.y) - d1y * (a0.x - b0.x)) / l1 >
+        SORTER_HALF_WIDTH
+    )
         return false;
     // b 在 a 主轴上的投影区间与 a 的 [0,1] 是否相交
     const t = (p: GridPoint) =>
@@ -295,18 +320,24 @@ function collinearSorterOverlap(
  */
 function overlapsExistingSorter(
     n: BlueprintBuilding,
-    buildings: readonly BlueprintBuilding[],
+    buildings: readonly BlueprintBuilding[]
 ): boolean {
     for (const b of buildings) {
         if (!isInserter(b.itemId)) continue;
         const samePair =
-            (b.inputObjIdx === n.inputObjIdx && b.outputObjIdx === n.outputObjIdx) ||
-            (b.inputObjIdx === n.outputObjIdx && b.outputObjIdx === n.inputObjIdx);
+            (b.inputObjIdx === n.inputObjIdx &&
+                b.outputObjIdx === n.outputObjIdx) ||
+            (b.inputObjIdx === n.outputObjIdx &&
+                b.outputObjIdx === n.inputObjIdx);
         if (samePair) continue;
-        if (collinearSorterOverlap(
-            n.localOffset[0], n.localOffset[1],
-            b.localOffset[0], b.localOffset[1],
-        ))
+        if (
+            collinearSorterOverlap(
+                n.localOffset[0],
+                n.localOffset[1],
+                b.localOffset[0],
+                b.localOffset[1]
+            )
+        )
             return true;
     }
     return false;
@@ -351,10 +382,21 @@ export function createSorterBetween(
     itemId: number,
     modelIndex: number,
     buildings: readonly BlueprintBuilding[] = [],
-    anchors: SorterAnchors = {},
+    anchors: SorterAnchors = {}
 ): BlueprintBuilding | null {
-    const preferred = buildSorter(src, dst, itemId, modelIndex, buildings, anchors, true);
-    if (preferred !== null || (anchors.src === undefined && anchors.dst === undefined))
+    const preferred = buildSorter(
+        src,
+        dst,
+        itemId,
+        modelIndex,
+        buildings,
+        anchors,
+        true
+    );
+    if (
+        preferred !== null ||
+        (anchors.src === undefined && anchors.dst === undefined)
+    )
         return preferred;
     // 按锚点无解时忽略锚点重试一次：用户点击位置可能偏离能连上的 slot 行
     // （例如点在源建筑正中，而目标皮带在相邻一行），此时退回"对端中心"基准。
@@ -368,10 +410,9 @@ function buildSorter(
     modelIndex: number,
     buildings: readonly BlueprintBuilding[],
     anchors: SorterAnchors,
-    useAnchors: boolean,
+    useAnchors: boolean
 ): BlueprintBuilding | null {
-    if (src.index === dst.index)
-        return null;
+    if (src.index === dst.index) return null;
     const c0 = src.localOffset[0];
     const c1 = dst.localOffset[0];
 
@@ -382,10 +423,8 @@ function buildSorter(
         ax = c1.x - c0.x;
         ay = c1.y - c0.y;
     }
-    if (ax === 0 && ay === 0)
-        return null;
-    if (Math.abs(ax) === Math.abs(ay))
-        return null;                       // 45° 斜向：主轴不唯一
+    if (ax === 0 && ay === 0) return null;
+    if (Math.abs(ax) === Math.abs(ay)) return null; // 45° 斜向：主轴不唯一
     const alongX = Math.abs(ax) > Math.abs(ay);
     const axis: GridPoint = alongX
         ? { x: Math.sign(ax), y: 0 }
@@ -409,7 +448,7 @@ function buildSorter(
         b: BlueprintBuilding,
         toward: GridPoint,
         targetLat: number,
-        occupied: ReadonlySet<number>,
+        occupied: ReadonlySet<number>
     ): SorterEnd | null => {
         const slots = getBuildingSlots(b.itemId);
         const c = b.localOffset[0];
@@ -419,7 +458,8 @@ function buildSorter(
         const candidates: { slot: number; end: SorterEnd }[] = [];
         for (let i = 0; i < slots.length; i++) {
             const s = slots[i];
-            if (s === null || !onFace.has(i))   // null = 该 slot 未标定
+            if (s === null || !onFace.has(i))
+                // null = 该 slot 未标定
                 continue;
             const [gx, gy] = fromSlotLocal(b, s.x, s.y);
             const point = { x: c.x + gx, y: c.y + gy };
@@ -428,12 +468,13 @@ function buildSorter(
                 end: { point, slot: i, offset: 0, lat: latOf(point, c0) },
             });
         }
-        if (candidates.length === 0)
-            return null;
-        candidates.sort((a, b2) =>
-            Math.abs(a.end.lat - targetLat) - Math.abs(b2.end.lat - targetLat)
-            || a.slot - b2.slot);
-        return candidates.find(cd => !occupied.has(cd.slot))?.end ?? null;
+        if (candidates.length === 0) return null;
+        candidates.sort(
+            (a, b2) =>
+                Math.abs(a.end.lat - targetLat) -
+                    Math.abs(b2.end.lat - targetLat) || a.slot - b2.slot
+        );
+        return candidates.find((cd) => !occupied.has(cd.slot))?.end ?? null;
     };
 
     /**
@@ -444,15 +485,16 @@ function buildSorter(
     const slotlessEnd = (
         b: BlueprintBuilding,
         refPoint: GridPoint,
-        sign: number,
+        sign: number
     ): SorterEnd => {
         const c = b.localOffset[0];
         const [lax, lay] = toSlotLocal(b, axis.x, axis.y);
         const [hx, hy] = faceHalfSize(b.modelIndex);
         const d = Math.max(0, rayFace(lax, lay, hx, hy) - ENDPOINT_INSET);
         // 端点在轴线上的位置：使其相对建筑中心的轴向坐标为 sign·d
-        const t = sign * d
-            - ((refPoint.x - c.x) * axis.x + (refPoint.y - c.y) * axis.y);
+        const t =
+            sign * d -
+            ((refPoint.x - c.x) * axis.x + (refPoint.y - c.y) * axis.y);
         const point = {
             x: refPoint.x + axis.x * t,
             y: refPoint.y + axis.y * t,
@@ -468,7 +510,7 @@ function buildSorter(
     const beltEnd = (
         belt: BlueprintBuilding,
         refPoint: GridPoint,
-        occupied: ReadonlySet<number>,
+        occupied: ReadonlySet<number>
     ): SorterEnd | null => {
         const c = belt.localOffset[0];
         const d = beltDir(belt);
@@ -476,11 +518,17 @@ function buildSorter(
         // 轴线与皮带方向近似平行（夹角 < ~26°）→ 投影退化，取皮带中心（真实蓝图实测）
         const parallel = Math.abs(axis.x * d.x + axis.y * d.y) > 0.9;
         /** 校验 + 生成端点；main 为该点在皮带方向上的投影 */
-        const make = (p: GridPoint): { end: SorterEnd; main: number } | null => {
-            const rx = p.x - c.x, ry = p.y - c.y;
+        const make = (
+            p: GridPoint
+        ): { end: SorterEnd; main: number } | null => {
+            const rx = p.x - c.x,
+                ry = p.y - c.y;
             const main = rx * d.x + ry * d.y;
             const lateral = rx * beltPerp.x + ry * beltPerp.y;
-            if (Math.abs(main) > BELT_CELL_HALF || Math.abs(lateral) > BELT_CELL_HALF)
+            if (
+                Math.abs(main) > BELT_CELL_HALF ||
+                Math.abs(lateral) > BELT_CELL_HALF
+            )
                 return null;
             return {
                 end: {
@@ -492,25 +540,26 @@ function buildSorter(
                 main,
             };
         };
-        const target = parallel ? { x: c.x, y: c.y } : projectOnBelt(belt, refPoint);
+        const target = parallel
+            ? { x: c.x, y: c.y }
+            : projectOnBelt(belt, refPoint);
         const first = make(target);
-        if (first === null)
-            return null;
-        if (!occupied.has(first.end.offset))
-            return first.end;
+        if (first === null) return null;
+        if (!occupied.has(first.end.offset)) return first.end;
         // offset 被占用：在 [-10, 10] 内按距离找最近空闲分段，并把端点移到该分段中心
         const candidates: number[] = [];
         for (let o = BELT_OFFSET_MIN; o <= BELT_OFFSET_MAX; o++) {
-            if (!occupied.has(o))
-                candidates.push(o);
+            if (!occupied.has(o)) candidates.push(o);
         }
-        candidates.sort((a, b) =>
-            Math.abs(a - first.end.offset) - Math.abs(b - first.end.offset) || a - b);
+        candidates.sort(
+            (a, b) =>
+                Math.abs(a - first.end.offset) -
+                    Math.abs(b - first.end.offset) || a - b
+        );
         for (const o of candidates) {
             const main = mainForOffset(o);
             const shifted = make({ x: c.x + d.x * main, y: c.y + d.y * main });
-            if (shifted === null)
-                continue;
+            if (shifted === null) continue;
             shifted.end.offset = o;
             return shifted.end;
         }
@@ -518,31 +567,50 @@ function buildSorter(
     };
 
     // ---- 驱动端：优先"带 slot 且给了点击锚点"的一端，其次任一带 slot 的一端 ----
-    let driver: 'src' | 'dst' | 'none' = 'none';
-    if (srcSlots.length > 0 && useAnchors && anchors.src !== undefined) driver = 'src';
-    else if (dstSlots.length > 0 && useAnchors && anchors.dst !== undefined) driver = 'dst';
-    else if (srcSlots.length > 0) driver = 'src';
-    else if (dstSlots.length > 0) driver = 'dst';
+    let driver: "src" | "dst" | "none" = "none";
+    if (srcSlots.length > 0 && useAnchors && anchors.src !== undefined)
+        driver = "src";
+    else if (dstSlots.length > 0 && useAnchors && anchors.dst !== undefined)
+        driver = "dst";
+    else if (srcSlots.length > 0) driver = "src";
+    else if (dstSlots.length > 0) driver = "dst";
 
     let srcEnd: SorterEnd | null = null;
     let dstEnd: SorterEnd | null = null;
-    if (driver === 'src') {
-        const targetLat = useAnchors && anchors.src !== undefined ? latOf(anchors.src, c0) : latOf(c1, c0);
-        srcEnd = chooseSlot(src, axis, targetLat, collectOccupiedSlots(buildings, src.index));
-        if (srcEnd === null)
-            return null;
-    } else if (driver === 'dst') {
+    if (driver === "src") {
+        const targetLat =
+            useAnchors && anchors.src !== undefined
+                ? latOf(anchors.src, c0)
+                : latOf(c1, c0);
+        srcEnd = chooseSlot(
+            src,
+            axis,
+            targetLat,
+            collectOccupiedSlots(buildings, src.index)
+        );
+        if (srcEnd === null) return null;
+    } else if (driver === "dst") {
         // 缺省（无锚点）时轴线过源对象中心 → 全局横向目标 0
-        const targetLat = useAnchors && anchors.dst !== undefined ? latOf(anchors.dst, c0) : 0;
+        const targetLat =
+            useAnchors && anchors.dst !== undefined
+                ? latOf(anchors.dst, c0)
+                : 0;
         const towardSrc: GridPoint = { x: -axis.x, y: -axis.y };
-        dstEnd = chooseSlot(dst, towardSrc, targetLat, collectOccupiedSlots(buildings, dst.index));
-        if (dstEnd === null)
-            return null;
+        dstEnd = chooseSlot(
+            dst,
+            towardSrc,
+            targetLat,
+            collectOccupiedSlots(buildings, dst.index)
+        );
+        if (dstEnd === null) return null;
     }
 
     // 轴线参考点：已确定端点的位置，或目标对象中心（两端都无 slot 时）
-    const refPoint: GridPoint = srcEnd !== null ? srcEnd.point
-        : dstEnd !== null ? dstEnd.point
+    const refPoint: GridPoint =
+        srcEnd !== null
+            ? srcEnd.point
+            : dstEnd !== null
+            ? dstEnd.point
             : { x: c1.x, y: c1.y };
 
     /**
@@ -550,14 +618,23 @@ function buildSorter(
      * 有 slot 数据的建筑端按"朝向对端的面 + 横向坐标（= 已定端点的横向）"选 slot；
      * 其余（分流器等无 slot 建筑）取轴线与连接面交点。
      */
-    const completeEnd = (b: BlueprintBuilding, isSrc: boolean): SorterEnd | null => {
+    const completeEnd = (
+        b: BlueprintBuilding,
+        isSrc: boolean
+    ): SorterEnd | null => {
         if (isBelt(b.itemId))
-            return beltEnd(b, refPoint, collectOccupiedBeltOffsets(buildings, b.index));
+            return beltEnd(
+                b,
+                refPoint,
+                collectOccupiedBeltOffsets(buildings, b.index)
+            );
         if (getBuildingSlots(b.itemId).length > 0) {
             const toward: GridPoint = isSrc ? axis : { x: -axis.x, y: -axis.y };
             return chooseSlot(
-                b, toward, latOf(refPoint, c0),
-                collectOccupiedSlots(buildings, b.index),
+                b,
+                toward,
+                latOf(refPoint, c0),
+                collectOccupiedSlots(buildings, b.index)
             );
         }
         return slotlessEnd(b, refPoint, isSrc ? 1 : -1);
@@ -566,40 +643,46 @@ function buildSorter(
     // ---- 补全另一端 ----
     if (srcEnd === null) {
         srcEnd = completeEnd(src, true);
-        if (srcEnd === null)
-            return null;
+        if (srcEnd === null) return null;
     }
     if (dstEnd === null) {
         dstEnd = completeEnd(dst, false);
-        if (dstEnd === null)
-            return null;
+        if (dstEnd === null) return null;
     }
 
     // ---- 校验：两端 slot 横向一致（建筑↔建筑不能架成斜向）+ 长度 1-3 ----
-    if (srcEnd.slot >= 0 && dstEnd.slot >= 0
-        && Math.abs(srcEnd.lat - dstEnd.lat) > SLOT_LATERAL_TOLERANCE)
+    if (
+        srcEnd.slot >= 0 &&
+        dstEnd.slot >= 0 &&
+        Math.abs(srcEnd.lat - dstEnd.lat) > SLOT_LATERAL_TOLERANCE
+    )
         return null;
 
     const dx = dstEnd.point.x - srcEnd.point.x;
     const dy = dstEnd.point.y - srcEnd.point.y;
     const len = Math.round(Math.hypot(dx, dy));
-    if (len < 1 || len > 3)
-        return null;
+    if (len < 1 || len > 3) return null;
 
     // ---- 分流器口唯一性（直连分拣器 slot 恒 -1，口按对端方向反推）----
     if (srcIsSplitter) {
         const port = splitterPortAt(src, dst, srcEnd.point);
-        if (port < 0 || collectOccupiedSplitterPorts(buildings, src.index).has(port))
+        if (
+            port < 0 ||
+            collectOccupiedSplitterPorts(buildings, src.index).has(port)
+        )
             return null;
     }
     if (dstIsSplitter) {
         const port = splitterPortAt(dst, src, dstEnd.point);
-        if (port < 0 || collectOccupiedSplitterPorts(buildings, dst.index).has(port))
+        if (
+            port < 0 ||
+            collectOccupiedSplitterPorts(buildings, dst.index).has(port)
+        )
             return null;
     }
 
     // ---- 组装分拣器记录（yaw[0] 沿运动主轴，yaw[1]/tilt 恒 0）----
-    const yaw0 = alongX ? (axis.x > 0 ? 90 : 270) : (axis.y > 0 ? 0 : 180);
+    const yaw0 = alongX ? (axis.x > 0 ? 90 : 270) : axis.y > 0 ? 0 : 180;
     const building = createBuilding(itemId, modelIndex, srcEnd.point, yaw0);
     building.localOffset[1] = { x: dstEnd.point.x, y: dstEnd.point.y, z: 0 };
     building.yaw = [yaw0, 0];
@@ -608,9 +691,9 @@ function buildSorter(
 
     building.inputObjIdx = src.index;
     building.outputObjIdx = dst.index;
-    building.inputFromSlot = srcEnd.slot;     // 建筑端 0-11，皮带/无 slot 端 -1
-    building.inputOffset = srcEnd.offset;     // 皮带端分段 offset，建筑端 0
-    building.inputToSlot = 1;                 // 分拣器自身固定 slot
+    building.inputFromSlot = srcEnd.slot; // 建筑端 0-11，皮带/无 slot 端 -1
+    building.inputOffset = srcEnd.offset; // 皮带端分段 offset，建筑端 0
+    building.inputToSlot = 1; // 分拣器自身固定 slot
     building.outputToSlot = dstEnd.slot;
     building.outputOffset = dstEnd.offset;
     building.outputFromSlot = 0;

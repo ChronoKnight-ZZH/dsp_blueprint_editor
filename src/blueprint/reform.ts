@@ -1,10 +1,17 @@
 import {
-    CanvasTexture, Color, Euler, Group, InstancedMesh,
-    Matrix4, MeshLambertMaterial, MeshStandardMaterial,
-    PlaneGeometry, SRGBColorSpace,
-} from 'three';
-import { BlueprintReformData } from './parser';
-import { PositionedBlueprint } from './planet';
+    CanvasTexture,
+    Color,
+    Euler,
+    Group,
+    InstancedMesh,
+    Matrix4,
+    MeshLambertMaterial,
+    MeshStandardMaterial,
+    PlaneGeometry,
+    SRGBColorSpace,
+} from "three";
+import { BlueprintReformData } from "./parser";
+import { PositionedBlueprint } from "./planet";
 
 /** 无地基（未改造），不渲染 */
 export const REFORM_TYPE_NONE = 0;
@@ -26,21 +33,21 @@ const TILE_SCALE = 0.985;
  * 蓝图携带自定义颜色（customReformColorMask + customReformColors）时以蓝图实际颜色为准。
  */
 const DEFAULT_REFORM_COLORS: readonly number[] = [
-    0x94948F, // 0  默认灰
-    0xD9D9D4, // 1  白
-    0x4F4F4F, // 2  黑
-    0xC05048, // 3  红
-    0xD17C3E, // 4  橙
-    0xD8B740, // 5  黄
-    0x9EB34A, // 6  黄绿
-    0x5EA85C, // 7  绿
-    0x46A88E, // 8  青绿
-    0x4A9FC2, // 9  青蓝
-    0x4B78C2, // 10 蓝
-    0x7B60C2, // 11 紫
-    0xAF60B5, // 12 品红
-    0xD2729A, // 13 粉
-    0x8A5C3C, // 14 棕
+    0x94948f, // 0  默认灰
+    0xd9d9d4, // 1  白
+    0x4f4f4f, // 2  黑
+    0xc05048, // 3  红
+    0xd17c3e, // 4  橙
+    0xd8b740, // 5  黄
+    0x9eb34a, // 6  黄绿
+    0x5ea85c, // 7  绿
+    0x46a88e, // 8  青绿
+    0x4a9fc2, // 9  青蓝
+    0x4b78c2, // 10 蓝
+    0x7b60c2, // 11 紫
+    0xaf60b5, // 12 品红
+    0xd2729a, // 13 粉
+    0x8a5c3c, // 14 棕
 ];
 
 interface ReformCell {
@@ -60,20 +67,21 @@ function expandReformCells(data: BlueprintReformData): ReformCell[] {
     // areaIndex(0..255) 与 int16 格坐标编码进一个 double 安全整数作为去重键
     const cells = new Map<number, ReformCell>();
     for (const rect of data.rects) {
-        if (rect.type === REFORM_TYPE_NONE)
-            continue;
+        if (rect.type === REFORM_TYPE_NONE) continue;
         for (let dx = 0; dx < rect.w; dx++) {
             for (let dy = 0; dy < rect.h; dy++) {
                 const gx = rect.x + dx;
                 const gy = rect.y + dy;
-                const key = rect.areaIndex * 0x100000000
-                    + ((gx & 0xFFFF) << 16)
-                    + (gy & 0xFFFF);
+                const key =
+                    rect.areaIndex * 0x100000000 +
+                    ((gx & 0xffff) << 16) +
+                    (gy & 0xffff);
                 cells.set(key, {
                     areaIndex: rect.areaIndex,
-                    gx, gy,
+                    gx,
+                    gy,
                     type: rect.type,
-                    colorIndex: rect.color & 0x1F,
+                    colorIndex: rect.color & 0x1f,
                 });
             }
         }
@@ -93,7 +101,7 @@ function resolveReformColors(data: BlueprintReformData): Color[] {
     for (let i = 0; i < 32; i++) {
         if (((data.customReformColorMask >>> i) & 1) !== 0) {
             const v = data.customReformColors[rank] ?? 0;
-            colors[i] = new Color(v & 0xFFFFFF);
+            colors[i] = new Color(v & 0xffffff);
             rank++;
         } else {
             const hex = DEFAULT_REFORM_COLORS[i] ?? 0x808080;
@@ -104,35 +112,46 @@ function resolveReformColors(data: BlueprintReformData): Color[] {
 }
 
 const TEXTURE_SIZE = 128;
-const GROOVE_COLOR = 'rgb(96,96,96)';
+const GROOVE_COLOR = "rgb(96,96,96)";
 
 /** 绘制单块金属板：底板渐变 + 边缘倒角高光/阴影 + 四角铆钉 */
 function drawMetalPlate(
     ctx: CanvasRenderingContext2D,
-    x: number, y: number, w: number, h: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number
 ) {
-    const px = x + 2, py = y + 2, pw = w - 4, ph = h - 4;
+    const px = x + 2,
+        py = y + 2,
+        pw = w - 4,
+        ph = h - 4;
     // 底色接近白色：纹理与实例地基色为相乘关系，浅灰纹理才能让自定义颜色准确显色
     const grad = ctx.createLinearGradient(0, py, 0, py + ph);
-    grad.addColorStop(0, 'rgb(232,232,232)');
-    grad.addColorStop(0.5, 'rgb(220,220,220)');
-    grad.addColorStop(1, 'rgb(206,206,206)');
+    grad.addColorStop(0, "rgb(232,232,232)");
+    grad.addColorStop(0.5, "rgb(220,220,220)");
+    grad.addColorStop(1, "rgb(206,206,206)");
     ctx.fillStyle = grad;
     ctx.fillRect(px, py, pw, ph);
 
     // 倒角：左上高光、右下阴影
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillStyle = "rgba(255,255,255,0.6)";
     ctx.fillRect(px, py, pw, 2);
     ctx.fillRect(px, py, 2, ph);
-    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    ctx.fillStyle = "rgba(0,0,0,0.28)";
     ctx.fillRect(px, py + ph - 2, pw, 2);
     ctx.fillRect(px + pw - 2, py, 2, ph);
 
     // 四角铆钉
-    for (const [rx, ry] of [[px + 6, py + 6], [px + pw - 9, py + 6], [px + 6, py + ph - 9], [px + pw - 9, py + ph - 9]] as const) {
-        ctx.fillStyle = 'rgba(0,0,0,0.38)';
+    for (const [rx, ry] of [
+        [px + 6, py + 6],
+        [px + pw - 9, py + 6],
+        [px + 6, py + ph - 9],
+        [px + pw - 9, py + ph - 9],
+    ] as const) {
+        ctx.fillStyle = "rgba(0,0,0,0.38)";
         ctx.fillRect(rx + 1, ry + 1, 3, 3);
-        ctx.fillStyle = 'rgba(255,255,255,0.65)';
+        ctx.fillStyle = "rgba(255,255,255,0.65)";
         ctx.fillRect(rx, ry, 3, 2);
     }
 }
@@ -154,7 +173,7 @@ function drawIBeamPattern(ctx: CanvasRenderingContext2D) {
     const brickW = TEXTURE_SIZE / 2;
     const rowH = TEXTURE_SIZE / 4;
     for (let row = 0; row < 4; row++) {
-        const offset = (row % 2) * brickW / 2;
+        const offset = ((row % 2) * brickW) / 2;
         for (let bx = -brickW; bx <= TEXTURE_SIZE; bx += brickW)
             drawMetalPlate(ctx, bx + offset, row * rowH, brickW, rowH);
     }
@@ -167,15 +186,13 @@ let gridTexture: CanvasTexture | null = null;
 let ibeamMaterial: MeshStandardMaterial | null = null;
 let gridMaterial: MeshStandardMaterial | null = null;
 
-function createPlateTexture(pattern: 'ibeam' | 'grid'): CanvasTexture {
-    const canvas = document.createElement('canvas');
+function createPlateTexture(pattern: "ibeam" | "grid"): CanvasTexture {
+    const canvas = document.createElement("canvas");
     canvas.width = TEXTURE_SIZE;
     canvas.height = TEXTURE_SIZE;
-    const ctx = canvas.getContext('2d')!;
-    if (pattern === 'ibeam')
-        drawIBeamPattern(ctx);
-    else
-        drawGridPattern(ctx);
+    const ctx = canvas.getContext("2d")!;
+    if (pattern === "ibeam") drawIBeamPattern(ctx);
+    else drawGridPattern(ctx);
     const texture = new CanvasTexture(canvas);
     texture.colorSpace = SRGBColorSpace;
     return texture;
@@ -188,14 +205,10 @@ function createPlateTexture(pattern: 'ibeam' | 'grid'): CanvasTexture {
 export class Reforms extends Group {}
 
 function getSharedResources() {
-    if (plateGeometry === null)
-        plateGeometry = new PlaneGeometry(1, 1);
-    if (baseMaterial === null)
-        baseMaterial = new MeshLambertMaterial();
-    if (ibeamTexture === null)
-        ibeamTexture = createPlateTexture('ibeam');
-    if (gridTexture === null)
-        gridTexture = createPlateTexture('grid');
+    if (plateGeometry === null) plateGeometry = new PlaneGeometry(1, 1);
+    if (baseMaterial === null) baseMaterial = new MeshLambertMaterial();
+    if (ibeamTexture === null) ibeamTexture = createPlateTexture("ibeam");
+    if (gridTexture === null) gridTexture = createPlateTexture("grid");
     if (ibeamMaterial === null)
         // 无环境贴图的场景下降低 metalness，保证金属板既有光泽又不会过暗
         ibeamMaterial = new MeshStandardMaterial({
@@ -224,47 +237,57 @@ const scaleMatrix = new Matrix4();
 export function buildReforms(
     R: number,
     pos: PositionedBlueprint,
-    reformData: BlueprintReformData | null | undefined,
+    reformData: BlueprintReformData | null | undefined
 ): Reforms | null {
-    if (reformData === null || reformData === undefined || reformData.rects.length === 0)
+    if (
+        reformData === null ||
+        reformData === undefined ||
+        reformData.rects.length === 0
+    )
         return null;
     const cells = expandReformCells(reformData);
-    if (cells.length === 0)
-        return null;
+    if (cells.length === 0) return null;
     const colors = resolveReformColors(reformData);
-    const { plateGeometry, baseMaterial, ibeamMaterial, gridMaterial } = getSharedResources();
+    const { plateGeometry, baseMaterial, ibeamMaterial, gridMaterial } =
+        getSharedResources();
 
     let numIBeam = 0;
     let numGrid = 0;
     for (const cell of cells) {
-        if (cell.type === REFORM_TYPE_IBEAM)
-            numIBeam++;
-        else if (cell.type === REFORM_TYPE_GRID)
-            numGrid++;
+        if (cell.type === REFORM_TYPE_IBEAM) numIBeam++;
+        else if (cell.type === REFORM_TYPE_GRID) numGrid++;
     }
 
-    const baseMesh = new InstancedMesh(plateGeometry, baseMaterial, cells.length);
-    const ibeamMesh = numIBeam > 0 ? new InstancedMesh(plateGeometry, ibeamMaterial, numIBeam) : null;
-    const gridMesh = numGrid > 0 ? new InstancedMesh(plateGeometry, gridMaterial, numGrid) : null;
+    const baseMesh = new InstancedMesh(
+        plateGeometry,
+        baseMaterial,
+        cells.length
+    );
+    const ibeamMesh =
+        numIBeam > 0
+            ? new InstancedMesh(plateGeometry, ibeamMaterial, numIBeam)
+            : null;
+    const gridMesh =
+        numGrid > 0
+            ? new InstancedMesh(plateGeometry, gridMaterial, numGrid)
+            : null;
 
     // 包围球跨整个星球，关闭视锥剔除避免近处浏览时被错误剔除
     baseMesh.frustumCulled = false;
-    if (ibeamMesh)
-        ibeamMesh.frustumCulled = false;
-    if (gridMesh)
-        gridMesh.frustumCulled = false;
+    if (ibeamMesh) ibeamMesh.frustumCulled = false;
+    if (gridMesh) gridMesh.frustumCulled = false;
 
     let ibeamIdx = 0;
     let gridIdx = 0;
     for (let i = 0; i < cells.length; i++) {
         const cell = cells[i];
         const area = pos.areas[cell.areaIndex];
-        const longitudeGridSize = 2 * Math.PI / area.segment / 5;
-        const latitudeGridSize = 2 * Math.PI / pos.segment / 5;
+        const longitudeGridSize = (2 * Math.PI) / area.segment / 5;
+        const latitudeGridSize = (2 * Math.PI) / pos.segment / 5;
         const longitude = (area.longitude + cell.gx) * longitudeGridSize;
         const latitude = (area.latitude + cell.gy) * latitudeGridSize;
 
-        euler.set(-latitude, longitude, 0, 'YXZ');
+        euler.set(-latitude, longitude, 0, "YXZ");
         rotationMatrix.makeRotationFromEuler(euler);
         // 与 calcBuildingTrans 相同的定位约定：先绕到经纬朝向，再沿本地 z 抬到地表
         tileMatrix.makeTranslation(0, 0, R + REFORM_LIFT);
@@ -273,7 +296,7 @@ export function buildReforms(
         scaleMatrix.makeScale(
             R * longitudeGridSize * Math.cos(latitude) * TILE_SCALE,
             R * latitudeGridSize * TILE_SCALE,
-            1,
+            1
         );
         tileMatrix.multiply(scaleMatrix);
 
@@ -304,9 +327,7 @@ export function buildReforms(
 
     const reforms = new Reforms();
     reforms.add(baseMesh);
-    if (ibeamMesh)
-        reforms.add(ibeamMesh);
-    if (gridMesh)
-        reforms.add(gridMesh);
+    if (ibeamMesh) reforms.add(ibeamMesh);
+    if (gridMesh) reforms.add(gridMesh);
     return reforms;
 }

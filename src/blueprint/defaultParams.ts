@@ -1,19 +1,32 @@
 import {
     AllParameters,
     StationParameters,
-    SplitterParameters, LabParamerters, AssembleParamerters,
-    InserterParameters, TankParameters,
-    StorageParameters, StorageType,
-    EjectorParameters, PowerGeneratorParameters,
-    ArtifacialStarParameters, EnergyExchangerParameters,
-    MonitorParameters, BattleBaseParameters, DispenserParameters,
-    UnknownParamerters, LogisticRole,
-    ResearchMode, AcceleratorMode,
-} from './parser';
-import { allAssemblers } from '@/data/items';
+    SplitterParameters,
+    LabParamerters,
+    AssembleParamerters,
+    InserterParameters,
+    TankParameters,
+    StorageParameters,
+    StorageType,
+    EjectorParameters,
+    PowerGeneratorParameters,
+    ArtifacialStarParameters,
+    EnergyExchangerParameters,
+    MonitorParameters,
+    BattleBaseParameters,
+    DispenserParameters,
+    UnknownParamerters,
+    LogisticRole,
+    ResearchMode,
+    AcceleratorMode,
+} from "./parser";
+import { allAssemblers } from "@/data/items";
 
 /** itemId → 最小合法 parameters 模板；未注册建筑返回 null（走 unknownParamParser） */
-export function defaultParamsFor(itemId: number, _modelIndex: number): AllParameters | null {
+export function defaultParamsFor(
+    itemId: number,
+    _modelIndex: number
+): AllParameters | null {
     void _modelIndex;
     switch (itemId) {
         // 物流运输站 / 星际物流运输站
@@ -25,16 +38,30 @@ export function defaultParamsFor(itemId: number, _modelIndex: number): AllParame
         case 2316:
             return {
                 ...emptyStation(1, 12, 49000),
-                storage: [{ itemId: 1001, max: 10000, localLogic: LogisticRole.Supply, remoteLogic: LogisticRole.None, keepMode: 0 }],
+                storage: [
+                    {
+                        itemId: 1001,
+                        max: 10000,
+                        localLogic: LogisticRole.Supply,
+                        remoteLogic: LogisticRole.None,
+                        keepMode: 0,
+                    },
+                ],
                 miningSpeed: 10000,
             };
         // 四向分流器
         case 2020:
-            return { priority: [false, false, false, false], extra: [0, 0] } as SplitterParameters;
+            return {
+                priority: [false, false, false, false],
+                extra: [0, 0],
+            } as SplitterParameters;
         // 研究站
         case 2901:
         case 2902:
-            return { researchMode: ResearchMode.None, acceleratorMode: AcceleratorMode.ExtraOutput } as LabParamerters;
+            return {
+                researchMode: ResearchMode.None,
+                acceleratorMode: AcceleratorMode.ExtraOutput,
+            } as LabParamerters;
         // 传送带：新放置的传送带无参数（与游戏一致），由 setBeltParams 按需初始化
         case 2001:
         case 2002:
@@ -73,7 +100,12 @@ export function defaultParamsFor(itemId: number, _modelIndex: number): AllParame
             return defaultBattleBase();
         // 物流配送器
         case 2107:
-            return { playerMode: 2, storageMode: 0, workEnergyPerTick: 30000, courierAutoReplenish: false } as DispenserParameters;
+            return {
+                playerMode: 2,
+                storageMode: 0,
+                workEnergyPerTick: 30000,
+                courierAutoReplenish: false,
+            } as DispenserParameters;
         // 地热发电站（单参数槽）
         case 2213:
             return { parameters: new Int32Array([0]) } as UnknownParamerters;
@@ -83,7 +115,11 @@ export function defaultParamsFor(itemId: number, _modelIndex: number): AllParame
         // 全息信标（2048 参数槽）
         case 2401: {
             const a = new Int32Array(2048);
-            a[0] = 83; a[1] = 1250; a[2] = 150; a[3] = 2; a[4] = 2;
+            a[0] = 83;
+            a[1] = 1250;
+            a[2] = 150;
+            a[3] = 2;
+            a[4] = 2;
             return { parameters: a } as UnknownParamerters;
         }
         // 防御塔（128 参数槽，索引 2 为默认开火优先级/分组）
@@ -101,22 +137,35 @@ export function defaultParamsFor(itemId: number, _modelIndex: number): AllParame
     }
     // 制造台 / 熔炉 / 精炼厂 / 化工厂 / 对撞机（allAssemblers 中除研究站外）
     if (allAssemblers.has(itemId)) {
-        return { acceleratorMode: AcceleratorMode.ExtraOutput } as AssembleParamerters;
+        return {
+            acceleratorMode: AcceleratorMode.ExtraOutput,
+        } as AssembleParamerters;
     }
     return null;
 }
 
-function emptyStation(maxItemKind: number, numSlots: number, workEnergyPerTick: number): StationParameters {
+function emptyStation(
+    maxItemKind: number,
+    numSlots: number,
+    workEnergyPerTick: number
+): StationParameters {
     const storage = [];
     for (let i = 0; i < maxItemKind; i++) {
-        storage.push({ itemId: 0, max: 0, localLogic: LogisticRole.None, remoteLogic: LogisticRole.None, keepMode: 0 });
+        storage.push({
+            itemId: 0,
+            max: 0,
+            localLogic: LogisticRole.None,
+            remoteLogic: LogisticRole.None,
+            keepMode: 0,
+        });
     }
     const slots = [];
     for (let i = 0; i < numSlots; i++) {
         slots.push({ dir: 0, storageIdx: 0 });
     }
     return {
-        storage, slots,
+        storage,
+        slots,
         workEnergyPerTick,
         tripRangeOfDrones: -1,
         tripRangeOfShips: 24000000000,
@@ -137,8 +186,7 @@ function emptyStorage(): StorageParameters {
 
 function defaultBattleBase(): BattleBaseParameters {
     const fighters = [];
-    for (let i = 0; i < 12; i++)
-        fighters.push({ itemId: 5101 });
+    for (let i = 0; i < 12; i++) fighters.push({ itemId: 5101 });
     return {
         ...emptyStorage(),
         automationLimit: 10,
@@ -155,11 +203,24 @@ function defaultBattleBase(): BattleBaseParameters {
 
 function defaultMonitor(): MonitorParameters {
     return {
-        targetBeltId: 0, offset: 0, targetCargoAmount: 0, periodTicksCount: 360,
-        passColorId: 113, failColorId: 13, passOperator: 5, alarmMode: 0,
-        cargoFilter: 0, systemWarningMode: 0, systemWarningIconId: 402,
-        tone: 20, volume: 80, pitch: 35, repeat: true, length: 4,
-        falloffRadius: [24, 72], spawnItemOperator: 0,
+        targetBeltId: 0,
+        offset: 0,
+        targetCargoAmount: 0,
+        periodTicksCount: 360,
+        passColorId: 113,
+        failColorId: 13,
+        passOperator: 5,
+        alarmMode: 0,
+        cargoFilter: 0,
+        systemWarningMode: 0,
+        systemWarningIconId: 402,
+        tone: 20,
+        volume: 80,
+        pitch: 35,
+        repeat: true,
+        length: 4,
+        falloffRadius: [24, 72],
+        spawnItemOperator: 0,
     };
 }
 

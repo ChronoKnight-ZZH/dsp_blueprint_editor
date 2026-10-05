@@ -22,7 +22,6 @@ export class EventDispatcher<TArgs extends Array<any>> {
     }
 }
 
-
 export class Updater {
     updateBuildingIcon = new EventDispatcher<[b: BlueprintBuilding]>();
     updateBeltIcon = new EventDispatcher<[b: BlueprintBuilding]>();
@@ -60,7 +59,7 @@ export class CommandQueue {
     }
     public set maxSize(value) {
         this._maxSize = value;
-        this.trim()
+        this.trim();
     }
 
     /**
@@ -85,7 +84,10 @@ export class CommandQueue {
 
     private trim() {
         if (this.maxSize < this.commands.length) {
-            const n = Math.min(this.commands.length - this.maxSize, this.currentPosition);
+            const n = Math.min(
+                this.commands.length - this.maxSize,
+                this.currentPosition
+            );
             this.commands.splice(0, n);
             this.currentPosition -= n;
             this.stateVersion.value++;
@@ -93,16 +95,18 @@ export class CommandQueue {
     }
 
     public push(c: Command) {
-        this.commands.splice(this.currentPosition)
+        this.commands.splice(this.currentPosition);
         c.do(this.data, this.updater);
-        if (this.currentPosition > 0 && this.commands[this.currentPosition - 1].merge(c))
+        if (
+            this.currentPosition > 0 &&
+            this.commands[this.currentPosition - 1].merge(c)
+        )
             return;
         this.commands.push(c);
         this.currentPosition++;
         this.trim();
         this.stateVersion.value++;
-        if (!c.silent)
-            this.execVersion.value++;
+        if (!c.silent) this.execVersion.value++;
     }
 
     public canUndo() {
@@ -111,13 +115,11 @@ export class CommandQueue {
     }
 
     public undo() {
-        if (!this.canUndo())
-            return false;
+        if (!this.canUndo()) return false;
         const cmd = this.commands[--this.currentPosition];
         cmd.undo(this.data, this.updater);
         this.stateVersion.value++;
-        if (!cmd.silent)
-            this.execVersion.value++;
+        if (!cmd.silent) this.execVersion.value++;
         return true;
     }
 
@@ -127,13 +129,11 @@ export class CommandQueue {
     }
 
     public redo() {
-        if (!this.canRedo())
-            return false;
+        if (!this.canRedo()) return false;
         const cmd = this.commands[this.currentPosition++];
         cmd.do(this.data, this.updater);
         this.stateVersion.value++;
-        if (!cmd.silent)
-            this.execVersion.value++;
+        if (!cmd.silent) this.execVersion.value++;
         return true;
     }
 }

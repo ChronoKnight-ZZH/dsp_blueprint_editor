@@ -1,8 +1,8 @@
 <template>
     <div class="shortcut-hint">
         <div class="hint-title" @click="collapsed = !collapsed">
-            <span class="hint-arrow">{{ collapsed ? '▸' : '▾' }}</span>
-            {{ t('当前模式') }}：{{ t(modeTitle) }}
+            <span class="hint-arrow">{{ collapsed ? "▸" : "▾" }}</span>
+            {{ t("当前模式") }}：{{ t(modeTitle) }}
         </div>
         <div v-if="!collapsed" class="hint-rows">
             <div v-for="row of rows" :key="row[0]" class="hint-row">
@@ -14,9 +14,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import { useI18n } from 'vue-i18n';
-import { usePlacement } from '@/editor/placementState';
+import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
+import { usePlacement } from "@/editor/placementState";
 
 const { t } = useI18n();
 const placement = usePlacement();
@@ -24,38 +24,37 @@ const placement = usePlacement();
 const collapsed = ref(false);
 
 const modeTitle = computed(() => {
-    if (placement.appMode === 'preview')
-        return '预览模式';
-    return placement.mode === 'deleting' ? '删除模式' : '编辑模式';
+    if (placement.appMode === "preview") return "预览模式";
+    return placement.mode === "deleting" ? "删除模式" : "编辑模式";
 });
 
 // 仅列已实现的快捷键
 const rows = computed<[string, string][]>(() => {
-    if (placement.appMode === 'preview')
+    if (placement.appMode === "preview")
         return [
-            ['左键', '选中建筑'],
-            ['右键', '删除建筑'],
-            ['滚轮', '缩放'],
-            ['拖拽', '旋转'],
-            ['0 / O', '显示/隐藏列表'],
-            ['WASD', '上下左右滚动'],
-            ['N', '重置镜头'],
+            ["左键", "选中建筑"],
+            ["右键", "删除建筑"],
+            ["滚轮", "缩放"],
+            ["拖拽", "旋转"],
+            ["0 / O", "显示/隐藏列表"],
+            ["WASD", "上下左右滚动"],
+            ["N", "重置镜头"],
         ];
-    if (placement.mode === 'deleting')
+    if (placement.mode === "deleting")
         return [
-            ['左键', '删除建筑'],
-            ['右键 / Esc', '退出删除'],
-            ['N', '重置镜头'],
+            ["左键", "删除建筑"],
+            ["右键 / Esc", "退出删除"],
+            ["N", "重置镜头"],
         ];
     return [
-        ['1-9', '切换分类'],
-        ['F1-F12', '选建筑'],
-        ['左键', '放置建筑'],
-        ['R', '旋转 90°'],
-        ['X', '删除模式'],
-        ['Esc', '取消/收起'],
-        ['Shift', '自由放置'],
-        ['N', '重置镜头'],
+        ["1-9", "切换分类"],
+        ["F1-F12", "选建筑"],
+        ["左键", "放置建筑"],
+        ["R", "旋转 90°"],
+        ["X", "删除模式"],
+        ["Esc", "取消/收起"],
+        ["Shift", "自由放置"],
+        ["N", "重置镜头"],
     ];
 });
 </script>
@@ -109,7 +108,7 @@ const rows = computed<[string, string][]>(() => {
         min-width: 56px;
         text-align: end;
         color: #8ec9ff;
-        font-family: 'Menlo', 'Consolas', monospace;
+        font-family: "Menlo", "Consolas", monospace;
         font-size: 0.72rem;
     }
 

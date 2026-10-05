@@ -1,4 +1,13 @@
-import { EventDispatcher, MOUSE, PerspectiveCamera, Quaternion, Spherical, TOUCH, Vector2, Vector3 } from 'three';
+import {
+    EventDispatcher,
+    MOUSE,
+    PerspectiveCamera,
+    Quaternion,
+    Spherical,
+    TOUCH,
+    Vector2,
+    Vector3,
+} from "three";
 
 enum STATE {
     NONE,
@@ -14,11 +23,14 @@ enum STATE {
 const EPS = 0.000001;
 
 // Like three/examples/jsm/controls/OrbitControls
-export class PlanetMapControls extends EventDispatcher<{change: object, start: object, end: object}> {
-
-    static changeEvent = { type: 'change' } as const;
-    static startEvent = { type: 'start' } as const;
-    static endEvent = { type: 'end' } as const;
+export class PlanetMapControls extends EventDispatcher<{
+    change: object;
+    start: object;
+    end: object;
+}> {
+    static changeEvent = { type: "change" } as const;
+    static startEvent = { type: "start" } as const;
+    static endEvent = { type: "end" } as const;
 
     enabled = true;
 
@@ -38,7 +50,7 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
 
     // How far you can orbit horizontally, upper and lower limits.
     // If set, the interval [ min, max ] must be a sub-interval of [ - 2 PI, 2 PI ], with ( max - min < 2 PI )
-    minAzimuthAngle = - Infinity; // radians
+    minAzimuthAngle = -Infinity; // radians
     maxAzimuthAngle = Infinity; // radians
 
     // Set to true to enable damping (inertia)
@@ -54,27 +66,36 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
     rotateSpeed = 1.0;
 
     keys: Record<string, { rotate: Vector2 }> = {
-        KeyW: { rotate: new Vector2( 0,  1) },
-        KeyS: { rotate: new Vector2( 0, -1) },
-        KeyA: { rotate: new Vector2( 1,  0) },
-        KeyD: { rotate: new Vector2(-1,  0) },
+        KeyW: { rotate: new Vector2(0, 1) },
+        KeyS: { rotate: new Vector2(0, -1) },
+        KeyA: { rotate: new Vector2(1, 0) },
+        KeyD: { rotate: new Vector2(-1, 0) },
     };
     keyRotateSpeed = 200.0;
 
-    mouseButtons = { LEFT: -1 as MOUSE, MIDDLE: MOUSE.ROTATE, RIGHT: -1 as MOUSE };
+    mouseButtons = {
+        LEFT: -1 as MOUSE,
+        MIDDLE: MOUSE.ROTATE,
+        RIGHT: -1 as MOUSE,
+    };
 
     touches = { ONE: -1 as TOUCH, TWO: TOUCH.DOLLY_ROTATE };
 
-    constructor(public object: PerspectiveCamera, public domElement: HTMLElement) {
+    constructor(
+        public object: PerspectiveCamera,
+        public domElement: HTMLElement
+    ) {
         super();
-        domElement.style.touchAction = 'none';
+        domElement.style.touchAction = "none";
 
         this.onContextMenu = this.onContextMenu.bind(this);
-        this.domElement.addEventListener('contextmenu', this.onContextMenu);
+        this.domElement.addEventListener("contextmenu", this.onContextMenu);
 
-        this.domElement.addEventListener('pointerdown', this.onPointerDown);
-        this.domElement.addEventListener('pointercancel', this.onPointerCancel);
-        this.domElement.addEventListener('wheel', this.onMouseWheel, { passive: false });
+        this.domElement.addEventListener("pointerdown", this.onPointerDown);
+        this.domElement.addEventListener("pointercancel", this.onPointerCancel);
+        this.domElement.addEventListener("wheel", this.onMouseWheel, {
+            passive: false,
+        });
 
         // force an update at start
         this.update();
@@ -82,8 +103,8 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
 
     private domElementKeyEvents: GlobalEventHandlers | null = null;
     listenToKeyEvents(domElement: GlobalEventHandlers) {
-        domElement.addEventListener('keydown', this.onKeyDown);
-        domElement.addEventListener('keyup', this.onKeyUp);
+        domElement.addEventListener("keydown", this.onKeyDown);
+        domElement.addEventListener("keyup", this.onKeyUp);
         this.domElementKeyEvents = domElement;
     }
 
@@ -120,9 +141,10 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
     updateTimeDelta(deltaTimeInSeconds: number) {
         for (const code of this.downKeys) {
             const act = this.keys[code];
-            if (act === undefined)
-                continue;
-            this.keyRotate.copy(act.rotate).multiplyScalar(this.keyRotateSpeed * deltaTimeInSeconds);
+            if (act === undefined) continue;
+            this.keyRotate
+                .copy(act.rotate)
+                .multiplyScalar(this.keyRotateSpeed * deltaTimeInSeconds);
             this.rotate(this.keyRotate.x, this.keyRotate.y);
         }
     }
@@ -132,7 +154,10 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
     update() {
         const twoPI = Math.PI * 2;
         // so camera.up is the orbit axis
-        const quat = new Quaternion().setFromUnitVectors(this.object.up, new Vector3(0, 1, 0));
+        const quat = new Quaternion().setFromUnitVectors(
+            this.object.up,
+            new Vector3(0, 1, 0)
+        );
         const quatInverse = quat.clone().invert();
         const offset = new Vector3();
 
@@ -147,7 +172,8 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
         this.spherical.setFromVector3(offset);
 
         if (this.enableDamping) {
-            this.spherical.theta += this.sphericalDelta.theta * this.dampingFactor;
+            this.spherical.theta +=
+                this.sphericalDelta.theta * this.dampingFactor;
             this.spherical.phi += this.sphericalDelta.phi * this.dampingFactor;
         } else {
             this.spherical.theta += this.sphericalDelta.theta;
@@ -160,34 +186,41 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
         let max = this.maxAzimuthAngle;
 
         if (isFinite(min) && isFinite(max)) {
-            if (min < - Math.PI)
-                min += twoPI;
-            else if (min > Math.PI)
-                min -= twoPI;
+            if (min < -Math.PI) min += twoPI;
+            else if (min > Math.PI) min -= twoPI;
 
-            if (max < - Math.PI)
-                max += twoPI;
-            else if (max > Math.PI)
-                max -= twoPI;
+            if (max < -Math.PI) max += twoPI;
+            else if (max > Math.PI) max -= twoPI;
 
             if (min <= max) {
-                this.spherical.theta = Math.max(min, Math.min(max, this.spherical.theta));
+                this.spherical.theta = Math.max(
+                    min,
+                    Math.min(max, this.spherical.theta)
+                );
             } else {
-                this.spherical.theta = (this.spherical.theta > (min + max) / 2) ?
-                    Math.max(min, this.spherical.theta) :
-                    Math.min(max, this.spherical.theta);
+                this.spherical.theta =
+                    this.spherical.theta > (min + max) / 2
+                        ? Math.max(min, this.spherical.theta)
+                        : Math.min(max, this.spherical.theta);
             }
-
         }
 
         // restrict phi to be between desired limits
-        this.spherical.phi = Math.max(this.minPolarAngle, Math.min(this.maxPolarAngle, this.spherical.phi));
+        this.spherical.phi = Math.max(
+            this.minPolarAngle,
+            Math.min(this.maxPolarAngle, this.spherical.phi)
+        );
         this.spherical.makeSafe();
 
-        this.spherical.radius = this.targetRadius + (this.spherical.radius - this.targetRadius) * this.scale;
+        this.spherical.radius =
+            this.targetRadius +
+            (this.spherical.radius - this.targetRadius) * this.scale;
 
         // restrict radius to be between desired limits
-        this.spherical.radius = Math.max(this.minDistance, Math.min(this.maxDistance, this.spherical.radius));
+        this.spherical.radius = Math.max(
+            this.minDistance,
+            Math.min(this.maxDistance, this.spherical.radius)
+        );
 
         // move target to panned location
 
@@ -207,8 +240,8 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
         this.object.lookAt(this.target);
 
         if (this.enableDamping === true) {
-            this.sphericalDelta.theta *= (1 - this.dampingFactor);
-            this.sphericalDelta.phi *= (1 - this.dampingFactor);
+            this.sphericalDelta.theta *= 1 - this.dampingFactor;
+            this.sphericalDelta.phi *= 1 - this.dampingFactor;
 
             this.panOffset.multiplyScalar(1 - this.dampingFactor);
         } else {
@@ -221,9 +254,10 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
         // update condition is:
         // min(camera displacement, camera rotation in radians)^2 > EPS
         // using small-angle approximation cos(x/2) = 1 - x^2 / 8
-        if (this.lastPosition.distanceToSquared(this.object.position) > EPS ||
-            8 * (1 - this.lastQuaternion.dot(this.object.quaternion)) > EPS) {
-
+        if (
+            this.lastPosition.distanceToSquared(this.object.position) > EPS ||
+            8 * (1 - this.lastQuaternion.dot(this.object.quaternion)) > EPS
+        ) {
             this.lastPosition.copy(this.object.position);
             this.lastQuaternion.copy(this.object.quaternion);
 
@@ -233,18 +267,24 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
     }
 
     dispose() {
-        this.domElement.removeEventListener('contextmenu', this.onContextMenu);
+        this.domElement.removeEventListener("contextmenu", this.onContextMenu);
 
-        this.domElement.removeEventListener('pointerdown', this.onPointerDown);
-        this.domElement.removeEventListener('pointercancel', this.onPointerCancel);
-        this.domElement.removeEventListener('wheel', this.onMouseWheel);
+        this.domElement.removeEventListener("pointerdown", this.onPointerDown);
+        this.domElement.removeEventListener(
+            "pointercancel",
+            this.onPointerCancel
+        );
+        this.domElement.removeEventListener("wheel", this.onMouseWheel);
 
-        this.domElement.removeEventListener('pointermove', this.onPointerMove);
-        this.domElement.removeEventListener('pointerup', this.onPointerUp);
+        this.domElement.removeEventListener("pointermove", this.onPointerMove);
+        this.domElement.removeEventListener("pointerup", this.onPointerUp);
 
         if (this.domElementKeyEvents !== null) {
-            this.domElementKeyEvents.removeEventListener('keydown', this.onKeyDown);
-            this.domElementKeyEvents.removeEventListener('keyup', this.onKeyUp);
+            this.domElementKeyEvents.removeEventListener(
+                "keydown",
+                this.onKeyDown
+            );
+            this.domElementKeyEvents.removeEventListener("keyup", this.onKeyUp);
         }
     }
 
@@ -274,7 +314,12 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
         const offset = new Vector3();
         offset.copy(this.object.position).sub(this.target);
         const targetDistance = offset.length() - this.targetRadius;
-        const unitAngle = targetDistance * Math.tan(this.object.fov / 2 * (Math.PI / 180.0)) * 2 / this.targetRadius / this.domElement.clientHeight;
+        const unitAngle =
+            (targetDistance *
+                Math.tan((this.object.fov / 2) * (Math.PI / 180.0)) *
+                2) /
+            this.targetRadius /
+            this.domElement.clientHeight;
 
         this.rotateLeft(deltaX * unitAngle);
         this.rotateUp(deltaY * unitAngle);
@@ -284,7 +329,7 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
         this.scale /= dollyScale;
     }
 
-    dollyIn( dollyScale: number ) {
+    dollyIn(dollyScale: number) {
         this.scale *= dollyScale;
     }
 
@@ -301,14 +346,14 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
 
     handleMouseMoveRotate(event: PointerEvent) {
         this.rotateEnd.set(event.clientX, event.clientY);
-        this.rotateDelta.subVectors(this.rotateEnd, this.rotateStart)
+        this.rotateDelta
+            .subVectors(this.rotateEnd, this.rotateStart)
             .multiplyScalar(this.rotateSpeed);
 
         this.rotate(this.rotateDelta.x, this.rotateDelta.y);
 
         this.rotateStart.copy(this.rotateEnd);
     }
-
 
     handleMouseWheel(event: WheelEvent) {
         this.dollyOut(Math.pow(this.wheelDollyBase, event.deltaY));
@@ -329,7 +374,10 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
 
     handleTouchStartRotate() {
         if (this.pointers.length === 1) {
-            this.rotateStart.set(this.pointers[0].pageX, this.pointers[0].pageY);
+            this.rotateStart.set(
+                this.pointers[0].pageX,
+                this.pointers[0].pageY
+            );
         } else {
             const x = 0.5 * (this.pointers[0].pageX + this.pointers[1].pageX);
             const y = 0.5 * (this.pointers[0].pageY + this.pointers[1].pageY);
@@ -337,21 +385,19 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
         }
     }
 
-	handleTouchStartDolly() {
-        const dx = this.pointers[ 0 ].pageX - this.pointers[ 1 ].pageX;
-        const dy = this.pointers[ 0 ].pageY - this.pointers[ 1 ].pageY;
+    handleTouchStartDolly() {
+        const dx = this.pointers[0].pageX - this.pointers[1].pageX;
+        const dy = this.pointers[0].pageY - this.pointers[1].pageY;
 
-        const distance = Math.sqrt( dx * dx + dy * dy );
+        const distance = Math.sqrt(dx * dx + dy * dy);
 
-        this.dollyStart.set( 0, distance );
+        this.dollyStart.set(0, distance);
     }
 
     handleTouchStartDollyRotate() {
-        if (this.enableDolly)
-            this.handleTouchStartDolly();
+        if (this.enableDolly) this.handleTouchStartDolly();
 
-        if (this.enableRotate)
-            this.handleTouchStartRotate();
+        if (this.enableRotate) this.handleTouchStartRotate();
     }
 
     handleTouchMoveRotate(event: PointerEvent) {
@@ -365,7 +411,8 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
 
             this.rotateEnd.set(x, y);
         }
-        this.rotateDelta.subVectors(this.rotateEnd, this.rotateStart)
+        this.rotateDelta
+            .subVectors(this.rotateEnd, this.rotateStart)
             .multiplyScalar(this.rotateSpeed);
 
         this.rotate(this.rotateDelta.x, this.rotateDelta.y);
@@ -381,7 +428,10 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
         const distance = Math.sqrt(dx * dx + dy * dy);
 
         this.dollyEnd.set(0, distance);
-        this.dollyDelta.set(0, Math.pow(this.dollyEnd.y / this.dollyStart.y, this.dollySpeed));
+        this.dollyDelta.set(
+            0,
+            Math.pow(this.dollyEnd.y / this.dollyStart.y, this.dollySpeed)
+        );
 
         this.dollyOut(this.dollyDelta.y);
 
@@ -389,42 +439,34 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
     }
 
     handleTouchMoveDollyRotate(event: PointerEvent) {
-        if (this.enableDolly)
-            this.handleTouchMoveDolly(event);
+        if (this.enableDolly) this.handleTouchMoveDolly(event);
 
-        if (this.enableRotate)
-            this.handleTouchMoveRotate(event);
+        if (this.enableRotate) this.handleTouchMoveRotate(event);
     }
 
     //
     // event handlers - FSM: listen for events and reset state
     //
     onPointerDown = (event: PointerEvent) => {
-        if (!this.enabled)
-            return;
+        if (!this.enabled) return;
 
         if (this.pointers.length === 0) {
             this.domElement.setPointerCapture(event.pointerId);
-            this.domElement.addEventListener('pointermove', this.onPointerMove);
-            this.domElement.addEventListener('pointerup', this.onPointerUp);
+            this.domElement.addEventListener("pointermove", this.onPointerMove);
+            this.domElement.addEventListener("pointerup", this.onPointerUp);
         }
 
         this.addPointer(event);
-        if (event.pointerType === 'touch')
-            this.onTouchStart(event);
-        else
-            this.onMouseDown(event);
-    }
+        if (event.pointerType === "touch") this.onTouchStart(event);
+        else this.onMouseDown(event);
+    };
 
     onPointerMove = (event: PointerEvent) => {
-        if (!this.enabled)
-            return;
+        if (!this.enabled) return;
 
-        if (event.pointerType === 'touch')
-            this.onTouchMove(event);
-        else
-            this.onMouseMove(event);
-    }
+        if (event.pointerType === "touch") this.onTouchMove(event);
+        else this.onMouseMove(event);
+    };
 
     onPointerUp = (event: PointerEvent) => {
         this.removePointer(event);
@@ -432,17 +474,19 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
         if (this.pointers.length === 0) {
             this.domElement.releasePointerCapture(event.pointerId);
 
-            this.domElement.removeEventListener('pointermove', this.onPointerMove);
-            this.domElement.removeEventListener('pointerup', this.onPointerUp);
-
+            this.domElement.removeEventListener(
+                "pointermove",
+                this.onPointerMove
+            );
+            this.domElement.removeEventListener("pointerup", this.onPointerUp);
         }
         this.dispatchEvent(PlanetMapControls.endEvent);
         this.state = STATE.NONE;
-    }
+    };
 
     onPointerCancel = (event: PointerEvent) => {
         this.removePointer(event);
-    }
+    };
 
     onMouseDown(event: PointerEvent) {
         let mouseAction = -1;
@@ -460,22 +504,19 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
 
         switch (mouseAction) {
             case MOUSE.DOLLY:
-                if (!this.enableDolly)
-                    return;
+                if (!this.enableDolly) return;
                 this.handleMouseDownDolly(event);
                 this.state = STATE.DOLLY;
                 break;
 
             case MOUSE.ROTATE:
-                if (!this.enableRotate)
-                    return;
+                if (!this.enableRotate) return;
                 this.handleMouseDownRotate(event);
                 this.state = STATE.ROTATE;
                 break;
 
             default:
                 this.state = STATE.NONE;
-
         }
 
         if (this.state !== STATE.NONE)
@@ -483,13 +524,11 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
     }
 
     onMouseMove(event: PointerEvent) {
-        if (!this.enabled)
-            return;
+        if (!this.enabled) return;
 
         switch (this.state) {
             case STATE.ROTATE:
-                if (!this.enableRotate)
-                    return;
+                if (!this.enableRotate) return;
                 this.handleMouseMoveRotate(event);
                 break;
         }
@@ -503,17 +542,16 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
         this.dispatchEvent(PlanetMapControls.startEvent);
         this.handleMouseWheel(event);
         this.dispatchEvent(PlanetMapControls.endEvent);
-    }
+    };
 
     onKeyDown = (event: KeyboardEvent) => {
-        if (!this.enabled)
-            return;
+        if (!this.enabled) return;
         this.handleKeyDown(event);
-    }
+    };
 
     onKeyUp = (event: KeyboardEvent) => {
         this.handleKeyUp(event);
-    }
+    };
 
     onTouchStart(event: PointerEvent) {
         this.trackPointer(event);
@@ -521,8 +559,7 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
             case 1:
                 switch (this.touches.ONE) {
                     case TOUCH.ROTATE:
-                        if (this.enableRotate === false)
-                            return;
+                        if (this.enableRotate === false) return;
                         this.handleTouchStartRotate();
                         this.state = STATE.TOUCH_ROTATE;
                         break;
@@ -534,8 +571,7 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
             case 2:
                 switch (this.touches.TWO) {
                     case TOUCH.DOLLY_ROTATE:
-                        if (!this.enableDolly && !this.enableRotate)
-                            return;
+                        if (!this.enableDolly && !this.enableRotate) return;
                         this.handleTouchStartDollyRotate();
                         this.state = STATE.TOUCH_DOLLY_ROTATE;
                         break;
@@ -555,13 +591,11 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
         this.trackPointer(event);
         switch (this.state) {
             case STATE.TOUCH_ROTATE:
-                if (!this.enableRotate)
-                    return;
+                if (!this.enableRotate) return;
                 this.handleTouchMoveRotate(event);
                 break;
             case STATE.TOUCH_DOLLY_ROTATE:
-                if (!this.enableDolly && !this.enableRotate)
-                    return;
+                if (!this.enableDolly && !this.enableRotate) return;
                 this.handleTouchMoveDollyRotate(event);
                 break;
             default:
@@ -570,10 +604,9 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
     }
 
     onContextMenu = (event: Event) => {
-        if (this.enabled === false)
-            return;
+        if (this.enabled === false) return;
         event.preventDefault();
-    }
+    };
 
     protected addPointer(event: PointerEvent) {
         this.pointers.push(event);
@@ -599,7 +632,10 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
     }
 
     getSecondPointerPosition(event: PointerEvent) {
-        const pointer = (event.pointerId === this.pointers[0].pointerId) ? this.pointers[1] : this.pointers[0];
+        const pointer =
+            event.pointerId === this.pointers[0].pointerId
+                ? this.pointers[1]
+                : this.pointers[0];
         return this.pointerPositions[pointer.pointerId];
     }
 }
