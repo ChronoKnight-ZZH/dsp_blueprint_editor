@@ -108,18 +108,20 @@ export function normalizeBlueprintAreas(bp: BlueprintData): BlueprintData {
     // 新原点纬度 rootAreaLatitude(sizeY)，y' = 绝对纬度 - 新原点纬度 = y + liveLat - newLat
     const dy = liveLat - rootAreaLatitude(sizeY);
 
-    const shiftX = (x: number) =>
-        (((x - originX) % ROOT_GRID_SIZE) + ROOT_GRID_SIZE) % ROOT_GRID_SIZE;
-    const buildings = bp.buildings.map((b) => ({
-        ...b,
-        localOffset: b.localOffset.map((p) => ({
-            x: shiftX(p.x),
-            y: p.y + dy,
-            z: p.z,
-        })) as BlueprintData["buildings"][number]["localOffset"],
-        // 导出时由 localOffset[1]/yaw[1] 重新生成，避免残留平移前的旧值
-        v2ExtraPose: undefined,
-    }));
+    const shiftX = (x: number) => ((x - originX) % ROOT_GRID_SIZE + ROOT_GRID_SIZE) % ROOT_GRID_SIZE;
+    const buildings = bp.buildings.map(b => {
+        const localOffset = b.localOffset.map(p => ({
+            x: shiftX(p.x), y: p.y + dy, z: p.z,
+        })) as BlueprintData['buildings'][number]['localOffset'];
+        // v2ExtraPose 必须保留：它除尖端坐标外还带分拣器的姿态角（pose[4] = yaw[0]、pose[5] = tilt），
+        // 丢弃后导出会退化成 [0,…,0]，游戏读到的分拣器朝向就是 0°（表现为"分拣器角度偏移"、报错）。
+        // 尖端坐标随 localOffset[1] 一起平移，其余字段原样保留（导出时还会再由 localOffset[1]/yaw[1] 刷新）。
+        const pose = b.v2ExtraPose;
+        const v2ExtraPose = pose === undefined || pose.length !== 7
+            ? pose
+            : [pose[0], localOffset[1].x, localOffset[1].y, localOffset[1].z, pose[4], pose[5], pose[6]];
+        return { ...b, localOffset, v2ExtraPose };
+    });
 
     return {
         ...bp,

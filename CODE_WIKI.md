@@ -216,9 +216,9 @@
 | `setBeaconContent.ts` | `SetBeaconContentCommand`：修改全息信标（itemId=2401）`content` 文本字段，`silent=true` 不触发 3D 重建；`merge` 合并对同一建筑的连续编辑。 |
 | `reform.ts` | 地基（reformData）3D 渲染层：`Reforms extends Group` + `buildReforms`，把 `BlueprintReformData` 渲染为工字铺（IBEAM）/ 直铺（PLAIN）/ 网格（GRID）+ 自定义颜色（共享 CanvasTexture 与 InstancedMesh）。 |
 | `removeBuilding.ts` | `RemoveBuildingsCommand` / `RemoveBuildingCommand` / `RemoveBuildingsByItemCommand`：删除建筑并维护 index 与交叉引用。 |
-| `area.ts` | 编辑期区域坐标：`planetToLocal / localToPlanet / ensureAreaFor`（放置时扩张根区域）与 `normalizeBlueprintAreas`（导出时把根区域收缩到实际建筑区间，环形经度取最小覆盖弧）。 |
+| `area.ts` | 编辑期区域坐标：`planetToLocal / localToPlanet / ensureAreaFor`（放置时扩张根区域）与 `normalizeBlueprintAreas`（导出时把根区域收缩到实际建筑区间，环形经度取最小覆盖弧）。归一化时**必须保留 `v2ExtraPose`**（只随 `localOffset[1]` 平移尖端坐标）：它是分拣器的姿态角来源，丢一次就会让导出退化成 `[0,…,0]`，游戏里表现为"分拣器角度偏移"报错。 |
 | `create.ts` | 新建蓝图与入库：`createEmptyBlueprint`（根区域 size 10×161 的临时画布）、`createBuilding`（最小合法 v2 记录）、`CreateBuildingCommand`。 |
-| `beltLine.ts` | 传送带铺线：`rasterizeLine`（latFirst / lonFirst / straight 三种走法）、`buildBeltLine`（逐格算 yaw）、`CreateBeltLineCommand`（整条一次撤销 + 内部串联）。 |
+| `beltLine.ts` | 传送带铺线：`rasterizeLine`（latFirst / lonFirst / straight 三种走法）、`buildBeltLine`（逐格算 yaw，**拐角格 = 进入/离开方向的平分角**，即 45° 斜角，与游戏一致）、`CreateBeltLineCommand`（整条一次撤销；重叠格按"末格复用 / 线路中间截断"处理，避免同格两条带）。 |
 | `sorter.ts` | 分拣器连接构造：`createSorterBetween`（建筑↔建筑 / 建筑↔皮带 / 皮带↔皮带 / 分流器），规则见 §6.12。 |
 
 ### 5.2 命令与状态层 `src/`
@@ -458,7 +458,18 @@
 | `length` | `round(两端点距离)`，必须落在 1–3 |
 | `yaw` | `yaw[0]` = 主轴整数角（0/90/180/270），`yaw[1]`/`tilt` = 0（游戏值带 ±0.9° 球面噪声） |
 | slot 字段 | 分拣器自身 `inputToSlot=1 / outputFromSlot=0`；建筑端 slot 0–11 且 offset 0；皮带/分流器端 slot −1 |
-| `v2ExtraPose` | `[pose0, tip.x, tip.y, tip.z, yaw0, tilt, yaw1]`，`pose0`（语义未公开，游戏自身在 −0.7..0.22 间跳变）按启发式写：输入端为建筑 → 0.20118，为皮带 → 0 |
+| `v2ExtraPose` | `[pose0, tip.x, tip.y, tip.z, yaw0, tilt, yaw1]`，`pose0`（语义未公开，游戏自身在 −0.7..0.22 间跳变）按启发式写：输入端为建筑 → 0.20118，为皮带 → 0。**`pose[4]` 必须是分拣器朝向 `yaw[0]`**（真实蓝图里两者差 ≤0.2°），写成 0 会让游戏把分拣器摆成 0°（用户实测"分拣器角度偏移"报错）；导出链路（`normalizeBlueprintAreas` + `exportBuildingV2`）与导入自愈（角度差 >45° 判为早期版本坏数据，按 `yaw[0]/tilt` 修正）都围绕这条不变量 |
+
+### 6.13 传送带与分拣器的游戏约定（传送带铺线 `beltLine.ts`）
+
+标定样本：`tests/tools/游戏生成.txt`（游戏自己保存的传送带+分拣器）与 `工具生成.txt`（早期工具输出，暴露了 §6.12 的 pose 问题与下面的传送带问题）。工具输出必须满足：
+
+| 约定 | 内容 |
+| --- | --- |
+| 传送带串联 | 只用 `outputObjIdx` 指向下游；`inputObjIdx` 恒 −1；`outputToSlot` = 有下游 1 / 末格 0；`inputToSlot` = 1；`inputFromSlot`/`outputFromSlot` = 0；`parameters` = null（游戏不存传送带参数） |
+| 拐角 yaw | 拐角格 yaw = **进入方向与离开方向的平分角**（东进南出 135°、南进西出 225°），直格就是行进方向；只写离开方向会缺 45° 过渡（游戏样本实测 136.5 / 223.6） |
+| 一格一带 | 同一格只能有一条传送带：重叠格若为已有线路**末格**则复用（并按实际上下游重算 yaw），若在**线路中间**则本次拖拽在冲突格前截断——否则会出现两个上游，游戏需分流器/集装机才支持 |
+| 分拣器 | 见 §6.12；关键是 `pose[4] = yaw[0]`、`inputToSlot=1`/`outputFromSlot=0`、皮带端 slot −1 且带 offset、建筑端 slot ≥0 且 offset 0 |
 
 **点击锚点**（`SorterAnchors`，`src`/`dst` 为连续网格坐标）：与游戏一致，光标落在哪一列/哪一行就决定挂哪个 slot。缺省时以"对端中心"为横向基准。按锚点无解时会**忽略锚点重试一次**（例如点源建筑正中、而目标皮带在相邻一行）。
 
@@ -678,6 +689,8 @@ python3 i18n.py ... -o ../locales     # 生成 zh/en locale
 | `stats.spec.ts` | `calculateProductionStats`：分馏塔特例、普通配方建筑、增产剂各等级倍率与自身消耗、研究站科研模式。 |
 | `sorter.spec.ts` | 分拣器连接：slot 表与同款模型复用、slot 占用切换、皮带 `offset = floor(main×21)` 编码、建筑↔皮带 / 建筑↔建筑端点、主轴与 45° 拒绝、分流器口唯一性、重复/重叠拒绝、点击锚点选 slot、方建筑角 slot 面归属、分拣器姿态字段启发式。 |
 | `sorter_replay.spec.ts` | 真实蓝图全量复现：`sorter_belt_replay`（3 根皮带↔皮带）、`sorter_building_belt_replay`（29 根建筑/皮带混合，`tests/tools/分拣器.txt` 副本）、`sorter_multi_building_replay`（23 根、12 种建筑 × 输入/输出两个方向 + 长度 1/2，`tests/tools/分拣器示例.txt` 副本）逐字段比对。 |
+| `beltGameConsistency.spec.ts` | 传送带约定：游戏样本 `belt_inserter_game_sample.txt` 的 `pose[4]≈yaw[0]`、串联/slot/parameters 约定、拐角平分角；工具侧拐角 yaw、多次拖拽重叠格复用与截断、撤销恢复。 |
+| `createdExport.spec.ts` | 工具"新建蓝图→铺带→加分拣器→保存"链路：导出再解析后 `pose[4]` 仍等于 `yaw[0]`（四朝向）、`normalizeBlueprintAreas` 平移尖端但保留姿态角且不改入参、缺 pose 时兜底写 `yaw[0]`，以及早期坏文件（fixture `tool_export_pose_broken.txt`）导入自愈。 |
 
 fixtures 位于 `tests/unit/blueprint/fixtures/`：除原有蓝图外新增 `starting_base_01029.txt`（0.10.29 老版本基地）、`foundation_only_99.txt`、`facilities_with_foundation_320.txt`、`sorter_belt_replay.txt`、`sorter_building_belt_replay.txt`、`sorter_multi_building_replay.txt`。调试/标定脚本位于 `tests/tools/`（`parseBlueprint.ts` 蓝图→JSON、`sorterReplay.ts` 分拣器连接复现比对、`dumpBuildings.ts` 紧凑建筑表、`deriveSlots.ts` slot 表反推/校验、`slotScaleProbe.ts` 分区尺度诊断、`fitBeltOffset.ts` 皮带 offset 分段数拟合），样本 `分拣器.txt` / `分拣器示例.txt` 为游戏 0.10.35 实测蓝图。
 
