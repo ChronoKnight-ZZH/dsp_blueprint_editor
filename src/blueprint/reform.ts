@@ -28,7 +28,7 @@ const REFORM_LIFT = 0.015;
 const TILE_SCALE = 0.985;
 
 /**
- * 游戏内置地基默认色板（地形改造面板，索引 0..14）。
+ * 游戏内置地基默认色板（地形改造面板，索引 0..16）。
  * 游戏未在蓝图中导出该表，此处为与游戏内色板近似的混凝土色调；
  * 蓝图携带自定义颜色（customReformColorMask + customReformColors）时以蓝图实际颜色为准。
  */
@@ -48,6 +48,7 @@ const DEFAULT_REFORM_COLORS: readonly number[] = [
     0xaf60b5, // 12 品红
     0xd2729a, // 13 粉
     0x8a5c3c, // 14 棕
+    0xffa6a6, // 15 粉
 ];
 
 interface ReformCell {
@@ -93,7 +94,8 @@ function expandReformCells(data: BlueprintReformData): ReformCell[] {
  * 解析 32 个地基颜色槽位。
  * customReformColorMask 第 i 位置位时，该槽位使用自定义颜色；
  * customReformColors 按置位槽位升序紧凑存储。
- * uint32 为小端 Color32（0xRRGGBB），alpha 恒为 255。
+ * uint32 为 0xRRGGBBAA（R 在最高字节，alpha 恒为 0xFF），
+ * 取高 24 位即得 RGB，与 tests/tools/dumpBlueprintData.ts 的展示约定一致。
  */
 function resolveReformColors(data: BlueprintReformData): Color[] {
     const colors: Color[] = new Array(32);
@@ -101,7 +103,8 @@ function resolveReformColors(data: BlueprintReformData): Color[] {
     for (let i = 0; i < 32; i++) {
         if (((data.customReformColorMask >>> i) & 1) !== 0) {
             const v = data.customReformColors[rank] ?? 0;
-            colors[i] = new Color(v & 0xffffff);
+            // 0xRRGGBBAA -> RGB：去掉最低字节的 alpha
+            colors[i] = new Color((v >>> 8) & 0xffffff);
             rank++;
         } else {
             const hex = DEFAULT_REFORM_COLORS[i] ?? 0x808080;
@@ -128,17 +131,17 @@ function drawMetalPlate(
         ph = h - 4;
     // 底色接近白色：纹理与实例地基色为相乘关系，浅灰纹理才能让自定义颜色准确显色
     const grad = ctx.createLinearGradient(0, py, 0, py + ph);
-    grad.addColorStop(0, "rgb(232,232,232)");
-    grad.addColorStop(0.5, "rgb(220,220,220)");
-    grad.addColorStop(1, "rgb(206,206,206)");
+    grad.addColorStop(0, "rgb(248,248,248)");
+    grad.addColorStop(0.5, "rgb(240,240,240)");
+    grad.addColorStop(1, "rgb(230,230,230)");
     ctx.fillStyle = grad;
     ctx.fillRect(px, py, pw, ph);
 
     // 倒角：左上高光、右下阴影
-    ctx.fillStyle = "rgba(255,255,255,0.6)";
+    ctx.fillStyle = "rgba(255,255,255,0.7)";
     ctx.fillRect(px, py, pw, 2);
     ctx.fillRect(px, py, 2, ph);
-    ctx.fillStyle = "rgba(0,0,0,0.28)";
+    ctx.fillStyle = "rgba(0,0,0,0.22)";
     ctx.fillRect(px, py + ph - 2, pw, 2);
     ctx.fillRect(px + pw - 2, py, 2, ph);
 
@@ -210,17 +213,19 @@ function getSharedResources() {
     if (ibeamTexture === null) ibeamTexture = createPlateTexture("ibeam");
     if (gridTexture === null) gridTexture = createPlateTexture("grid");
     if (ibeamMaterial === null)
-        // 无环境贴图的场景下降低 metalness，保证金属板既有光泽又不会过暗
+        // 场景无环境贴图时金属反射项几乎为 0，过高的 metalness 会按 (1-metalness)
+        // 压低漫反射，使地基颜色发暗、去饱和；取低 metalness 并由纹理自带的
+        // 高光/倒角呈现金属感，实例颜色即可接近蓝图色板
         ibeamMaterial = new MeshStandardMaterial({
             map: ibeamTexture,
-            metalness: 0.5,
-            roughness: 0.45,
+            metalness: 0.2,
+            roughness: 0.5,
         });
     if (gridMaterial === null)
         gridMaterial = new MeshStandardMaterial({
             map: gridTexture,
-            metalness: 0.5,
-            roughness: 0.45,
+            metalness: 0.2,
+            roughness: 0.5,
         });
     return { plateGeometry, baseMaterial, ibeamMaterial, gridMaterial };
 }

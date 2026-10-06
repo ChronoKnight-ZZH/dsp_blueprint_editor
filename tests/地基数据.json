@@ -1,0 +1,272 @@
+{
+  "header": {
+    "layout": 10,
+    "icons": [
+      1131,
+      0,
+      0,
+      0,
+      0
+    ],
+    "time": "2026-10-05T23:48:03.760Z",
+    "gameVersion": "0.10.35.29104",
+    "shortDesc": "新蓝图",
+    "author": "",
+    "blueprintVersion": "",
+    "properties": "",
+    "desc": "第一排是三个type\n第二，三排是定义颜色\n第四排是处定义颜色55FF00FF"
+  },
+  "version": 2,
+  "cursorOffset": {
+    "x": 40,
+    "y": 19
+  },
+  "cursorTargetArea": 0,
+  "dragBoxSize": {
+    "x": 81,
+    "y": 39
+  },
+  "primaryAreaIdx": 0,
+  "areas": [
+    {
+      "index": 0,
+      "parentIndex": -1,
+      "tropicAnchor": 0,
+      "areaSegments": 200,
+      "anchorLocalOffset": {
+        "x": 0,
+        "y": 0
+      },
+      "size": {
+        "x": 81,
+        "y": 39
+      }
+    }
+  ],
+  "buildings": [],
+  "patch": 1,
+  "reformData": {
+    "reserved": 0,
+    "rects": [
+      {
+        "reserved": 0,
+        "x": 0,
+        "y": 0,
+        "w": 10,
+        "h": 10,
+        "type": 1,
+        "color": 16,
+        "areaIndex": 0
+      },
+      {
+        "reserved": 0,
+        "x": 0,
+        "y": 10,
+        "w": 10,
+        "h": 10,
+        "type": 1,
+        "color": 8,
+        "areaIndex": 0
+      },
+      {
+        "reserved": 0,
+        "x": 10,
+        "y": 10,
+        "w": 10,
+        "h": 10,
+        "type": 1,
+        "color": 9,
+        "areaIndex": 0
+      },
+      {
+        "reserved": 0,
+        "x": 20,
+        "y": 10,
+        "w": 10,
+        "h": 10,
+        "type": 1,
+        "color": 10,
+        "areaIndex": 0
+      },
+      {
+        "reserved": 0,
+        "x": 30,
+        "y": 10,
+        "w": 10,
+        "h": 10,
+        "type": 1,
+        "color": 11,
+        "areaIndex": 0
+      },
+      {
+        "reserved": 0,
+        "x": 40,
+        "y": 10,
+        "w": 10,
+        "h": 10,
+        "type": 1,
+        "color": 12,
+        "areaIndex": 0
+      },
+      {
+        "reserved": 0,
+        "x": 50,
+        "y": 10,
+        "w": 10,
+        "h": 10,
+        "type": 1,
+        "color": 13,
+        "areaIndex": 0
+      },
+      {
+        "reserved": 0,
+        "x": 60,
+        "y": 10,
+        "w": 10,
+        "h": 10,
+        "type": 1,
+        "color": 14,
+        "areaIndex": 0
+      },
+      {
+        "reserved": 0,
+        "x": 70,
+        "y": 10,
+        "w": 10,
+        "h": 10,
+        "type": 1,
+        "color": 15,
+        "areaIndex": 0
+      },
+      {
+        "reserved": 0,
+        "x": 0,
+        "y": 20,
+        "w": 10,
+        "h": 10,
+        "type": 1,
+        "color": 0,
+        "areaIndex": 0
+      },
+      {
+        "reserved": 0,
+        "x": 10,
+        "y": 20,
+        "w": 10,
+        "h": 10,
+        "type": 1,
+        "color": 1,
+        "areaIndex": 0
+      },
+      {
+        "reserved": 0,
+        "x": 20,
+        "y": 20,
+        "w": 10,
+        "h": 10,
+        "type": 1,
+        "color": 2,
+        "areaIndex": 0
+      },
+      {
+        "reserved": 0,
+        "x": 30,
+        "y": 20,
+        "w": 10,
+        "h": 10,
+        "type": 1,
+        "color": 3,
+        "areaIndex": 0
+      },
+      {
+        "reserved": 0,
+        "x": 40,
+        "y": 20,
+        "w": 10,
+        "h": 10,
+        "type": 1,
+        "color": 4,
+        "areaIndex": 0
+      },
+      {
+        "reserved": 0,
+        "x": 50,
+        "y": 20,
+        "w": 10,
+        "h": 10,
+        "type": 1,
+        "color": 5,
+        "areaIndex": 0
+      },
+      {
+        "reserved": 0,
+        "x": 60,
+        "y": 20,
+        "w": 10,
+        "h": 10,
+        "type": 1,
+        "color": 6,
+        "areaIndex": 0
+      },
+      {
+        "reserved": 0,
+        "x": 70,
+        "y": 20,
+        "w": 10,
+        "h": 10,
+        "type": 1,
+        "color": 7,
+        "areaIndex": 0
+      },
+      {
+        "reserved": 0,
+        "x": 0,
+        "y": 30,
+        "w": 10,
+        "h": 10,
+        "type": 7,
+        "color": 0,
+        "areaIndex": 0
+      },
+      {
+        "reserved": 0,
+        "x": 10,
+        "y": 30,
+        "w": 10,
+        "h": 10,
+        "type": 2,
+        "color": 0,
+        "areaIndex": 0
+      },
+      {
+        "reserved": 0,
+        "x": 20,
+        "y": 30,
+        "w": 10,
+        "h": 10,
+        "type": 1,
+        "color": 0,
+        "areaIndex": 0
+      }
+    ],
+    "customReformColorMask": 65536,
+    "customReformColors": [
+      1442775295,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  }
+}
