@@ -144,7 +144,10 @@ function ringDelta(from: number, to: number): number {
 }
 
 /** 相邻两格 (a→b) 的方向 yaw；非相邻或重合返回 null */
-function stepYaw(a: { x: number, y: number }, b: { x: number, y: number }): number | null {
+function stepYaw(
+    a: { x: number; y: number },
+    b: { x: number; y: number }
+): number | null {
     const ddx = ringDelta(a.x, b.x);
     const ddy = b.y - a.y;
     return DIR_YAW.get(`${ddx},${ddy}`) ?? null;
@@ -157,10 +160,10 @@ function stepYaw(a: { x: number, y: number }, b: { x: number, y: number }): numb
  * 只写"离开方向"会让传送带在拐角处缺失 45° 过渡。
  */
 function cellYaw(
-    prev: { x: number, y: number } | null,
-    next: { x: number, y: number } | null,
-    self: { x: number, y: number },
-    fallbackYaw: number,
+    prev: { x: number; y: number } | null,
+    next: { x: number; y: number } | null,
+    self: { x: number; y: number },
+    fallbackYaw: number
 ): number {
     const dirIn = prev === null ? null : stepYaw(prev, self);
     const dirOut = next === null ? null : stepYaw(self, next);
@@ -169,8 +172,7 @@ function cellYaw(
     const rad = Math.PI / 180;
     const vx = Math.sin(dirIn * rad) + Math.sin(dirOut * rad);
     const vy = Math.cos(dirIn * rad) + Math.cos(dirOut * rad);
-    if (Math.abs(vx) < 1e-9 && Math.abs(vy) < 1e-9)
-        return dirOut;                       // 180° 折返（不应出现）：退回离开方向
+    if (Math.abs(vx) < 1e-9 && Math.abs(vy) < 1e-9) return dirOut; // 180° 折返（不应出现）：退回离开方向
     const deg = Math.atan2(vx, vy) / rad;
     return (deg + 360) % 360;
 }
@@ -193,7 +195,12 @@ export function buildBeltLine(
     const pts = rasterizeLine(p0.x, p0.y, p1.x, p1.y, pathMode);
     const belts = pts.map((p) => createBuilding(itemId, modelIndex, p, 0));
     for (let i = 0; i < belts.length; i++) {
-        const yaw = cellYaw(pts[i - 1] ?? null, pts[i + 1] ?? null, pts[i], fallbackYaw);
+        const yaw = cellYaw(
+            pts[i - 1] ?? null,
+            pts[i + 1] ?? null,
+            pts[i],
+            fallbackYaw
+        );
         belts[i].yaw = [yaw, yaw];
         // 传送带 slot 与游戏一致：inputToSlot 恒为 1；outputToSlot 为 1（有下游）或 0（末格）
         belts[i].inputToSlot = 1;
@@ -225,7 +232,7 @@ function isBelt(b: BlueprintBuilding): boolean {
 export class CreateBeltLineCommand implements Command {
     private prevSizeX = 0;
     /** 复用的已有传送带：撤销时恢复其原 yaw */
-    private reused: { belt: BlueprintBuilding, yaw: [number, number] }[] = [];
+    private reused: { belt: BlueprintBuilding; yaw: [number, number] }[] = [];
     /** 本次实际新增的传送带数量（undo 时按此弹出） */
     private added = 0;
     /** 本次建立的路径（新建 + 复用的对象，按路径顺序） */
@@ -237,16 +244,15 @@ export class CreateBeltLineCommand implements Command {
         this.reused = [];
         this.added = 0;
         this.path = [];
-        if (this.belts.length === 0)
-            return;
+        if (this.belts.length === 0) return;
         const root = data.areas[0];
         this.prevSizeX = root.size.x;
 
-        const key = (b: BlueprintBuilding) => `${b.localOffset[0].x},${b.localOffset[0].y}`;
+        const key = (b: BlueprintBuilding) =>
+            `${b.localOffset[0].x},${b.localOffset[0].y}`;
         const existing = new Map<string, BlueprintBuilding>();
         for (const b of data.buildings) {
-            if (isBelt(b))
-                existing.set(key(b), b);
+            if (isBelt(b)) existing.set(key(b), b);
         }
 
         for (const b of this.belts) {
@@ -255,8 +261,7 @@ export class CreateBeltLineCommand implements Command {
                 // 该格已在某条线路**中间**（已有下游）：再接入会形成两个上游，游戏不支持
                 // （需要分流器/集装机）。此时截断本次拖拽：不改动已有格、也不再新建后续格，
                 // 保证老线路完整且不产生非法数据。
-                if (hit.outputObjIdx >= 0)
-                    break;
+                if (hit.outputObjIdx >= 0) break;
                 // 复用它（常见于"接着上一段继续画"：上一段末格没有下游）
                 this.reused.push({ belt: hit, yaw: [hit.yaw[0], hit.yaw[1]] });
                 this.path.push(hit);
@@ -272,8 +277,7 @@ export class CreateBeltLineCommand implements Command {
             this.path.push(b);
             this.added++;
         }
-        if (this.path.length === 0)
-            return;
+        if (this.path.length === 0) return;
 
         // 路径内部连接：仅通过 outputObjIdx 串联（与游戏一致，inputObjIdx 恒为 -1）。
         for (let i = 0; i < this.path.length - 1; i++) {
@@ -292,26 +296,32 @@ export class CreateBeltLineCommand implements Command {
         for (const b of data.buildings) byIndex.set(b.index, b);
         for (const r of this.reused) {
             const cell = r.belt;
-            const succ = cell.outputObjIdx >= 0 ? byIndex.get(cell.outputObjIdx) ?? null : null;
-            const pred = cell.index >= 0
-                ? data.buildings.find(b =>
-                    b !== cell && isBelt(b) && b.outputObjIdx === cell.index) ?? null
-                : null;
+            const succ =
+                cell.outputObjIdx >= 0
+                    ? byIndex.get(cell.outputObjIdx) ?? null
+                    : null;
+            const pred =
+                cell.index >= 0
+                    ? data.buildings.find(
+                          (b) =>
+                              b !== cell &&
+                              isBelt(b) &&
+                              b.outputObjIdx === cell.index
+                      ) ?? null
+                    : null;
             const yaw = cellYaw(
                 pred?.localOffset[0] ?? null,
                 succ?.localOffset[0] ?? null,
                 cell.localOffset[0],
-                cell.yaw[0],
+                cell.yaw[0]
             );
             cell.yaw = [yaw, yaw];
         }
     }
 
     undo(data: BlueprintData): void {
-        for (let i = 0; i < this.added; i++)
-            data.buildings.pop();
-        for (const r of this.reused)
-            r.belt.yaw = [r.yaw[0], r.yaw[1]];
+        for (let i = 0; i < this.added; i++) data.buildings.pop();
+        for (const r of this.reused) r.belt.yaw = [r.yaw[0], r.yaw[1]];
         data.areas[0].size.x = this.prevSizeX;
     }
 

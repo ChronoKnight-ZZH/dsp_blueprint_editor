@@ -5,7 +5,7 @@
     "scripts": {
         "serve": "vue-cli-service serve",
         "build": "vue-cli-service build",
-        "test:unit": "jest",
+        "test:unit": "jest --watchAll",
         "lint": "vue-cli-service lint",
         "build-cli": "tsc --module commonjs --outDir cli",
         "cli": "ts-node -O '{\"module\": \"commonjs\"}' src/cli.ts",
