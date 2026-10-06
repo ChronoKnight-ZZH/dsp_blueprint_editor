@@ -319,6 +319,19 @@
         <BuildingPalette
             v-if="data && placement.appMode === 'edit'"
             ref="palette"
+            @import-photo="photoInput?.click()"
+            @open-rgba="rgbaOpen = true"
+        />
+        <input
+            ref="photoInput"
+            type="file"
+            accept="image/*"
+            style="display: none"
+            @change="onPhotoFile"
+        />
+        <ReformColorDialog
+            v-if="rgbaOpen"
+            @close="rgbaOpen = false"
         />
         <ShortcutHint />
     </div>
@@ -353,6 +366,7 @@ import {
     usePlacement,
     resetToIdle,
     selectBuilding,
+    selectFoundation,
     enterDeleteMode,
     rotateBuilding,
     enterEditMode,
@@ -371,6 +385,8 @@ import { CommandQueue } from "./command";
 import BuildingOverview from "./components/BuildingOverview.vue";
 import BuildingPalette from "./components/BuildingPalette.vue";
 import ShortcutHint from "./components/ShortcutHint.vue";
+import ReformColorDialog from "./components/ReformColorDialog.vue";
+import { photoToBlueprint } from "@/blueprint/reformImage";
 import { useLang } from "./i18n";
 // 仅用于类型标注，编译时擦除，不影响 defineAsyncComponent 的异步分包
 import type BlueprintEditorImpl from "./components/BlueprintEditor.vue";
@@ -634,6 +650,30 @@ const parseBp = (s: string) => {
     codeExpired.value = false;
 };
 
+// 照片 → 地基蓝图
+const rgbaOpen = ref(false);
+const photoInput = ref<HTMLInputElement | null>(null);
+
+const fromPhoto = async (file: File) => {
+    working.value = true;
+    try {
+        const bp = await photoToBlueprint(file);
+        parseBp(toStr(bp));
+    } catch (err) {
+        parseErrorMessage.value = t("照片解析失败") + ": " + String(err);
+        console.error(err);
+    } finally {
+        working.value = false;
+    }
+};
+
+const onPhotoFile = (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = ""; // 允许重复选择同一文件
+    if (file) fromPhoto(file);
+};
+
 // 拖拽状态
 const isDragOver = ref(false);
 
@@ -811,7 +851,10 @@ const hotkey = (event: KeyboardEvent) => {
             );
             if (cat && fn <= cat.buildings.length) {
                 const b = cat.buildings[fn - 1];
-                if (!b.disabled) selectBuilding(b.itemId, b.modelIndex);
+                if (!b.disabled) {
+                    if (b.foundation) selectFoundation();
+                    else selectBuilding(b.itemId, b.modelIndex);
+                }
             }
         }
         palette.value?.expand();

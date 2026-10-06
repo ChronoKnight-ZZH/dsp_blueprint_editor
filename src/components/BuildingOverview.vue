@@ -9,7 +9,7 @@
             v-for="[itemId, count] in buildingCounter"
             :key="itemId"
             class="overview-icon-item"
-            :title="t('右键删除全部此类建筑')"
+            :title="itemId === FOUNDATION_ITEM_ID ? t('地基不可在此剔除') : t('右键删除全部此类建筑')"
             @contextmenu.prevent="onIconContextMenu(itemId)"
         >
             <BuildingIcon
@@ -38,15 +38,30 @@ const emit = defineEmits<{
 
 const commandQueue = inject(commandQueueKey)!.value!;
 
+/** 地基对应的 itemId（items 表中 "地基"） */
+const FOUNDATION_ITEM_ID = 1131;
+
 const onIconContextMenu = (itemId: number) => {
+    // 地基来自 reformData（地形改造），不属于 buildings 数组，无法通过剔除命令删除
+    if (itemId === FOUNDATION_ITEM_ID) return;
     // 右键列表图标：一键剔除全部同类建筑（可 Ctrl+Z 撤销）
     emit("remove-by-item", itemId);
 };
 
+/** 地基瓦片数 = Σ(矩形宽 × 高) */
+const foundationTiles = computed(() => {
+    commandQueue.execVersion.value;
+    const rects = commandQueue.data.reformData?.rects;
+    if (!rects) return 0;
+    let tiles = 0;
+    for (const r of rects) tiles += r.w * r.h;
+    return tiles;
+});
+
 const total = computed(() => {
     // 命令（剔除同类 / 撤销 / 重做）后重新统计
     commandQueue.execVersion.value;
-    return commandQueue.data.buildings.length;
+    return commandQueue.data.buildings.length + foundationTiles.value;
 });
 
 const buildingCounter = computed(() => {
@@ -56,6 +71,10 @@ const buildingCounter = computed(() => {
         const count = counter.get(b.itemId) ?? 0;
         counter.set(b.itemId, count + 1);
     }
+    // 地基按瓦片数作为一项建筑计入列表
+    const tiles = foundationTiles.value;
+    if (tiles > 0)
+        counter.set(FOUNDATION_ITEM_ID, (counter.get(FOUNDATION_ITEM_ID) ?? 0) + tiles);
     return counter;
 });
 </script>
@@ -98,16 +117,19 @@ const buildingCounter = computed(() => {
         "共{total}个": "共{total}个",
         "右键点击剔除": "右键点击建筑可剔除；右键图标删除全部同类",
         "右键删除全部此类建筑": "右键一键删除全部此类建筑（可撤销）",
+        "地基不可在此剔除": "地基（地形改造），按瓦片计数，不可在此剔除",
     },
     "en": {
         "共{total}个": "{total} in total",
         "右键点击剔除": "Right-click a building to remove it; right-click an icon to remove all of that type",
         "右键删除全部此类建筑": "Right-click to remove all buildings of this type (undoable)",
+        "地基不可在此剔除": "Foundation (terrain reform), counted by tile; cannot be removed here",
     },
     "fr": {
         "共{total}个": "{total} au total",
         "右键点击剔除": "Clic droit sur un bâtiment pour le retirer ; clic droit sur une icône pour tout retirer du même type",
         "右键删除全部此类建筑": "Clic droit pour retirer tous les bâtiments de ce type (annulable)",
+        "地基不可在此剔除": "Fondation (terrain), comptée par tuile ; suppression impossible ici",
     }
 }
 </i18n>

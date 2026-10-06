@@ -321,5 +321,10 @@
     "戴森球类": "Dense Sphere",
     "地基与信标": "Foundation and Beacon",
     "暂不支持": "Not supported",
+    "导入照片生成地基蓝图": "Import photo to generate foundation blueprint",
+    "导入照片": "Import photo",
+    "自定义色槽 RGBA": "Custom color slots RGBA (paint cells)",
+    "RGBA 上色": "RGBA paint",
+    "照片解析失败": "Failed to parse photo",
     "新建": "New"
 }

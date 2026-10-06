@@ -46,6 +46,12 @@ const rows = computed<[string, string][]>(() => {
             ["右键 / Esc", "退出删除"],
             ["N", "重置镜头"],
         ];
+    if (placement.mode === "reforming")
+        return [
+            ["左键", "铺/涂地基"],
+            ["右键 / Esc", "退出地基模式"],
+            ["N", "重置镜头"],
+        ];
     return [
         ["1-9", "切换分类"],
         ["F1-F12", "选建筑"],
@@ -127,6 +133,8 @@ const rows = computed<[string, string][]>(() => {
         "删除模式": "删除模式",
         "选中建筑": "选中建筑",
         "删除建筑": "删除建筑",
+        "铺/涂地基": "铺/涂地基",
+        "退出地基模式": "退出地基模式",
         "缩放": "缩放",
         "旋转": "旋转",
         "显示/隐藏列表": "显示/隐藏列表",
@@ -156,6 +164,8 @@ const rows = computed<[string, string][]>(() => {
         "删除模式": "Delete",
         "选中建筑": "Select building",
         "删除建筑": "Delete building",
+        "铺/涂地基": "Paint/place foundation tile",
+        "退出地基模式": "Exit foundation mode",
         "缩放": "Zoom",
         "旋转": "Rotate",
         "显示/隐藏列表": "Show/hide list",

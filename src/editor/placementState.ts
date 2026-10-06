@@ -1,6 +1,6 @@
 import { reactive } from "vue";
 
-export type EditorMode = "idle" | "placing" | "deleting";
+export type EditorMode = "idle" | "placing" | "deleting" | "reforming";
 
 export type AppMode = "preview" | "edit";
 
@@ -12,6 +12,8 @@ export interface PlacementState {
     selectedModelIndex: number | null;
     yaw: number; // rotation in degrees (0, 90, 180, 270)
     freePlacement: boolean; // Shift held
+    /** 地基模式当前使用的颜色槽位（0..31，16..31 为自定义色） */
+    reformColorSlot: number;
 }
 
 const state = reactive<PlacementState>({
@@ -22,6 +24,7 @@ const state = reactive<PlacementState>({
     selectedModelIndex: null,
     yaw: 0,
     freePlacement: false,
+    reformColorSlot: 0,
 });
 
 export function enterEditMode() {
@@ -53,6 +56,14 @@ export function selectBuilding(itemId: number, modelIndex: number) {
     state.mode = "placing";
     state.selectedItemId = itemId;
     state.selectedModelIndex = modelIndex;
+    state.yaw = 0;
+}
+
+/** 选择地基：进入地基模式（铺/涂一格），不做建筑放置 */
+export function selectFoundation() {
+    state.mode = "reforming";
+    state.selectedItemId = 1131; // 地基 itemId
+    state.selectedModelIndex = null;
     state.yaw = 0;
 }
 

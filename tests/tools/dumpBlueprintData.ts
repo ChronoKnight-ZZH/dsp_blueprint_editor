@@ -53,6 +53,9 @@ const REFORM_TYPE_NAMES: Record<number, string> = {
   2: 'GRID',
 };
 
+/** 地基对应的 itemId（items 表中 "地基"） */
+const FOUNDATION_ITEM_ID = 1131;
+
 // ---------------------------------------------------------------------------
 // 参数解析
 // ---------------------------------------------------------------------------
@@ -101,10 +104,11 @@ function uint32ToHexRRGGBBAA(c: number): string {
 /**
  * 解析一个地基颜色索引 -> { hex, custom }。
  *
- * 规则（对照 CODE_WIKI §7.5）：
+ * 规则（对照游戏 PlatformSystem / BlueprintUtils）：
  *   - data 字节低 5 位 = colorIndex (0..31)
- *   - 若 customReformColorMask 的第 colorIndex 位为 0 -> 使用默认调色板 colorPalette256[colorIndex]
- *   - 若为 1 -> 按掩码中低位到高位的顺序从 customReformColors 中取出对应 uint32
+ *   - 槽位 0..15 使用内置调色板
+ *   - 槽位 16..31 为自定义色：若 customReformColorMask 第 colorIndex 位置位，
+ *     则取 customReformColors[colorIndex - 16]（直接下标，非按置位顺序）
  */
 function resolveReformColor(
   bp: BlueprintData,
@@ -115,15 +119,11 @@ function resolveReformColor(
     return { hex: colorPalette256[colorIndex] ?? '#000000', custom: false };
   }
   const mask = reform.customReformColorMask >>> 0;
-  const isCustom = ((mask >>> colorIndex) & 1) === 1;
+  const isCustom = colorIndex >= 16 && ((mask >>> colorIndex) & 1) === 1;
   if (!isCustom) {
     return { hex: colorPalette256[colorIndex] ?? '#000000', custom: false };
   }
-  let offset = 0;
-  for (let i = 0; i < colorIndex; i++) {
-    if (((mask >>> i) & 1) === 1) offset++;
-  }
-  const packed = reform.customReformColors[offset] ?? 0;
+  const packed = reform.customReformColors[colorIndex - 16] ?? 0;
   return { hex: uint32ToHexRRGGBBAA(packed), custom: true };
 }
 
@@ -194,8 +194,17 @@ function summarize(bp: BlueprintData): BlueprintSummary {
     }
   }
 
-  let reform: ReformStats | null = null;
+  // 地基（reformData 矩形）按瓦片数计入建筑列表与总数，数量 = Σ(w × h)
   const rd = bp.reformData;
+  let foundationTiles = 0;
+  if (rd) {
+    for (const r of rd.rects)
+      foundationTiles += r.w * r.h;
+    if (foundationTiles > 0)
+      buildingCounts.set(FOUNDATION_ITEM_ID, (buildingCounts.get(FOUNDATION_ITEM_ID) ?? 0) + foundationTiles);
+  }
+
+  let reform: ReformStats | null = null;
   if (rd) {
     const byType: Record<string, number> = {};
     const byColorIndex: Record<number, ReformByIndexEntry> = {};
@@ -242,7 +251,7 @@ function summarize(bp: BlueprintData): BlueprintSummary {
     header: bp.header,
     numAreas: (bp.areas as unknown[]).length,
     areas: bp.areas as unknown[],
-    numBuildings: bp.buildings.length,
+    numBuildings: bp.buildings.length + foundationTiles,
     buildingCounts: [...buildingCounts.entries()]
       .map(([itemId, count]) => ({ itemId, name: itemLabel(itemId), count }))
       .sort((a, b) => b.count - a.count),
@@ -310,7 +319,7 @@ function printReport(s: BlueprintSummary): void {
   log(`自定义颜色掩码:  ${r.customReformColorMask}`);
   log(`自定义颜色数量:  ${r.customReformColors.length}`);
   if (r.customReformColors.length > 0) {
-    log('自定义颜色列表 (按 mask 置位顺序):');
+    log('自定义颜色列表 (槽位 16..31 对应的数组下标 0..15):');
     r.customReformColors.forEach((hex, i) => log(`  [${i}] ${hex}`));
   }
   log();

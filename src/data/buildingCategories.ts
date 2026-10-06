@@ -4,6 +4,8 @@ export interface CategoryBuilding {
     nameKey: string;
     /** true = greyed out, placement not implemented in test phase */
     disabled?: boolean;
+    /** true = 地基：选中进入地基模式（铺/涂一格），不做建筑放置 */
+    foundation?: boolean;
 }
 
 export interface CategoryEntry {
@@ -122,6 +124,9 @@ export const buildingCategories: CategoryEntry[] = [
     {
         key: 9,
         nameKey: "地基与信标",
-        buildings: [{ itemId: 2401, modelIndex: 664, nameKey: "全息信标" }],
+        buildings: [
+            { itemId: 2401, modelIndex: 664, nameKey: "全息信标" },
+            { itemId: 1131, modelIndex: 0, nameKey: "地基", foundation: true },
+        ],
     },
 ];

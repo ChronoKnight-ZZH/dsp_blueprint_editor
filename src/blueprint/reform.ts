@@ -91,24 +91,27 @@ function expandReformCells(data: BlueprintReformData): ReformCell[] {
 }
 
 /**
- * 解析 32 个地基颜色槽位。
- * customReformColorMask 第 i 位置位时，该槽位使用自定义颜色；
- * customReformColors 按置位槽位升序紧凑存储。
- * uint32 为 0xRRGGBBAA（R 在最高字节，alpha 恒为 0xFF），
- * 取高 24 位即得 RGB，与 tests/tools/dumpBlueprintData.ts 的展示约定一致。
+ * 解析 32 个地基颜色槽位（与游戏 PlatformSystem 一致）。
+ * 槽位 0..15 使用内置色板；槽位 16..31 为自定义色，
+ * customReformColorMask 第 i 位（i>=16）置位表示槽位 i 使用
+ * customReformColors[i - 16]（直接下标，非按置位顺序紧凑排列）。
+ * uint32 为 0xRRGGBBAA（R 在最高字节），取高 24 位即得 RGB，
+ * 与游戏 BlueprintUtils 的 (r << 24 | g << 16 | b << 8 | a) 编码对应。
+ * 未标定的自定义槽位取游戏默认值白色（reformCustomColors 初始为 Color.white）。
  */
 function resolveReformColors(data: BlueprintReformData): Color[] {
     const colors: Color[] = new Array(32);
-    let rank = 0;
+    const mask = data.customReformColorMask >>> 0;
     for (let i = 0; i < 32; i++) {
-        if (((data.customReformColorMask >>> i) & 1) !== 0) {
-            const v = data.customReformColors[rank] ?? 0;
-            // 0xRRGGBBAA -> RGB：去掉最低字节的 alpha
-            colors[i] = new Color((v >>> 8) & 0xffffff);
-            rank++;
-        } else {
+        if (i < 16) {
             const hex = DEFAULT_REFORM_COLORS[i] ?? 0x808080;
             colors[i] = new Color(hex);
+        } else if (((mask >>> i) & 1) !== 0) {
+            const v = data.customReformColors[i - 16] ?? 0;
+            // 0xRRGGBBAA -> RGB：去掉最低字节的 alpha
+            colors[i] = new Color((v >>> 8) & 0xffffff);
+        } else {
+            colors[i] = new Color(0xffffff);
         }
     }
     return colors;

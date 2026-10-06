@@ -624,6 +624,10 @@ import {
     type BeltPathMode,
 } from "@/blueprint/beltLine";
 import { createSorterBetween, collectOccupiedSlots } from "@/blueprint/sorter";
+import {
+    PaintReformCellCommand,
+    reformColorHex,
+} from "@/blueprint/reformEdit";
 import { getBuildingSlots } from "@/data/buildingSlots";
 
 const props = defineProps<{
@@ -652,13 +656,14 @@ const { grids: planetGrid, material: gridMaterial } = buildPlanetGrid(
 scene.add(planetGrid);
 
 const placement = usePlacement();
-// 网格线随模式变色：预览原色 / 编辑绿 / 删除红
+// 网格线随模式变色：预览原色 / 编辑绿 / 删除红 / 地基蓝
 watchEffect(() => {
-    if (placement.appMode === "edit")
-        gridMaterial.color.set(
-            placement.mode === "deleting" ? 0xff5050 : 0x50fa50
-        );
-    else gridMaterial.color.set(0xf0f0f0);
+    if (placement.appMode === "edit") {
+        if (placement.mode === "deleting") gridMaterial.color.set(0xff5050);
+        else if (placement.mode === "reforming")
+            gridMaterial.color.set(0x40a0ff);
+        else gridMaterial.color.set(0x50fa50);
+    } else gridMaterial.color.set(0xf0f0f0);
 });
 
 const root: Ref<HTMLDivElement | null> = ref(null);
@@ -756,6 +761,28 @@ const isPlacingSorter = () =>
     placement.mode === "placing" &&
     placement.selectedItemId !== null &&
     isInserter(placement.selectedItemId);
+
+// 地基模式光标：跟随鼠标高亮目标格（薄板，颜色 = 当前选择的槽位色）
+const reformCursorVisible = ref(false);
+const reformCursor = new Mesh(
+    new BoxGeometry(1, 1, 1),
+    new MeshBasicMaterial({
+        color: 0xffffff,
+        opacity: 0.55,
+        transparent: true,
+        depthWrite: false,
+    })
+);
+reformCursor.matrixAutoUpdate = false;
+reformCursor.renderOrder = 9;
+watchEffect(() => {
+    const show =
+        placement.appMode === "edit" &&
+        placement.mode === "reforming" &&
+        reformCursorVisible.value;
+    if (show) scene.add(reformCursor);
+    else scene.remove(reformCursor);
+});
 
 let beltStart: { x: number; y: number } | null = null;
 const sorterSource = ref<number | null>(null);
@@ -1213,6 +1240,70 @@ onMounted(() => {
         return _tmpPos.setFromMatrixPosition(t).clone();
     };
 
+    // ---- 地基模式：逐格铺/涂 ----
+    /** 网格偏移 → 地基光标世界矩阵（薄板贴于格子中心，朝向球面法线） */
+    const reformCellMatrix = (
+        offset: { x: number; y: number }
+    ): Matrix4 | null => {
+        if (b.value === null) return null;
+        const fake = createBuilding(1131, 0, offset, 0);
+        const t = calcBuildingTrans(R, b.value.pos, fake)[0].clone();
+        t.multiply(new Matrix4().makeScale(1, 1, 0.12));
+        return t;
+    };
+
+    /** 地基模式：鼠标所在格 → 目标格高亮（颜色 = 当前槽位色） */
+    const updateReformCursor = (e: MouseEvent) => {
+        if (
+            placement.appMode !== "edit" ||
+            placement.mode !== "reforming"
+        ) {
+            reformCursorVisible.value = false;
+            return;
+        }
+        const queue = commandQueue.value;
+        if (!queue) {
+            reformCursorVisible.value = false;
+            return;
+        }
+        const a = anchorOffset(e);
+        if (a === null) {
+            reformCursorVisible.value = false;
+            return;
+        }
+        const x = Math.floor(a.x);
+        const y = Math.floor(a.y);
+        const root = queue.data.areas[0];
+        if (y < 0 || y >= root.size.y || x < 0 || x >= root.size.x) {
+            reformCursorVisible.value = false;
+            return;
+        }
+        const m = reformCellMatrix({ x, y });
+        if (m === null) {
+            reformCursorVisible.value = false;
+            return;
+        }
+        reformCursor.matrix.copy(m);
+        reformCursor.matrix.needsUpdate = true;
+        reformCursor.material.color.set(
+            reformColorHex(queue.data.reformData, placement.reformColorSlot)
+        );
+        reformCursorVisible.value = true;
+    };
+
+    /** 地基模式：单击格 = 铺/涂一格当前颜色（空域铺新格，有地基改色） */
+    const paintReformCell = (e: MouseEvent) => {
+        const queue = commandQueue.value;
+        if (!queue) return;
+        const a = anchorOffset(e);
+        if (a === null) return;
+        const x = Math.floor(a.x);
+        const y = Math.floor(a.y);
+        const root = queue.data.areas[0];
+        if (y < 0 || y >= root.size.y || x < 0 || x >= root.size.x) return;
+        queue.push(new PaintReformCellCommand(0, x, y, placement.reformColorSlot));
+    };
+
     /** 未设 A 点时：在鼠标位置显示单个传送带方块 */
     const showSingleBeltPreview = (e: MouseEvent) => {
         if (
@@ -1391,7 +1482,9 @@ onMounted(() => {
     };
     const onPointerMove = (e: MouseEvent) => {
         lastMouseEvent = e;
-        if (isPlacingBelt()) {
+        if (placement.mode === "reforming") {
+            updateReformCursor(e);
+        } else if (isPlacingBelt()) {
             if (beltStart !== null) updateBeltPreview(beltStart, e);
             else showSingleBeltPreview(e);
         } else {
@@ -1407,6 +1500,7 @@ onMounted(() => {
     const onMouseLeave = () => {
         lastMouseEvent = null;
         previewVisible.value = false;
+        reformCursorVisible.value = false;
         sorterHover.value = null;
         sorterHoverAnchor.value = null;
         hideBeltPreview(); // 隐藏路径预览，但保留 A 点
@@ -1414,7 +1508,9 @@ onMounted(() => {
     // 鼠标静止时，键盘切换建筑 / R 旋转 / Shift 吸附变化也要刷新预览
     watchEffect(() => {
         if (!lastMouseEvent) return;
-        if (isPlacingBelt()) {
+        if (placement.mode === "reforming") {
+            updateReformCursor(lastMouseEvent);
+        } else if (isPlacingBelt()) {
             if (beltStart !== null)
                 updateBeltPreview(beltStart, lastMouseEvent);
             else showSingleBeltPreview(lastMouseEvent);
@@ -1448,11 +1544,12 @@ onMounted(() => {
         // 传送带在 mouseup 中处理 A/B 点击状态机，click 忽略
         if (isPlacingBelt()) return;
         if (dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD) return; // was a drag, not a click
-        // Left click: place / delete / select
+        // Left click: place / delete / reform / select
         if (placement.mode === "placing") {
             if (isPlacingSorter()) pickSorterPoint(e);
             else placeBuilding(e);
         } else if (placement.mode === "deleting") deleteBuilding(e);
+        else if (placement.mode === "reforming") paintReformCell(e);
         else {
             const index = pickBuilding(e);
             if (index === null) emit("clickEmpty");

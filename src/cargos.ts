@@ -4,7 +4,6 @@ import {
     InstancedMesh,
     MeshLambertMaterial,
     WebGLProgramParametersWithUniforms,
-    WebGLRenderer,
 } from "three";
 
 /** 带 cargoDistance 实例属性的货物几何体 */
@@ -33,10 +32,8 @@ class CargoMaterial extends MeshLambertMaterial {
     cargoMoveUniform = { value: 0 };
 
     // this overrides base class method
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     onBeforeCompile(
         parameters: WebGLProgramParametersWithUniforms,
-        renderer: WebGLRenderer
     ) {
         parameters.vertexShader = parameters.vertexShader
             .replace(
