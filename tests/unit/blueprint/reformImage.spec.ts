@@ -3,9 +3,8 @@ import {
     buildBlueprintFromPixels,
     buildRectsFromSlots,
     medianCutQuantize,
-    assignSlots,
-    PHOTO_WIDTH,
-    PHOTO_MAX_ROWS,
+    PHOTO_MAX_WIDTH,
+    PHOTO_ROWS,
 } from "@/blueprint/reformImage";
 
 type RGB = [number, number, number];
@@ -69,7 +68,7 @@ describe("照片 → 地基蓝图", () => {
         expect(rects[2]).toMatchObject({ y: 2, h: 1, color: 1 });
     });
 
-    test("纯色小图 → 1 个矩形、无自定义色", () => {
+    test("纯色小图 → 1 个矩形、颜色进入自定义槽 16", () => {
         const bp = buildBlueprintFromPixels(
             solidCanvas(4, 3, [200, 80, 72]),
             4,
@@ -81,9 +80,15 @@ describe("照片 → 地基蓝图", () => {
         expect(bp.reformData!.rects).toHaveLength(1);
         expect(bp.reformData!.rects[0].w).toBe(4);
         expect(bp.reformData!.rects[0].h).toBe(3);
-        // 接近内置红 [0xc0,0x50,0x48] → 内置槽 3
-        expect(bp.reformData!.rects[0].color).toBe(3);
-        expect(bp.reformData!.customReformColorMask).toBe(0);
+        // 原色始终写入自定义槽（精确匹配距离 0，优先于相近的内置红）
+        expect(bp.reformData!.rects[0].color).toBe(16);
+        const rgba = bp.reformData!.customReformColors[0];
+        expect((rgba >>> 24) & 0xff).toBe(200);
+        expect((rgba >>> 16) & 0xff).toBe(80);
+        expect((rgba >>> 8) & 0xff).toBe(72);
+        expect((bp.reformData!.customReformColorMask >>> 16) & 1).toBe(1);
+        // 补齐到 16 项
+        expect(bp.reformData!.customReformColors.length).toBe(16);
     });
 
     test("多色图覆盖全部格子且槽位合法（0..31）", () => {
@@ -132,10 +137,13 @@ describe("照片 → 地基蓝图", () => {
         });
         const bp = buildBlueprintFromPixels(px, 4, 1);
         const rd = bp.reformData!;
-        // 每个 1×1 格的槽位 → 反查实际 RGB 应接近原像素
+        // 照片原色全部进入自定义槽（0..15 内置槽仅保留给更接近的颜色）
+        for (const r of rd.rects) {
+            expect(r.color).toBeGreaterThanOrEqual(16);
+        }
         expect(rd.rects).toHaveLength(4);
         for (const r of rd.rects) {
-            // 非自定义槽无法直接反查；仅校验自定义槽的 RGB 通道接近原色
+            // 非自定义槽无法直接反查；仅校验自定义槽的 RGB 通道接近原像素
             if (r.color >= 16) {
                 const rgba = rd.customReformColors[r.color - 16];
                 const rVec = (rgba >>> 24) & 0xff;
@@ -147,13 +155,13 @@ describe("照片 → 地基蓝图", () => {
                 expect(Math.abs(bVec - src[2])).toBeLessThanOrEqual(2);
             }
         }
-        // 自定义槽使用后 mask 置位
+        // 自定义槽使用后 mask 置位（4 个代表色占用槽 16..19）
         expect(
             rd.customReformColors.length === 16 // 补齐到 16 项
         ).toBe(true);
-        expect(
-            (rd.customReformColorMask >>> (16 + 0)) & 1
-        ).toBe(1);
+        for (let k = 0; k < 4; k++) {
+            expect((rd.customReformColorMask >>> (16 + k)) & 1).toBe(1);
+        }
     });
 
     test("生成的蓝图字节级 round-trip", () => {
@@ -181,19 +189,6 @@ describe("照片 → 地基蓝图", () => {
         );
     });
 
-    test("assignSlots：与内置色相近者用内置槽，自定义候选超限自动合并", () => {
-        const n = 24;
-        const palette: RGB[] = [];
-        for (let i = 0; i < n; i++)
-            palette.push([i * 10, 20 + i, 180 - i]);
-        const { slots, customColors } = assignSlots(palette);
-        expect(customColors.length).toBeLessThanOrEqual(16);
-        for (const s of slots) {
-            expect(s).toBeGreaterThanOrEqual(0);
-            expect(s).toBeLessThanOrEqual(31);
-        }
-    });
-
     test("medianCutQuantize 输出不超过目标色数", () => {
         const unique: RGB[] = [];
         const freqs = new Map<string, number>();
@@ -201,13 +196,13 @@ describe("照片 → 地基蓝图", () => {
             unique.push([i * 4 % 255, (i * 7) % 255, (i * 11) % 255]);
             freqs.set(`${unique[i][0]},${unique[i][1]},${unique[i][2]}`, 1);
         }
-        const out = medianCutQuantize(unique, freqs, 32);
-        expect(out.length).toBeLessThanOrEqual(32);
+        const out = medianCutQuantize(unique, freqs, 16);
+        expect(out.length).toBeLessThanOrEqual(16);
         expect(out.length).toBeGreaterThan(0);
     });
 
-    test("常量：宽 = 赤道整圈 1000，高上限 161", () => {
-        expect(PHOTO_WIDTH).toBe(1000);
-        expect(PHOTO_MAX_ROWS).toBe(161);
+    test("常量：行数固定 161，列数上限 1000", () => {
+        expect(PHOTO_ROWS).toBe(161);
+        expect(PHOTO_MAX_WIDTH).toBe(1000);
     });
 });

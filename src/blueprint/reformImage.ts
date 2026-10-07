@@ -4,31 +4,32 @@ import {
     ensureReformData,
     DEFAULT_REFORM_COLORS,
     REFORM_TYPE_GRID,
+    CUSTOM_COLOR_SLOT_BASE,
+    CUSTOM_COLOR_SLOTS,
     rgbOfHex,
 } from "./reformEdit";
 
 /**
  * 照片 → 地基蓝图（像素画）。
  *
- * 赤道带网格约定：
- * - 经向整圈 200 段 × 5 格/段 = 1000 列（图片宽度固定为 1000 像素）；
- * - 纬向赤道带可正向对齐的行数上限 ≈ 161 行（±27.7°），图片等比缩放后
- *   高度自适应，最高 161 行，超出取中央条带；
- * - 蓝图地基每格颜色只能存 5-bit 索引（0..31），因此照片颜色先量化到
- *   ≤32 色：与游戏内置 16 色接近的用内置槽，其余自动分配自定义 RGBA 槽
- *   （最多 16 个）。
+ * 输出网格约定：
+ * - 行数固定为 161（赤道带 lat -80..80 可正向对齐的行数上限）；
+ * - 列数 = round(161 × 图片宽高比)，上限 1000（原赤道整圈 200 段 × 5 格/段），
+ *   超宽时只取水平中央条带（不拉伸）；
+ * - 蓝图地基每格颜色只能存 5-bit 索引（0..31）：0..15 游戏内置色，
+ *   16..31 自定义 RGBA 槽。图片先中位切分量化出 ≤16 个代表色并全部写入
+ *   自定义槽（真实颜色值、mask 置位），再对每格在「内置 ∪ 自定义」≤32 色中
+ *   取最近匹配。
  */
 
-/** 输出列数 = 赤道整圈格子数（200 段 × 5 格/段） */
-export const PHOTO_WIDTH = 1000;
-/** 赤道带可正向对齐的行数上限（lat -80..80 格） */
-export const PHOTO_MAX_ROWS = 161;
+/** 输出列数上限（原赤道整圈 1000 列），超出时取水平中央条带 */
+export const PHOTO_MAX_WIDTH = 1000;
+/** 输出行数固定值（赤道带 lat -80..80 可正向对齐的行数上限） */
+export const PHOTO_ROWS = 161;
 
 type RGB = [number, number, number];
 
 const BUILTIN_RGB: RGB[] = DEFAULT_REFORM_COLORS.map((h) => rgbOfHex(h));
-/** 与内置色的接近阈值：距离小于该值直接使用内置槽位 */
-const BUILTIN_SIM_THRESHOLD = 46;
 
 function colorKey(c: RGB): string {
     return `${c[0]},${c[1]},${c[2]}`;
@@ -148,48 +149,6 @@ export function medianCutQuantize(
 }
 
 /**
- * 把 ≤32 个代表色分配到 32 个槽位：
- * 与内置色相近（≤ BUILTIN_SIM_THRESHOLD）的用内置槽（0..15）；
- * 其余进入自定义色槽（16..31），自定义候选超过 16 个时两两合并最近的一对
- * （取平均值）直至不超限；最后每个代表色就近映射到「内置 ∪ 自定义」调色板。
- */
-export function assignSlots(palette: RGB[]): {
-    slots: number[];
-    customColors: RGB[];
-} {
-    const custom = palette.filter(
-        (c) => dist(c, BUILTIN_RGB[nearestIndex(BUILTIN_RGB, c)]) >
-            BUILTIN_SIM_THRESHOLD
-    );
-    while (custom.length > 16) {
-        // 找最近的一对
-        let bi = -1;
-        let bj = -1;
-        let bd = Infinity;
-        for (let i = 0; i < custom.length; i++) {
-            for (let j = i + 1; j < custom.length; j++) {
-                const d = dist(custom[i], custom[j]);
-                if (d < bd) {
-                    bd = d;
-                    bi = i;
-                    bj = j;
-                }
-            }
-        }
-        const avg: RGB = [
-            Math.round((custom[bi][0] + custom[bj][0]) / 2),
-            Math.round((custom[bi][1] + custom[bj][1]) / 2),
-            Math.round((custom[bi][2] + custom[bj][2]) / 2),
-        ];
-        custom.splice(Math.max(bi, bj), 1);
-        custom[Math.min(bi, bj)] = avg;
-    }
-    const finalPalette: RGB[] = [...BUILTIN_RGB, ...custom];
-    const slots = palette.map((c) => nearestIndex(finalPalette, c));
-    return { slots, customColors: custom };
-}
-
-/**
  * 由「每格槽位索引」生成地基矩形列表。
  * 同一行内同色横向合并（run-length）；再纵向合并同 x、同宽、同色的连续行。
  * 注意游戏格式中矩形 w/h 为 u8（最大 255），超长合并必须截断。
@@ -273,17 +232,15 @@ export function buildBlueprintFromPixels(
     const unique: RGB[] = [...freqs.keys()].map(
         (k) => k.split(",").map(Number) as RGB
     );
-    const palette =
-        unique.length <= 32 ? unique : medianCutQuantize(unique, freqs, 32);
-    const { slots, customColors } = assignSlots(palette);
-    const slotLookup = new Map<string, number>();
-    palette.forEach((c, i) => slotLookup.set(colorKey(c), slots[i]));
+    // 图片代表色中位切分量化到 ≤16 色，全部写入自定义槽；内置 16 色保留参与匹配
+    const customColors = medianCutQuantize(unique, freqs, CUSTOM_COLOR_SLOTS);
+    const palette = [...BUILTIN_RGB, ...customColors];
     const slotsPerCell = new Uint8Array(width * height);
     for (let i = 0; i < colors.length; i++)
-        slotsPerCell[i] = slotLookup.get(colorKey(colors[i])) ?? 0;
+        slotsPerCell[i] = nearestIndex(palette, colors[i]);
     const rects = buildRectsFromSlots(slotsPerCell, width, height);
 
-    // 组装蓝图：整圈 1000 列 × rows 行，居中于赤道
+    // 组装蓝图：161 行 × width 列，居中于赤道
     const bp = createEmptyBlueprint();
     bp.header.shortDesc = "地基图片";
     bp.areas[0].size = { x: width, y: height };
@@ -293,18 +250,20 @@ export function buildBlueprintFromPixels(
     rd.reserved = 0;
     rd.rects = rects;
     rd.customReformColorMask = 0;
-    rd.customReformColors = customColors
-        .map((c) => ((c[0] << 24) | (c[1] << 16) | (c[2] << 8) | 0xff) >>> 0);
-    // 自定义色槽从 16 起依次占用；补足 16 项与游戏导出惯例一致
-    while (rd.customReformColors.length < 16)
+    // 自定义槽从 16 起依次写入真实颜色值（用几个写几个），补足 16 项与游戏导出惯例一致
+    rd.customReformColors = customColors.map(
+        (c) => ((c[0] << 24) | (c[1] << 16) | (c[2] << 8) | 0xff) >>> 0
+    );
+    while (rd.customReformColors.length < CUSTOM_COLOR_SLOTS)
         rd.customReformColors.push(0);
     for (let k = 0; k < customColors.length; k++)
         rd.customReformColorMask =
-            (rd.customReformColorMask | (1 << (16 + k))) >>> 0;
+            (rd.customReformColorMask | (1 << (CUSTOM_COLOR_SLOT_BASE + k))) >>>
+            0;
     return bp;
 }
 
-/** 加载图片并缩放到 1000 列像素画布（高度自适应 ≤161，超出取中央条带） */
+/** 加载图片到 161 行画布（列数 = round(161 × 宽高比)，上限 1000，超宽取水平中央条带） */
 export async function loadPhotoImage(
     source: Blob | string
 ): Promise<HTMLCanvasElement> {
@@ -318,29 +277,28 @@ export async function loadPhotoImage(
                 reject(new Error("图片加载失败 / Failed to load image"));
             image.src = url;
         });
-        const scale = PHOTO_WIDTH / Math.max(1, img.naturalWidth);
-        const scaledH = img.naturalHeight * scale;
-        const rows = Math.max(
-            1,
-            Math.min(PHOTO_MAX_ROWS, Math.round(scaledH))
+        const scale = PHOTO_ROWS / Math.max(1, img.naturalHeight);
+        const cols = Math.min(
+            PHOTO_MAX_WIDTH,
+            Math.max(1, Math.round(img.naturalWidth * scale))
         );
         const canvas = document.createElement("canvas");
-        canvas.width = PHOTO_WIDTH;
-        canvas.height = rows;
+        canvas.width = cols;
+        canvas.height = PHOTO_ROWS;
         const ctx = canvas.getContext("2d")!;
-        // 高度超出时只取中央条带（照片不拉伸）
-        const srcH = rows / scale;
-        const srcY = Math.max(0, (img.naturalHeight - srcH) / 2);
+        // 宽度超出时只取水平中央条带（照片不拉伸）
+        const srcW = cols / scale;
+        const srcX = Math.max(0, (img.naturalWidth - srcW) / 2);
         ctx.drawImage(
             img,
+            srcX,
             0,
-            srcY,
-            img.naturalWidth,
-            srcH,
+            srcW,
+            img.naturalHeight,
             0,
             0,
-            PHOTO_WIDTH,
-            rows
+            cols,
+            PHOTO_ROWS
         );
         return canvas;
     } finally {
