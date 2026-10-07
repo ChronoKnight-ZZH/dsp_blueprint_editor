@@ -201,8 +201,8 @@ describe("照片 → 地基蓝图", () => {
         expect(out.length).toBeGreaterThan(0);
     });
 
-    test("常量：行数固定 161，列数上限 1000", () => {
-        expect(PHOTO_ROWS).toBe(161);
+    test("常量：行数固定 160，列数上限 1000", () => {
+        expect(PHOTO_ROWS).toBe(160);
         expect(PHOTO_MAX_WIDTH).toBe(1000);
     });
 });

@@ -13,9 +13,12 @@ import {
  * 照片 → 地基蓝图（像素画）。
  *
  * 输出网格约定：
- * - 行数固定为 161（赤道带 lat -80..80 可正向对齐的行数上限）；
- * - 列数 = round(161 × 图片宽高比)，上限 1000（原赤道整圈 200 段 × 5 格/段），
+ * - 行数固定为 150（赤道带 lat -80..80 可正向对齐的行数上限为 161，
+ *   160 为当前选取的图像条带行数，可在该上限内调整）；
+ * - 列数 = round(160 × 图片宽高比)，上限 1000（原赤道整圈 200 段 × 5 格/段），
  *   超宽时只取水平中央条带（不拉伸）；
+ * - 图片整体旋转 180° 输出（等效上下、左右同时镜像：图片顶部行 → 最北，
+ *   底部行 → 最南，左列仍从经度 0 开始、逆时针排布）；
  * - 蓝图地基每格颜色只能存 5-bit 索引（0..31）：0..15 游戏内置色，
  *   16..31 自定义 RGBA 槽。图片先中位切分量化出 ≤16 个代表色并全部写入
  *   自定义槽（真实颜色值、mask 置位），再对每格在「内置 ∪ 自定义」≤32 色中
@@ -24,8 +27,8 @@ import {
 
 /** 输出列数上限（原赤道整圈 1000 列），超出时取水平中央条带 */
 export const PHOTO_MAX_WIDTH = 1000;
-/** 输出行数固定值（赤道带 lat -80..80 可正向对齐的行数上限） */
-export const PHOTO_ROWS = 161;
+/** 输出行数固定值（赤道带可正向对齐行数上限 161 内选取） */
+export const PHOTO_ROWS = 160;
 
 type RGB = [number, number, number];
 
@@ -263,7 +266,7 @@ export function buildBlueprintFromPixels(
     return bp;
 }
 
-/** 加载图片到 161 行画布（列数 = round(161 × 宽高比)，上限 1000，超宽取水平中央条带） */
+/** 加载图片到 160 行画布（列数 = round(160 × 宽高比)，上限 1000，超宽取水平中央条带） */
 export async function loadPhotoImage(
     source: Blob | string
 ): Promise<HTMLCanvasElement> {
@@ -289,6 +292,9 @@ export async function loadPhotoImage(
         // 宽度超出时只取水平中央条带（照片不拉伸）
         const srcW = cols / scale;
         const srcX = Math.max(0, (img.naturalWidth - srcW) / 2);
+        // 整体旋转 180°：translate 到右下角再缩放 (-1,-1)，等效上下+左右镜像
+        ctx.translate(canvas.width, canvas.height);
+        ctx.scale(-1, -1);
         ctx.drawImage(
             img,
             srcX,

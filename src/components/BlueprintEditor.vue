@@ -1284,7 +1284,8 @@ onMounted(() => {
             return;
         }
         reformCursor.matrix.copy(m);
-        reformCursor.matrix.needsUpdate = true;
+        // 更新光标矩阵
+        reformCursor.updateMatrixWorld();
         reformCursor.material.color.set(
             reformColorHex(queue.data.reformData, placement.reformColorSlot)
         );
