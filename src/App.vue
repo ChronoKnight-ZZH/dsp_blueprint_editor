@@ -369,6 +369,7 @@ import {
     selectFoundation,
     enterDeleteMode,
     rotateBuilding,
+    cycleBuildingVariant,
     enterEditMode,
     exitEditMode,
 } from "./editor/placementState";
@@ -823,14 +824,17 @@ const hotkey = (event: KeyboardEvent) => {
         enterDeleteMode();
         return;
     }
-    // R：传送带模式下切换路径走法，其他建筑旋转 90°（仅在放置模式）
+    // R：放置模式下 —— 传送带切换路径走法、有变形样式的建筑（四向分流器）切换形态，
+    //    其余建筑旋转 90°；按住 Shift 时始终为旋转 90°（变形建筑也能转向）
     if (event.code === "KeyR" && isEdit && placement.mode === "placing") {
-        if (
-            placement.selectedItemId !== null &&
-            isBelt(placement.selectedItemId)
-        )
+        const id = placement.selectedItemId;
+        if (!event.shiftKey && id !== null && isBelt(id)) {
             renderer.value?.cycleBeltPathMode();
-        else rotateBuilding();
+            return;
+        }
+        if (!event.shiftKey && id !== null && cycleBuildingVariant() !== null)
+            return;
+        rotateBuilding();
         return;
     }
     // 1-9：切换分类并展开建筑列表

@@ -1076,6 +1076,11 @@ const V2_RECORD_MARKER_MIN = -100; // 导入时接受的标记下限（0.10.33 �
 const V2_BELT_ITEM_IDS = new Set([2001, 2002, 2003]);
 const V2_INSERTER_ITEM_IDS = new Set([2011, 2012, 2013, 2014]);
 
+/** 两个角度（度）之间的最小夹角（0..180） */
+export function angleDiffDeg(a: number, b: number): number {
+    return Math.abs((((a - b) % 360) + 540) % 360 - 180);
+}
+
 function isV2RecordMarkerAt(bytes: Uint8Array, off: number): boolean {
     if (off + 8 > bytes.length) return false;
     // 小端 int32：值 <= -100 即视为记录起始标记
@@ -1145,7 +1150,16 @@ function importBuildingV2(
         filterId: r.getInt16(),
         parameters: null,
     };
-    if (v2ExtraPose !== undefined) b.v2ExtraPose = v2ExtraPose;
+    if (v2ExtraPose !== undefined) {
+        // 坏数据自愈：早期版本工具导出的分拣器把 pose[4]（基准朝向）写成了 0，
+        // 游戏里表现为"分拣器角度偏移 / 报错"。真实蓝图实测 |pose[4] − yaw[0]| ≤ 0.2°，
+        // 因此差值 > 45° 即判定为坏数据，按 yaw[0] / tilt 修正 —— 打开旧文件再保存即可修好。
+        if (angleDiffDeg(v2ExtraPose[4], yaw0) > 45) {
+            v2ExtraPose[4] = yaw0;
+            v2ExtraPose[5] = tilt;
+        }
+        b.v2ExtraPose = v2ExtraPose;
+    }
     const length = r.getInt16();
     if (length > 0) {
         const p = r.getView(length * Int32Array.BYTES_PER_ELEMENT);
@@ -1258,13 +1272,14 @@ function exportBuildingV2(w: BufferWriter, b: BlueprintBuilding) {
     if (V2_INSERTER_ITEM_IDS.has(b.itemId)) {
         let pose = b.v2ExtraPose;
         if (!pose || pose.length !== 7)
+            // 缺少姿态时兜底必须写 yaw[0] / tilt：写 0 会让游戏把分拣器摆成 0°
             pose = [
                 0,
                 b.localOffset[1].x,
                 b.localOffset[1].y,
                 b.localOffset[1].z,
-                0,
-                0,
+                b.yaw[0],
+                b.tilt,
                 b.yaw[1],
             ];
         else {

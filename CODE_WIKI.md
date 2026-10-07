@@ -217,7 +217,7 @@
 | `reform.ts` | 地基（reformData）3D 渲染层：`Reforms extends Group` + `buildReforms`，把 `BlueprintReformData` 渲染为工字铺（IBEAM）/ 直铺（PLAIN）/ 网格（GRID）+ 自定义颜色（共享 CanvasTexture 与 InstancedMesh）。 |
 | `removeBuilding.ts` | `RemoveBuildingsCommand` / `RemoveBuildingCommand` / `RemoveBuildingsByItemCommand`：删除建筑并维护 index 与交叉引用。 |
 | `area.ts` | 编辑期区域坐标：`planetToLocal / localToPlanet / ensureAreaFor`（放置时扩张根区域）与 `normalizeBlueprintAreas`（导出时把根区域收缩到实际建筑区间，环形经度取最小覆盖弧）。归一化时**必须保留 `v2ExtraPose`**（只随 `localOffset[1]` 平移尖端坐标）：它是分拣器的姿态角来源，丢一次就会让导出退化成 `[0,…,0]`，游戏里表现为"分拣器角度偏移"报错。 |
-| `create.ts` | 新建蓝图与入库：`createEmptyBlueprint`（根区域 size 10×161 的临时画布）、`createBuilding`（最小合法 v2 记录）、`CreateBuildingCommand`。 |
+| `create.ts` | 新建蓝图与入库：`createEmptyBlueprint`（根区域 size 10×161 的临时画布）、`createBuilding`（最小合法 v2 记录，可选 `z` = 堆叠高度；可堆叠建筑按游戏写堆叠端口默认值 `out=14/15`、`in=15/14`，见 §6.14）、`CreateBuildingCommand`。 |
 | `beltLine.ts` | 传送带铺线：`rasterizeLine`（latFirst / lonFirst / straight 三种走法）、`buildBeltLine`（逐格算 yaw，**拐角格 = 进入/离开方向的平分角**，即 45° 斜角，与游戏一致）、`CreateBeltLineCommand`（整条一次撤销；重叠格按"末格复用 / 线路中间截断"处理，避免同格两条带）。 |
 | `sorter.ts` | 分拣器连接构造：`createSorterBetween`（建筑↔建筑 / 建筑↔皮带 / 皮带↔皮带 / 分流器），规则见 §6.12。 |
 
@@ -276,6 +276,9 @@
 | `items.ts` | 由 `itemsData.ts` 构建 `itemsMap`；提供 `isBelt/isInserter/isStation/...` 等 itemId 分类判定；`allAssemblers` 集合（用于 `parser.ts` 注册参数解析器）。 |
 | `recipes.ts` | 由 `recipesData.ts` 构建 `recipesMap`。 |
 | `building.ts` | `buildingMeta` 表：每种模型 ID 的颜色、单位盒/选择盒变换、图标位置；`noIconBuildings`、`stationSlotTrans`。 |
+| `buildingSlots.ts` | 建筑 slot 坐标表（下标 = 游戏 slot 编号）+ **面分组表**（每面恰好 3 个，见 §6.15）：`getBuildingSlots / hasSlots / faceSlotIndices / slotFaceOf / slotDisplayPos / findNearestSlot / findNearestFreeSlot`；常量 `FACE_TOL = 0.03`、`SLOT_MARKER_FACE_INSET = 0.18`。 |
+| `stacking.ts` | 建筑堆叠与箱顶放置规则（见 §6.14）：`stackOffsetFor / stackBaseFor / stackedZ / linkStack / stackColumn / inheritLabMode / stackPortDefaults / requiresBase / isStackLink`；常量 `STACK_TOP_SLOT = 15`、`STACK_BOTTOM_SLOT = 14`、`BOX_TOP_SLOT = 13`。 |
+| `buildingCategories.ts` | 底部建筑面板分类表 `buildingCategories`（1-9 类）+ `CategoryBuilding.variants`（放置时可循环切换的变形样式）+ `variantsOf(itemId)`。 |
 | `icons.ts` | 图标 ID 体系（<1000 信号、<20000 物品、<40000 配方、<60000 科技）；`iconUrl / allIconIds`。 |
 | `color.ts` | 颜色相关工具与地基颜色表。 |
 | `midi.ts` | 流速监测器音色（MIDI）数据。 |
@@ -452,7 +455,7 @@
 | 主轴 | 由两端对象**整格差**的主分量决定（如制造台 (13,11) → 皮带 (11,12)：Δ=(-2,+1) → 沿 -x）；整格差为 45° 时主轴不唯一 → 拒绝 |
 | 方向 | 输入（`inputObjIdx`，取料端，端点写在 `localOffset[0]`）与输出（`outputObjIdx`，放料端，端点写在 `localOffset[1]`）由调用方给的 src/dst 决定，两个方向规则完全对称 |
 | 建筑端端点 | = 该建筑某个 **slot 的坐标**（`buildingSlots`，按建筑 yaw 旋转）。slot = 朝向对端的面上的候选里横向坐标离目标最近者；被占用时同面切换到最近空闲 slot |
-| 面归属 | slot 坐标投影到面法线后与该方向**极值**之差 ≤ `FACE_TOL = 0.03` 即属于该面（`faceSlotIndices`）。不用"主轴取大"：方建筑（电弧熔炉 3.2×3.2）与模型在选盒内偏移的建筑（火力发电厂）角 slot 横纵几乎相等，主轴分组会归错面——真实蓝图里从 -y 侧接入熔炉挂的是角 slot 8 而非中间 slot 7 |
+| 面归属 | 有**面分组表**的建筑（储物仓 2101/2102、电弧熔炉 2302、制造台 2303 系列、矩阵研究站 2901/2902）直接按表取该面的 3 个 slot（见 §6.15）；其余建筑用几何极值法：slot 坐标投影到面法线后与该方向**极值**之差 ≤ `FACE_TOL = 0.03` 即属于该面（`faceSlotIndices`）。不用"主轴取大"：方建筑（电弧熔炉 3.2×3.2）与模型在选盒内偏移的建筑（火力发电厂）角 slot 横纵几乎相等，主轴分组会归错面——真实蓝图里从 -y 侧接入熔炉挂的是角 slot 8 而非中间 slot 7 |
 | 皮带端端点 | = **轴线与皮带中心线的交点**（把对端端点投影到皮带中心线上）；轴线与皮带方向近似平行（<26°）时投影退化，取皮带格中心 |
 | 皮带 `offset` | `floor(main × 21)`，`main` = 端点在皮带方向上相对皮带中心的投影（格），合法区间 −10..10（±半格）；≈0 的浮点噪声归零，被占用时平移到最近空闲分段中心 |
 | `length` | `round(两端点距离)`，必须落在 1–3 |
@@ -483,6 +486,43 @@
 - 同款模型别名：2304/2305/2318 → 2303（制造台各等级）、2315/2319 → 2302（熔炉）、2902 → 2901（研究站）、2211 → 2204。
 
 **UI 接入**（`BlueprintEditor.vue`）：`anchorOffset(e)` 把屏幕位置转成连续网格坐标（命中建筑时用建筑表面命中点径向投影回球面），第一次点击记下 `sorterSourceAnchor`、悬停时记下 `sorterHoverAnchor`，预演与实际放置都把它们传给 `createSorterBetween`；slot 标记只渲染已标定（非 null）的 slot。
+
+### 6.14 建筑堆叠与箱顶放置（`data/stacking.ts`）
+
+标定样本：`tests/tools/特殊用法建筑.txt`（游戏手放，同一格逐层叠放；fixture 副本 `stacking_game_sample.txt`）。游戏 wire 字段规律（逐字段核对样本得到）：
+
+| 内容 | 规则 |
+| --- | --- |
+| 堆叠端口 | 底座顶面 = slot **15**，上层底面 = slot **14**。上层建筑写 `inputObjIdx = 底座index`、`inputFromSlot = 15`、`inputToSlot = 14`、`inputOffset = 0`；**底座侧不改**（`outputObjIdx` 仍 −1，`outputToSlot/outputFromSlot` 保持默认 14/15） |
+| 端口默认值 | 可堆叠建筑（储物仓 2101/2102、储液罐 2106、研究站 2901/2902、四向分流器 2020）**即使没堆叠**也写 `out=-1/14/15/0`、`in=-1/15/14/0`；熔炉/制造台等不可堆叠建筑写 0（`createBuilding` 按 `stackPortDefaults` 区分） |
+| 层高 | 每建筑固定的一层高度（实测 z 差），不是选择盒高度：四向分流器/储物仓·小 = 2，储物仓·大/储液罐/研究站 = 3 |
+| 允许的组合 | 保守表 `stackCompat`：分流器 → 储物仓·小；储物仓·小/大 → 储物仓·小/大 + 物流配送器；储液罐 → 储液罐；研究站 → 研究站（Mk.I/Mk.II 交叉）。游戏不接受的组合宁可放不下去，也不要写进蓝图让游戏报错 |
+| 物流配送器 2107 | **只能放在箱子箱盖上方**：写 `inputFromSlot = 13`（箱盖接口）、`inputToSlot = 0`，落位高度 = 箱盖高度（储物仓·小 1.875、储物仓·大 2.9812433），与储物仓自身的堆叠层高不同 |
+| 底座判定 | `stackBaseFor`：优先取光标所指建筑（BVH 拾取，与游戏"光标在建筑上就是往上叠"一致），否则取该格内**能承载该子建筑的最高**建筑；同格判定用 slot 环极值当落座半径 + 半格容差，避免仅靠中心整格判定而在点边缘时失效 |
+| 放置联动 | 堆叠时 x/y **对齐底座中心**；研究站叠在研究站上且底座处于"研究模式"时，上层默认继承该模式（`inheritLabMode`） |
+| 整列联动 | `stackColumn` 沿堆叠端口（`inputToSlot=14`）上下走，得到整列（不会把分拣器连接 `inputToSlot=1` 误当堆叠）；`SetLabResearchModeCommand` 作用于整列，撤销逐层恢复各自原模式 |
+
+### 6.15 slot 面分组：四边各三个（`data/buildingSlots.ts`）
+
+游戏 0.10.35 实测（`tests/tools/特殊用法_生成.txt`：14 种建筑 × 全部 slot 的分拣器环）：
+方建筑（电弧熔炉 3.2×3.2、储物仓 3.2×3.2）每个面的**角 slot 与相邻面的边界 slot 坐标逐位相同**（slot 2 与 3、5 与 6、8 与 9、11 与 0），游戏靠"分拣器**从哪个面离开**"区分这两个编号（北面出 → slot 2，东面出 → slot 3）。
+
+- `slotFaceGroups`：逐建筑显式给出 `[+y(北), +x(东), -y(南), -x(西)]` 四个面的 slot 编号（每面 3 个）。**每个建筑自己的编号绕向不同**（矩阵研究站 2901 是反向绕的，东面是 9/10/11），不能按统一公式推导。
+- `faceSlotIndices` 优先查该表，保证"每面 3 个、角 slot 归属唯一"；其余建筑退回几何极值法。
+- 旧实现的 bug：几何极值法把角 slot 同时算进两个相邻面（每面 5 个候选），于是"该面被占用时切到同面下一个空闲 slot"会跳到相邻面的错误编号，实际只用到 8 个 slot（用户反馈"接口有 12 个、四边各三个，不是 8 个"）。复现工具 `tests/tools/replaySlots.ts`：修复前 8 处不一致（2302 的 6/3/11/9、2101 的 3/11/9/6 全部落到相邻面），修复后 3 份真实蓝图 243/259 条完全一致、0 不一致。
+- `slotDisplayPos`（显示专用）：角 slot 与相邻面边界 slot 真实坐标重合，按真实坐标画标记会叠成一个点（看起来只有 8 个）。显示时沿**所属面**向面中心收缩 `SLOT_MARKER_FACE_INSET = 0.18`，于是 UI 上呈现"四边各三个"；连接用的端点仍是 `getBuildingSlots` 的真实坐标。
+
+### 6.16 放置快捷键与分流器变形样式
+
+| 键 | 行为 |
+| --- | --- |
+| `R` | 放置模式下：传送带 → 切换路径走法（latFirst / lonFirst / straight）；有 `variants` 的建筑（四向分流器 2020，三种形态模型 38/39/40）→ 循环切换形态；其余建筑 → 旋转 90° |
+| `Shift+R` | 始终旋转 90°（变形建筑/传送带也能转向） |
+| `Shift` | 自由放置（不吸附整格） |
+| `X` | 进入删除模式；`Esc` 分层取消；`1-9` 切分类；`F1-F12` 选建筑；`N` 重置镜头 |
+
+- 变形样式的载体就是 `modelIndex`（`placementState.cycleBuildingVariant()` 改 `selectedModelIndex`），预览与放置自动跟随；面板入口见 `buildingCategories.ts` 的 `variants: [38, 39, 40]`。
+- **鼠标静止时也要刷新预览**：`BlueprintEditor.vue` 中最后一次指针坐标存成 `shallowRef`（`lastPointer`），`watchEffect` 首次执行就不会因"还没动过鼠标"提前 return 而一个依赖都收集不到。用普通变量时表现为"按 R 没反应、动一下鼠标才转"。
 
 ---
 
@@ -613,6 +653,7 @@ App.vue 的 watchEffect 把 codeExpired 置 true（蓝图字符串需重生成�
 
 - `Ctrl+Z` 撤销，`Ctrl+Y` 或 `Ctrl+Shift+Z` 重做（`App.vue` 的 `hotkey`）。
 - `O` / `0`：切换侧栏（非固定状态）。
+- 编辑模式：`1-9` 切分类、`F1-F12` 选建筑、`R` 旋转/切形态/切走法（见 §6.16）、`Shift+R` 强制旋转、`Shift` 自由放置、`X` 删除模式、`Esc` 分层取消、`N` 重置镜头、右键退出放置。
 
 ---
 
@@ -691,8 +732,10 @@ python3 i18n.py ... -o ../locales     # 生成 zh/en locale
 | `sorter_replay.spec.ts` | 真实蓝图全量复现：`sorter_belt_replay`（3 根皮带↔皮带）、`sorter_building_belt_replay`（29 根建筑/皮带混合，`tests/tools/分拣器.txt` 副本）、`sorter_multi_building_replay`（23 根、12 种建筑 × 输入/输出两个方向 + 长度 1/2，`tests/tools/分拣器示例.txt` 副本）逐字段比对。 |
 | `beltGameConsistency.spec.ts` | 传送带约定：游戏样本 `belt_inserter_game_sample.txt` 的 `pose[4]≈yaw[0]`、串联/slot/parameters 约定、拐角平分角；工具侧拐角 yaw、多次拖拽重叠格复用与截断、撤销恢复。 |
 | `createdExport.spec.ts` | 工具"新建蓝图→铺带→加分拣器→保存"链路：导出再解析后 `pose[4]` 仍等于 `yaw[0]`（四朝向）、`normalizeBlueprintAreas` 平移尖端但保留姿态角且不改入参、缺 pose 时兜底写 `yaw[0]`，以及早期坏文件（fixture `tool_export_pose_broken.txt`）导入自愈。 |
+| `slotFace.spec.ts` | slot 面分组：12 slot 环建筑每面恰好 3 个且四面覆盖 0-11、角 slot 归属唯一（电弧熔炉 +x 面只有 3/4/5）、矩阵研究站反向绕向、`slotDisplayPos` 把重合角 slot 分开且 12 个显示点两两可分辨；并用 fixture `slot_face_game_sample.txt`（游戏 14 种建筑 × 全部 slot 的分拣器环）复现每根分拣器的建筑端 slot，与游戏写死的编号逐条一致（≥24 条）。 |
+| `stacking.spec.ts` | 堆叠规则：用 fixture `stacking_game_sample.txt` 逐条校验 10 组堆叠样本的层高/z/端口字段（15/14、配送器 13）、未连接时的端口默认值、允许/禁止的组合表、`stackBaseFor` 底座判定（光标所指、同格最上层、物流配送器只在箱盖）、`stackColumn` 整列解析、研究模式继承与整列联动（含撤销）、分流器 38/39/40 循环切换，以及"叠出来 → 导出 → 再解析"的端到端字段一致性。 |
 
-fixtures 位于 `tests/unit/blueprint/fixtures/`：除原有蓝图外新增 `starting_base_01029.txt`（0.10.29 老版本基地）、`foundation_only_99.txt`、`facilities_with_foundation_320.txt`、`sorter_belt_replay.txt`、`sorter_building_belt_replay.txt`、`sorter_multi_building_replay.txt`。调试/标定脚本位于 `tests/tools/`（`parseBlueprint.ts` 蓝图→JSON、`sorterReplay.ts` 分拣器连接复现比对、`dumpBuildings.ts` 紧凑建筑表、`deriveSlots.ts` slot 表反推/校验、`slotScaleProbe.ts` 分区尺度诊断、`fitBeltOffset.ts` 皮带 offset 分段数拟合），样本 `分拣器.txt` / `分拣器示例.txt` 为游戏 0.10.35 实测蓝图。
+fixtures 位于 `tests/unit/blueprint/fixtures/`：除原有蓝图外新增 `starting_base_01029.txt`（0.10.29 老版本基地）、`foundation_only_99.txt`、`facilities_with_foundation_320.txt`、`sorter_belt_replay.txt`、`sorter_building_belt_replay.txt`、`sorter_multi_building_replay.txt`、`tool_export_pose_broken.txt`（早期工具导出的坏 pose）、`slot_face_game_sample.txt`（游戏 14 种建筑 × 全部 slot 的分拣器环）、`stacking_game_sample.txt`（游戏逐层堆叠样本）。调试/标定脚本位于 `tests/tools/`（`parseBlueprint.ts` 蓝图→JSON、`sorterReplay.ts` 分拣器连接复现比对、`dumpBuildings.ts` 紧凑建筑表、`deriveSlots.ts` slot 表反推/校验、`dumpSlotSamples.ts` 逐 slot 原始样本、`replaySlots.ts` slot 面归属复现比对、`slotScaleProbe.ts` 分区尺度诊断、`fitBeltOffset.ts` 皮带 offset 分段数拟合、`compareBlueprints.ts` / `checkPoseConsistency.ts` / `reproToolExport.ts` 导出姿态回归），样本 `分拣器.txt` / `分拣器示例.txt` / `特殊用法建筑.txt` / `特殊用法_生成.txt` 为游戏 0.10.35 实测蓝图。
 
 ### 12.3 运行
 
@@ -809,7 +852,13 @@ cat blueprint.txt | yarn cli > bp.json
 | `createSorterBetween` | 分拣器连接构造（§6.12）：主轴取两端整格差的主分量，建筑端端点落 slot、皮带端落在轴线与皮带中心线交点，皮带 `offset = floor(main × 21)`，`length = round(端点距)`。 |
 | `BELT_SEGMENTS_PER_CELL` | 21：皮带每格内部分段数（真实蓝图反推）；皮带端 offset 合法区间 −10..10（±半格）。 |
 | `SorterAnchors` | 分拣器点击锚点：光标所在列/行决定挂哪个建筑 slot；按锚点无解时忽略锚点重试一次（退回对端中心基准）。 |
-| `faceSlotIndices` | 建筑 slot 的**面归属**：slot 投影到面法线后接近该方向极值（≤ `FACE_TOL = 0.03`）即属于该面，角 slot 可同属两面。`SlotTable` 的数组下标 = slot 编号，未标定 slot 为 `null`。 |
+| `faceSlotIndices` | 建筑 slot 的**面归属**（§6.15）：有面分组表的建筑（储物仓/电弧熔炉/制造台/研究站）每面恰好 3 个、角 slot 归属唯一；其余建筑用几何极值法（投影到面法线后接近该方向极值 ≤ `FACE_TOL = 0.03`）。`SlotTable` 的数组下标 = slot 编号，未标定 slot 为 `null`。 |
+| `slotFaceGroups` / `slotDisplayPos` | 逐建筑的面分组表（`[+y, +x, -y, -x]` 各 3 个 slot，绕向因建筑而异）；显示专用坐标 `slotDisplayPos` 把真实坐标重合的角 slot 沿所属面内缩 `SLOT_MARKER_FACE_INSET = 0.18`，让 UI 呈现"四边各三个"。 |
+| `stackOffsetFor` / `stackBaseFor` | 堆叠规则（§6.14）：底座 itemId + 上层 itemId → 一层高度（不允许返回 `null`）；`stackBaseFor` 按"光标所指建筑优先、其次同格能承载的最高建筑"求底座。 |
+| `STACK_TOP_SLOT` / `STACK_BOTTOM_SLOT` / `BOX_TOP_SLOT` | 15 / 14 / 13：底座顶面端口、上层底面端口、储物仓箱盖接口（物流配送器专用）。 |
+| `linkStack` / `stackColumn` / `inheritLabMode` | 写堆叠连接字段；自下而上取整列（只跟 `inputToSlot=14` 的堆叠端口，不跟分拣器连接）；堆叠时研究站继承底座的"研究模式"。 |
+| `SetLabResearchModeCommand` | 修改研究站研究模式（`silent`）：作用于**整列**堆叠研究站，撤销时逐层恢复各自原模式。 |
+| `variantsOf` / `cycleBuildingVariant` | 建筑放置时可循环切换的变形样式（模型序号列表，如四向分流器 38/39/40）；`R` 键在放置模式下切换。 |
 
 ---
 

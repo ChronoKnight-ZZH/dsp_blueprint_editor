@@ -6,6 +6,11 @@ export interface CategoryBuilding {
     disabled?: boolean;
     /** true = 地基：选中进入地基模式（铺/涂一格），不做建筑放置 */
     foundation?: boolean;
+    /**
+     * 放置时可用快捷键循环切换的"变形样式"模型序号（默认 modelIndex 是其中一项）。
+     * 例：四向分流器 (2020) 有三种形态，游戏实测模型序号 38（十字）/39（一字）/40。
+     */
+    variants?: number[];
 }
 
 export interface CategoryEntry {
@@ -51,7 +56,13 @@ export const buildingCategories: CategoryEntry[] = [
             { itemId: 2012, modelIndex: 42, nameKey: "高速分拣器" },
             { itemId: 2013, modelIndex: 43, nameKey: "极速分拣器" },
             { itemId: 2014, modelIndex: 483, nameKey: "集装分拣器" },
-            { itemId: 2020, modelIndex: 38, nameKey: "四向分流器" },
+            {
+                itemId: 2020,
+                modelIndex: 38,
+                nameKey: "四向分流器",
+                // 三种变形样式：十字形 / 一字形 / 十字形（加强），放置时按 R 循环
+                variants: [38, 39, 40],
+            },
             { itemId: 2030, modelIndex: 208, nameKey: "流速器" },
             { itemId: 2313, modelIndex: 120, nameKey: "喷涂机" },
         ],
@@ -130,3 +141,14 @@ export const buildingCategories: CategoryEntry[] = [
         ],
     },
 ];
+
+/** itemId → 放置时可切换的变形样式（模型序号列表） */
+const buildingVariants = new Map<number, number[]>();
+for (const cat of buildingCategories)
+    for (const b of cat.buildings)
+        if (b.variants) buildingVariants.set(b.itemId, b.variants);
+
+/** 该建筑放置时可切换的变形样式；没有变形返回空数组 */
+export function variantsOf(itemId: number): number[] {
+    return buildingVariants.get(itemId) ?? [];
+}

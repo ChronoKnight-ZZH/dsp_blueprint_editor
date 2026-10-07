@@ -607,6 +607,7 @@ import {
     onMounted,
     Ref,
     onUnmounted,
+    shallowRef,
     watchEffect,
     computed,
     inject,
@@ -628,7 +629,21 @@ import {
     PaintReformCellCommand,
     reformColorHex,
 } from "@/blueprint/reformEdit";
-import { getBuildingSlots } from "@/data/buildingSlots";
+import { getBuildingSlots, slotDisplayPos } from "@/data/buildingSlots";
+import {
+    inheritLabMode,
+    isStackChild,
+    linkStack,
+    requiresBase,
+    stackBaseFor,
+    stackedZ,
+} from "@/data/stacking";
+
+/**
+ * 只需要屏幕坐标的事件最小结构：MouseEvent / PointerEvent 均可赋值，
+ * 也让"鼠标静止时用最后一次坐标重算预览"可以直接传一个普通对象。
+ */
+type PointerCoords = { clientX: number; clientY: number };
 
 const props = defineProps<{
     selectedBuildingIndex: number | null;
@@ -987,7 +1002,10 @@ function refreshSorterOverlay() {
         const targetSlot = preview ? preview.outputToSlot : -1;
         let count = 0;
         for (let i = 0; i < slots.length && count < SLOT_MARKER_CAP; i++) {
-            const slot = slots[i];
+            // 坐标用 slotDisplayPos：角 slot 与相邻面边界 slot 在蓝图数据里完全重合，
+            // 按真实坐标画会两两叠成一个点（看起来只有 8 个）——显示时沿所属面向内收一点，
+            // 呈现游戏里的"四边各三个"。连接用的端点仍是真实坐标。
+            const slot = slotDisplayPos(hoverBuilding.itemId, i);
             if (slot === null) continue;
             overlayLift.makeTranslation(slot.x, slot.y, 0.35);
             overlayM.multiplyMatrices(trans[0], overlayLift);
@@ -1083,7 +1101,7 @@ onMounted(() => {
     const GRID_SIZE = 1000; // 200 segments * 5 grids/segment
     const RAD_TO_GRID = GRID_SIZE / (2 * Math.PI);
 
-    const setupRay = (e: MouseEvent) => {
+    const setupRay = (e: PointerCoords) => {
         ray.origin.setFromMatrixPosition(camera.matrixWorld);
         const rect = renderer.domElement.getBoundingClientRect();
         ray.direction.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -1091,7 +1109,7 @@ onMounted(() => {
         ray.direction.z = 0.5;
         ray.direction.unproject(camera).sub(ray.origin).normalize();
     };
-    const pickBuilding = (e: MouseEvent) => {
+    const pickBuilding = (e: PointerCoords) => {
         if (b.value === null) return null;
         setupRay(e);
         const intersects = b.value.bvh.raycast(ray);
@@ -1108,12 +1126,12 @@ onMounted(() => {
         return intersects.length === 0 ? null : intersects[0].index;
     };
     /** Raycast to planet sphere, return 3D hit point or null */
-    const screenToPlanet = (e: MouseEvent): Vector3 | null => {
+    const screenToPlanet = (e: PointerCoords): Vector3 | null => {
         setupRay(e);
         return ray.intersectSphere(planetSphere, v);
     };
     /** 屏幕点击 → 吸附后的网格偏移（placeBuilding 与预览共用，保证坐标逻辑一致） */
-    const placementOffset = (e: MouseEvent) => {
+    const placementOffset = (e: PointerCoords) => {
         const hit = screenToPlanet(e);
         if (hit === null) return null;
         const latGrid = Math.asin(hit.y / R) * RAD_TO_GRID;
@@ -1131,7 +1149,7 @@ onMounted(() => {
      * 命中建筑时用建筑表面命中点径向投影回球面，否则用星球表面点。
      */
     const anchorPoint = new Vector3();
-    const anchorOffset = (e: MouseEvent) => {
+    const anchorOffset = (e: PointerCoords) => {
         if (b.value === null) return null;
         setupRay(e);
         const intersects = b.value.bvh.raycast(ray);
@@ -1157,8 +1175,13 @@ onMounted(() => {
         const lonGrid = Math.atan2(anchorPoint.x, anchorPoint.z) * RAD_TO_GRID;
         return planetToLocal(latGrid, lonGrid);
     };
-    /** Place building at clicked planet position */
-    const placeBuilding = (e: MouseEvent) => {
+    /**
+     * 放置建筑。
+     * 可堆叠建筑（储物仓 / 储液罐 / 矩阵研究站 / 四向分流器）在光标落在底座上时
+     * **叠到该列最上层**（z = 底座 z + 一层高度，x/y 对齐底座中心，写 15/14 堆叠端口）。
+     * 物流配送器（2107）没有箱子底座时直接拒绝（游戏：只能放在箱盖上方）。
+     */
+    const placeBuilding = (e: PointerCoords) => {
         const queue = commandQueue.value;
         if (
             !queue ||
@@ -1168,21 +1191,58 @@ onMounted(() => {
             return;
         const offset = placementOffset(e);
         if (offset === null) return;
+        const itemId = placement.selectedItemId;
+        const parent = placeBaseFor(e, offset, itemId);
+        if (requiresBase(itemId) && parent === null) return;
         const building = createBuilding(
-            placement.selectedItemId,
+            itemId,
             placement.selectedModelIndex,
-            offset,
-            placement.yaw
+            parent
+                ? {
+                      x: parent.localOffset[0].x,
+                      y: parent.localOffset[0].y,
+                  }
+                : offset,
+            placement.yaw,
+            stackedZ(parent, itemId)
         );
+        if (parent) {
+            linkStack(building, parent);
+            inheritLabMode(building, parent);
+        }
         try {
             queue.push(new CreateBuildingCommand(building));
         } catch {
             // Outside equator band — ignore
         }
     };
+    /** 放置/预览共用的堆叠底座求解（光标所指建筑优先，其次同格最上层可承载建筑） */
+    const placeBaseFor = (
+        e: PointerCoords,
+        offset: { x: number; y: number },
+        itemId: number
+    ): BlueprintBuilding | null => {
+        const queue = commandQueue.value;
+        // 只有"可以叠在别人身上"的建筑才需要做拾取，普通建筑放置不付这份开销
+        if (!queue || !isStackChild(itemId)) return null;
+        const hit = pickBuilding(e);
+        return stackBaseFor(
+            queue.data.buildings,
+            hit === null ? null : queue.data.buildings[hit],
+            offset.x,
+            offset.y,
+            itemId
+        );
+    };
     /** 鼠标跟随预览：placing 模式下更新半透明绿盒的位置与朝向（分拣器走两点架接，无绿盒） */
-    let lastMouseEvent: MouseEvent | null = null;
-    const updatePreview = (e: MouseEvent) => {
+    /**
+     * 最后一帧的指针屏幕坐标（投影/拾取只用到 clientX/clientY）。
+     * **必须是响应式**：鼠标静止时按 R 旋转 / 切建筑 / 改 Shift 吸附也要立即刷新预览。
+     * 用普通变量时，下面 onMounted 里的 watchEffect 首次执行会因 null 提前 return，
+     * 一个依赖都收集不到 → 之后永不重跑，表现为"按 R 没反应、动一下鼠标才转"。
+     */
+    const lastPointer = shallowRef<PointerCoords | null>(null);
+    const updatePreview = (e: PointerCoords) => {
         if (
             placement.appMode !== "edit" ||
             placement.mode !== "placing" ||
@@ -1207,11 +1267,25 @@ onMounted(() => {
             previewVisible.value = false;
             return;
         }
+        const itemId = placement.selectedItemId;
+        // 预演堆叠：底座高度 + 对齐底座中心；只能放在底座上的建筑（物流配送器）
+        // 没有箱子时不显示预览（点了也放不下去）
+        const parent = placeBaseFor(e, offset, itemId);
+        if (requiresBase(itemId) && parent === null) {
+            previewVisible.value = false;
+            return;
+        }
         const fake = createBuilding(
-            placement.selectedItemId,
+            itemId,
             placement.selectedModelIndex,
-            offset,
-            placement.yaw
+            parent
+                ? {
+                      x: parent.localOffset[0].x,
+                      y: parent.localOffset[0].y,
+                  }
+                : offset,
+            placement.yaw,
+            stackedZ(parent, itemId)
         );
         const trans = calcBuildingTrans(R, b.value.pos, fake)[0];
         previewMesh.matrix.multiplyMatrices(trans, meta.unitBoxTrans);
@@ -1253,7 +1327,7 @@ onMounted(() => {
     };
 
     /** 地基模式：鼠标所在格 → 目标格高亮（颜色 = 当前槽位色） */
-    const updateReformCursor = (e: MouseEvent) => {
+    const updateReformCursor = (e: PointerCoords) => {
         if (
             placement.appMode !== "edit" ||
             placement.mode !== "reforming"
@@ -1293,7 +1367,7 @@ onMounted(() => {
     };
 
     /** 地基模式：单击格 = 铺/涂一格当前颜色（空域铺新格，有地基改色） */
-    const paintReformCell = (e: MouseEvent) => {
+    const paintReformCell = (e: PointerCoords) => {
         const queue = commandQueue.value;
         if (!queue) return;
         const a = anchorOffset(e);
@@ -1306,7 +1380,7 @@ onMounted(() => {
     };
 
     /** 未设 A 点时：在鼠标位置显示单个传送带方块 */
-    const showSingleBeltPreview = (e: MouseEvent) => {
+    const showSingleBeltPreview = (e: PointerCoords) => {
         if (
             b.value === null ||
             placement.selectedItemId === null ||
@@ -1393,16 +1467,16 @@ onMounted(() => {
         beltPreviewVisible.value = n > 0;
         beltStraightLineVisible.value = false;
     };
-    // 切换传送带路径走法（在 onMounted 内定义，可访问 lastMouseEvent / updateBeltPreview）
+    // 切换传送带路径走法（在 onMounted 内定义，可访问 lastPointer / updateBeltPreview）
     cycleBeltPathModeFn.value = () => {
         const i = BELT_PATH_MODES.indexOf(beltPathMode);
         beltPathMode = BELT_PATH_MODES[(i + 1) % BELT_PATH_MODES.length];
-        if (beltStart !== null && lastMouseEvent)
-            updateBeltPreview(beltStart, lastMouseEvent);
+        if (beltStart !== null && lastPointer.value)
+            updateBeltPreview(beltStart, lastPointer.value);
         return beltPathMode;
     };
     /** 点击 B 点：提交整条传送带（一次撤销）。仅在放置成功后清空 A 点。 */
-    const commitBeltLine = (e: MouseEvent) => {
+    const commitBeltLine = (e: PointerCoords) => {
         const queue = commandQueue.value;
         const start = beltStart;
         if (
@@ -1432,7 +1506,7 @@ onMounted(() => {
         }
     };
     /** 分拣器两点架接：支持建筑↔建筑、建筑↔皮带、皮带↔皮带 */
-    const pickSorterPoint = (e: MouseEvent) => {
+    const pickSorterPoint = (e: PointerCoords) => {
         const queue = commandQueue.value;
         if (!queue) return;
         const anchor = anchorOffset(e) ?? undefined;
@@ -1469,7 +1543,7 @@ onMounted(() => {
         sorterSourceAnchor = null;
         if (sorter) queue.push(new CreateBuildingCommand(sorter));
     };
-    const onMouseUp = (e: MouseEvent) => {
+    const onMouseUp = (e: PointerCoords) => {
         if (downPos === null) return;
         const dx = e.clientX - downPos.x;
         const dy = e.clientY - downPos.y;
@@ -1481,8 +1555,8 @@ onMounted(() => {
             else commitBeltLine(e); // 第二次点击：A→B 放置
         }
     };
-    const onPointerMove = (e: MouseEvent) => {
-        lastMouseEvent = e;
+    const onPointerMove = (e: PointerCoords) => {
+        lastPointer.value = { clientX: e.clientX, clientY: e.clientY };
         if (placement.mode === "reforming") {
             updateReformCursor(e);
         } else if (isPlacingBelt()) {
@@ -1499,7 +1573,7 @@ onMounted(() => {
         }
     };
     const onMouseLeave = () => {
-        lastMouseEvent = null;
+        lastPointer.value = null;
         previewVisible.value = false;
         reformCursorVisible.value = false;
         sorterHover.value = null;
@@ -1507,20 +1581,22 @@ onMounted(() => {
         hideBeltPreview(); // 隐藏路径预览，但保留 A 点
     };
     // 鼠标静止时，键盘切换建筑 / R 旋转 / Shift 吸附变化也要刷新预览
+    // 依赖由 lastPointer.value 与 update* 内部读到的 placement 字段共同收集，
+    // 任意一个变化（含 R 键改 placement.yaw / 切分流器形态）都会让本 effect 重跑。
     watchEffect(() => {
-        if (!lastMouseEvent) return;
+        const p = lastPointer.value;
+        if (!p) return;
         if (placement.mode === "reforming") {
-            updateReformCursor(lastMouseEvent);
+            updateReformCursor(p);
         } else if (isPlacingBelt()) {
-            if (beltStart !== null)
-                updateBeltPreview(beltStart, lastMouseEvent);
-            else showSingleBeltPreview(lastMouseEvent);
+            if (beltStart !== null) updateBeltPreview(beltStart, p);
+            else showSingleBeltPreview(p);
         } else {
-            updatePreview(lastMouseEvent);
+            updatePreview(p);
         }
     });
     /** Delete building at clicked position */
-    const deleteBuilding = (e: MouseEvent) => {
+    const deleteBuilding = (e: PointerCoords) => {
         const index = pickBuilding(e);
         if (index === null) return;
         const queue = commandQueue.value;
@@ -1534,10 +1610,10 @@ onMounted(() => {
     // PlanetMapControls' setPointerCapture which only captures pointer events.
     const DRAG_THRESHOLD = 4;
     let downPos: { x: number; y: number } | null = null;
-    const onMouseDown = (e: MouseEvent) => {
+    const onMouseDown = (e: PointerCoords) => {
         downPos = { x: e.clientX, y: e.clientY };
     };
-    const onClick = (e: MouseEvent) => {
+    const onClick = (e: PointerCoords) => {
         if (downPos === null) return;
         const dx = e.clientX - downPos.x;
         const dy = e.clientY - downPos.y;

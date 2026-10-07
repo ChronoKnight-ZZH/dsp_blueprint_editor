@@ -1,4 +1,5 @@
 import { reactive } from "vue";
+import { variantsOf } from "@/data/buildingCategories";
 
 export type EditorMode = "idle" | "placing" | "deleting" | "reforming";
 
@@ -75,4 +76,19 @@ export function enterDeleteMode() {
 
 export function rotateBuilding() {
     state.yaw = (state.yaw + 90) % 360;
+}
+
+/**
+ * 切换到下一个"变形样式"（四向分流器的三种形态等）。
+ * 形态就是模型序号，直接改 selectedModelIndex，预览与放置都会用新模型。
+ * @returns 切换后的模型序号；该建筑没有变形（或未选建筑）返回 null
+ */
+export function cycleBuildingVariant(): number | null {
+    if (state.selectedItemId === null) return null;
+    const variants = variantsOf(state.selectedItemId);
+    if (variants.length === 0) return null;
+    const i = variants.indexOf(state.selectedModelIndex ?? -1);
+    const next = variants[(i + 1) % variants.length];
+    state.selectedModelIndex = next;
+    return next;
 }

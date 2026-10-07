@@ -5,6 +5,8 @@ import {
     ResearchMode,
 } from "./parser";
 import { Command, Updater } from "@/command";
+import { stackColumn } from "@/data/stacking";
+import { isLab } from "@/data/items";
 
 /**
  * 修改单体建筑配方（recipeId 字段）的撤销命令。
@@ -46,31 +48,49 @@ export class SetBuildingRecipeCommand implements Command {
 /**
  * 修改研究站（itemId=2901/2902）研究模式（researchMode 字段）的撤销命令。
  *
+ * **整列联动**：堆叠成一列的研究站（同一格、沿堆叠端口 inputToSlot=14 相连）在游戏里
+ * 是一体运作的，点击任意一层的"研究模式"要改整列 —— 本命令作用于整列建筑，
+ * 撤销时逐层恢复各自的原模式。
+ *
  * 只改数据字段，不改变几何/拓扑/3D 模型 → silent=true。
- * 派发 updateBuildingIcon 仅为触发 BuildingInfoPanel 重新渲染模式文本
+ * 派发 updateBuildingIcon 让 BuildingInfoPanel 重新渲染模式文本
  * （研究模式不影响 3D 图标，刷新为无害 no-op，由 BlueprintEditor 的 hasIcon 守卫跳过）。
  */
 export class SetLabResearchModeCommand implements Command {
     readonly silent = true;
 
-    private oldMode: ResearchMode;
     private newMode: ResearchMode;
+    /** 目标建筑（整列），首次 do 时解析并固定，保证 redo/undo 作用对象一致 */
+    private targets: BlueprintBuilding[] = [];
+    private readonly oldModes = new Map<BlueprintBuilding, ResearchMode>();
 
     constructor(private building: BlueprintBuilding, mode: ResearchMode) {
-        this.oldMode = (building.parameters as LabParamerters).researchMode;
         this.newMode = mode;
     }
 
-    do(_data: BlueprintData, updater: Updater) {
-        (this.building.parameters as LabParamerters).researchMode =
-            this.newMode;
-        updater.updateBuildingIcon.dispatch(this.building);
+    do(data: BlueprintData, updater: Updater) {
+        if (this.targets.length === 0) {
+            const column = stackColumn(data.buildings, this.building).filter(
+                (b) => isLab(b.itemId) && b.parameters !== null
+            );
+            this.targets = column.length > 0 ? column : [this.building];
+            for (const lab of this.targets)
+                this.oldModes.set(
+                    lab,
+                    (lab.parameters as LabParamerters).researchMode
+                );
+        }
+        for (const lab of this.targets) {
+            (lab.parameters as LabParamerters).researchMode = this.newMode;
+            updater.updateBuildingIcon.dispatch(lab);
+        }
     }
 
     undo(_data: BlueprintData, updater: Updater) {
-        (this.building.parameters as LabParamerters).researchMode =
-            this.oldMode;
-        updater.updateBuildingIcon.dispatch(this.building);
+        for (const [lab, mode] of this.oldModes) {
+            (lab.parameters as LabParamerters).researchMode = mode;
+            updater.updateBuildingIcon.dispatch(lab);
+        }
     }
 
     merge(c: Command): boolean {

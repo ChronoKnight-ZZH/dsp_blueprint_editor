@@ -2,6 +2,7 @@ import { BlueprintBuilding, BlueprintData } from "./parser";
 import { Command } from "@/command";
 import { ensureAreaFor } from "./area";
 import { defaultParamsFor } from "./defaultParams";
+import { stackPortDefaults } from "@/data/stacking";
 
 /**
  * Create an empty v2 blueprint with a single root area anchored at the equator (latitude -80).
@@ -46,19 +47,21 @@ export function createEmptyBlueprint(): BlueprintData {
  * Construct a minimal legal v2 building record for a single-point building.
  * All connection fields are -1 (no links). Parameters are null (game fills defaults).
  * @param yaw rotation in degrees (0-360)
+ * @param z 堆叠高度（格）：叠在别的建筑上时 = 底座 z + 一层高度，见 `@/data/stacking`
  */
 export function createBuilding(
     itemId: number,
     modelIndex: number,
     offset: { x: number; y: number },
-    yaw: number
+    yaw: number,
+    z = 0
 ): BlueprintBuilding {
-    return {
+    const building: BlueprintBuilding = {
         index: 0,
         areaIndex: 0,
         localOffset: [
-            { x: offset.x, y: offset.y, z: 0 },
-            { x: offset.x, y: offset.y, z: 0 },
+            { x: offset.x, y: offset.y, z },
+            { x: offset.x, y: offset.y, z },
         ],
         yaw: [yaw, yaw],
         tilt: 0,
@@ -76,6 +79,17 @@ export function createBuilding(
         filterId: 0,
         parameters: defaultParamsFor(itemId, modelIndex),
     };
+    // 可堆叠建筑（储物仓 / 储液罐 / 矩阵研究站 / 四向分流器）的堆叠端口默认值：
+    // 游戏即使没堆叠也写 out=14/15、in=15/14（见 tests/tools/特殊用法建筑.txt），
+    // 写成 0 会让游戏把这些字段当成分拣器 slot 0。
+    const ports = stackPortDefaults(itemId);
+    if (ports) {
+        building.outputToSlot = ports.outputToSlot;
+        building.outputFromSlot = ports.outputFromSlot;
+        building.inputFromSlot = ports.inputFromSlot;
+        building.inputToSlot = ports.inputToSlot;
+    }
+    return building;
 }
 
 /**

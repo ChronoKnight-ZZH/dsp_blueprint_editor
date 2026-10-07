@@ -23,7 +23,7 @@ export interface SlotPos {
 /** slot 表：下标 = slot 编号，null = 该 slot 尚未标定 */
 export type SlotTable = (SlotPos | null)[];
 
-/** 储物仓·小 (2101) 12 slot */
+/** 储物仓·小 (2101) 12 slot（3.2×3.2 方建筑：见 {@link slotFaceGroups} 的角 slot 说明） */
 const storage2101: SlotTable = [
     { x: -0.7991, y: 0.7955 }, // slot 0
     { x: 0.0, y: 0.795 }, // slot 1
@@ -76,7 +76,11 @@ const artificialStar2210: SlotTable = [
     { x: -1.9012, y: 0.0036 }, // slot 3
 ];
 
-/** 电弧熔炉 (2302) 12 slot（3.2×3.2 方建筑：角 slot 与相邻面的边界 slot 位置重合，故成对相同） */
+/**
+ * 电弧熔炉 (2302) 12 slot（3.2×3.2 方建筑：角 slot 与相邻面的边界 slot 位置重合，
+ * 故成对相同——0.10.35 实测 slot 2 与 3 / 5 与 6 / 8 与 9 / 11 与 0 的分拣器建筑端
+ * 端点逐位相同；游戏里靠"分拣器从哪个面离开"区分这两个编号，见 {@link slotFaceGroups}）
+ */
 const smelter2302: SlotTable = [
     { x: -0.7996, y: 0.7954 }, // slot 0
     { x: 0.0, y: 0.795 }, // slot 1
@@ -252,10 +256,94 @@ export function hasSlots(itemId: number): boolean {
 export const FACE_TOL = 0.03;
 
 /**
+ * 面分组的 slot 编号表：**每个面恰好 3 个 slot**（两端角 slot + 中间 slot），
+ * 与游戏 0.10.35 蓝图实测一致（tests/tools/特殊用法_生成.txt：12 根分拣器分别挂在
+ * 0-11 号 slot 上，北面出的分拣器挂 2、东面出的挂 3，两者建筑端端点逐位相同）。
+ *
+ * 为什么必须显式给出：方建筑（电弧熔炉 / 储物仓 3.2×3.2）每个面的**角 slot 与
+ * 相邻面的边界 slot 几何坐标完全相同**（游戏就是这么写蓝图数据的），靠几何极值
+ * 分组会把角 slot 同时算进两个相邻面（每个面变成 5 个候选），于是"该面已被占用时
+ * 切到同面下一个空闲 slot"会跳到相邻面的错误编号，导出的分拣器朝向就与游戏不符。
+ *
+ * 数组元素顺序 = 面顺序 [+y(北), +x(东), -y(南), -x(西)]；**每个建筑自己的编号绕向
+ * 不同**（矩阵研究站是反向绕的），所以逐建筑给出，不能按统一公式推导。
+ */
+const slotFaceGroups: Record<
+    number,
+    [number[], number[], number[], number[]]
+> = {
+    // 储物仓·小 (2101)：北(0,1,2) 东(3,4,5) 南(6,7,8) 西(9,10,11)
+    2101: [
+        [0, 1, 2],
+        [3, 4, 5],
+        [6, 7, 8],
+        [9, 10, 11],
+    ],
+    // 储物仓·大 (2102)
+    2102: [
+        [0, 1, 2],
+        [3, 4, 5],
+        [6, 7, 8],
+        [9, 10, 11],
+    ],
+    // 电弧熔炉 (2302)：角 slot 与相邻面边界 slot 坐标完全重合
+    2302: [
+        [0, 1, 2],
+        [3, 4, 5],
+        [6, 7, 8],
+        [9, 10, 11],
+    ],
+    // 制造台 Mk.I (2303)：角 slot 坐标本身不重合，分组与几何法一致，此处显式固定
+    2303: [
+        [0, 1, 2],
+        [3, 4, 5],
+        [6, 7, 8],
+        [9, 10, 11],
+    ],
+    // 矩阵研究站 (2901)：编号绕向与储物仓相反（东面是 9/10/11）
+    2901: [
+        [0, 1, 2],
+        [9, 10, 11],
+        [6, 7, 8],
+        [3, 4, 5],
+    ],
+};
+
+/** 面索引：0=+y(北) 1=+x(东) 2=-y(南) 3=-x(西) */
+export type SlotFaceIndex = 0 | 1 | 2 | 3;
+
+/** 取建筑的显式面分组表（含同款模型别名）；无表返回 null */
+export function slotFaceGroupsOf(
+    itemId: number
+): [number[], number[], number[], number[]] | null {
+    const alias = slotAliases[itemId];
+    return slotFaceGroups[alias ?? itemId] ?? null;
+}
+
+/** 方向向量 → 面索引（主轴取大） */
+function faceIndexOf(dir: SlotPos): SlotFaceIndex {
+    if (Math.abs(dir.x) >= Math.abs(dir.y)) return dir.x >= 0 ? 1 : 3;
+    return dir.y >= 0 ? 0 : 2;
+}
+
+/** slot 编号 → 所属面索引（0..3）；无分组表或 slot 未标定返回 -1 */
+export function slotFaceOf(itemId: number, slot: number): number {
+    const groups = slotFaceGroupsOf(itemId);
+    if (groups === null) return -1;
+    for (let f = 0; f < groups.length; f++) {
+        if (groups[f].indexOf(slot) >= 0) return f;
+    }
+    return -1;
+}
+
+/**
  * 求**属于某个面**的 slot 编号列表。
  *
- * 不能用"主轴取大"分组：方建筑（电弧熔炉 3.2×3.2）与模型在选盒内偏移的建筑
- * （火力发电厂）角 slot 的横纵坐标几乎相等或大小关系相反，按主轴分组会把它们
+ * 有显式面分组表的建筑（储物仓 / 电弧熔炉 / 制造台 / 矩阵研究站）直接按表返回，
+ * 保证"四边各三个"且角 slot 归属唯一；其余建筑退回几何极值法。
+ *
+ * 几何法本身不能用"主轴取大"分组：方建筑（电弧熔炉 3.2×3.2）与模型在选盒内偏移的
+ * 建筑（火力发电厂）角 slot 的横纵坐标几乎相等或大小关系相反，按主轴分组会把它们
  * 归错面——真实蓝图里分拣器从 -y 侧接入熔炉时挂的是角 slot 8 而不是中间 slot 7。
  *
  * @param dir 面法线方向（建筑 yaw=0 局部系，不必归一化）
@@ -263,6 +351,13 @@ export const FACE_TOL = 0.03;
  */
 export function faceSlotIndices(itemId: number, dir: SlotPos): number[] {
     const slots = getBuildingSlots(itemId);
+    const groups = slotFaceGroupsOf(itemId);
+    if (groups !== null) {
+        // 未标定（null）的 slot 不计入
+        return groups[faceIndexOf(dir)].filter(
+            (i) => slots[i] !== null && slots[i] !== undefined
+        );
+    }
     const onX = Math.abs(dir.x) >= Math.abs(dir.y);
     const sign = (onX ? dir.x : dir.y) >= 0 ? 1 : -1;
     const proj = (s: SlotPos) => sign * (onX ? s.x : s.y);
@@ -276,6 +371,35 @@ export function faceSlotIndices(itemId: number, dir: SlotPos): number[] {
         if (s !== null && extreme - proj(s) <= FACE_TOL) out.push(i);
     }
     return out;
+}
+
+/**
+ * 显示用 slot 标记内缩量（格）：角 slot 与其相邻面的边界 slot 在蓝图数据里坐标
+ * **逐位相同**，直接按真实坐标画标记会两两重叠、看起来只有 8 个点。为了让 UI 上
+ * 呈现游戏里的"四边各三个"，绘制时把每个 slot 沿**它所属的面**向面中心收缩此距离。
+ * 只影响标记位置，连接用的端点坐标仍取 {@link getBuildingSlots} 原值。
+ */
+export const SLOT_MARKER_FACE_INSET = 0.18;
+
+/**
+ * slot 标记的**显示坐标**（建筑 yaw=0 局部系）。
+ * 有面分组表的建筑：沿所属面方向向面中心收缩 {@link SLOT_MARKER_FACE_INSET}；
+ * 其余建筑与 {@link getBuildingSlots} 相同。
+ * @returns null = 该 slot 未标定
+ */
+export function slotDisplayPos(
+    itemId: number,
+    slot: number,
+    inset: number = SLOT_MARKER_FACE_INSET
+): SlotPos | null {
+    const s = getBuildingSlots(itemId)[slot];
+    if (s === null || s === undefined) return null;
+    const face = slotFaceOf(itemId, slot);
+    if (face < 0) return s;
+    const shrink = (v: number) =>
+        v - Math.sign(v) * Math.min(Math.abs(v), inset);
+    if (face === 0 || face === 2) return { x: shrink(s.x), y: s.y };
+    return { x: s.x, y: shrink(s.y) };
 }
 
 /**
