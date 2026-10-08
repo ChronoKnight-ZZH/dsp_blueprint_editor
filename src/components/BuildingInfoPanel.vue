@@ -87,15 +87,15 @@
             }}</span>
         </div>
     </div>
-    <div v-if="beltParams" class="belt-edit">
+    <div v-if="isBeltBuilding" class="belt-edit">
         <div class="belt-row">
             <label>{{ t("图标") }}</label>
             <ItemSelect
-                :itemId="beltParams.iconId > 0 ? beltParams.iconId : null"
+                :itemId="beltIconId > 0 ? beltIconId : null"
                 @update:itemId="onBeltIcon"
             />
             <button
-                v-if="beltParams.iconId > 0"
+                v-if="beltIconId > 0"
                 class="clear-btn"
                 type="button"
                 @click="clearBeltIcon"
@@ -109,7 +109,7 @@
                 type="number"
                 min="0"
                 class="count-input"
-                :value="beltParams.count"
+                :value="beltCount"
                 @change="onBeltCount"
             />
         </div>
@@ -349,11 +349,21 @@ const accModeText = computed(() => {
 });
 
 const beltVersion = ref(0);
-const beltParams = computed(() => {
+/**
+ * 传送带参数：游戏里"没设过图标/数量"的传送带**没有 parameters 字段**，
+ * 但工具必须能让用户给这类传送带设置图标与数量，所以 UI 按 null → 0/0 显示，
+ * 真正写入时由 SetBeltParamsCommand 按需创建 `{iconId, count}`（与游戏编码一致）。
+ */
+const isBeltBuilding = computed(() => isBelt(props.building.itemId));
+const beltIconId = computed(() => {
     beltVersion.value;
-    if (isBelt(props.building.itemId) && props.building.parameters)
-        return props.building.parameters as BeltParameters;
-    return null;
+    const p = props.building.parameters as BeltParameters | null;
+    return p ? p.iconId : 0;
+});
+const beltCount = computed(() => {
+    beltVersion.value;
+    const p = props.building.parameters as BeltParameters | null;
+    return p ? p.count : 0;
 });
 commandQueue.updater.updateBeltIcon.onMounted((b) => {
     if (b === props.building) beltVersion.value++;

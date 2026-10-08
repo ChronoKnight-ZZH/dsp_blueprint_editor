@@ -189,8 +189,10 @@ function collectOccupiedBeltOffsets(
  * - 十字形（modelIndex 38/40）：0=+y, 1=+x, 2=-y, 3=-x，共四口
  * - 一字形（modelIndex 39）：仅长轴两端开口，0=A 端(+y)，2=B 端(-y)；
  *   0/1、2/3 是同一端的两层高度（平面架接不区分），短轴两侧封闭 → 返回 -1
+ *
+ * 导出供"分流器口优先输入/输出"功能复用（见 `splitterPorts.ts`）。
  */
-function splitterPortAt(
+export function splitterPortAt(
     sp: BlueprintBuilding,
     partner: BlueprintBuilding | null,
     fallback?: GridPoint
@@ -215,7 +217,7 @@ function splitterPortAt(
 }
 
 /** 按 index 查找建筑（buildings 数组下标与 index 不一定一致，如测试传入子集） */
-function findByIndex(
+export function findByIndex(
     buildings: readonly BlueprintBuilding[],
     index: number
 ): BlueprintBuilding | null {

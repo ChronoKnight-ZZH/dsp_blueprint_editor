@@ -28,6 +28,11 @@ export class Updater {
     updateBeltIconSubscript = new EventDispatcher<[b: BlueprintBuilding]>();
     updateSorterIcon = new EventDispatcher<[b: BlueprintBuilding]>();
 
+    /**
+     * 建筑信息面板的增量刷新通道（当前用于四向分流器）：
+     * "优先输入/输出"与"筛选物品"改动后派发，SpitterInfo 借此 bump 版本号重算
+     * （`props.building` 是原始对象，直接改字段不会触发 Vue 响应式）。
+     */
     updateStationInfo = new EventDispatcher<[b: BlueprintBuilding]>();
 
     /** 清空所有 dispatcher 的回调（场景重建前调用，避免陈旧回调引用已销毁的 AllBuildings） */

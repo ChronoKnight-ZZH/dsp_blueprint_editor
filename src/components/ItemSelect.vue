@@ -95,6 +95,15 @@ const selected = (i: Item | null) => {
     openModal.value = false;
     emit("update:itemId", i ? i.id : null);
 };
+
+/**
+ * 供外部（3D 视图里"分流器优先输出口二次左键设置筛选"）直接弹出物品选择弹窗，
+ * 无需用户再去点这个图标触发器。
+ */
+const open = () => {
+    openModal.value = true;
+};
+defineExpose({ open });
 </script>
 
 <style lang="scss">

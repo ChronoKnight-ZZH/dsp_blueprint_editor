@@ -39,3 +39,4 @@ const { fromStr } = require(path.join(srcDir, 'blueprint', 'parser'));
 
 const input = fs.readFileSync(file, 'utf8').trim();
 process.stdout.write(JSON.stringify(fromStr(input), null, 2));
+export {};

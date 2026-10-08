@@ -36,6 +36,7 @@ import {
     gridAreas,
     calcBuildingTrans,
     PositionedBlueprint,
+    HEIGHT_GRID_SIZE,
 } from "@/blueprint/planet";
 import { buildReforms } from "@/blueprint/reform";
 import { buildingMeta, noIconBuildings } from "@/data/building";
@@ -616,14 +617,20 @@ import { Scene, PerspectiveCamera, SphereGeometry, AmbientLight } from "three";
 import { PlanetMapControls } from "@/PlanetMapControls";
 import { attachCamera, attachRenderer } from "@/utils";
 import { usePlacement, resetToIdle } from "@/editor/placementState";
-import { planetToLocal } from "@/blueprint/area";
+import { planetToLocal, ROOT_GRID_SIZE, type AreaGridOrigin } from "@/blueprint/area";
 import { createBuilding, CreateBuildingCommand } from "@/blueprint/create";
 import {
     buildBeltLine,
     CreateBeltLineCommand,
-    rasterizeLine,
     type BeltPathMode,
+    type BeltPortEnd,
 } from "@/blueprint/beltLine";
+import {
+    hasBeltPorts,
+    pickBeltPort,
+    portWorldNormal,
+    portWorldOffset,
+} from "@/data/beltPorts";
 import { createSorterBetween, collectOccupiedSlots } from "@/blueprint/sorter";
 import {
     PaintReformCellCommand,
@@ -631,11 +638,12 @@ import {
 } from "@/blueprint/reformEdit";
 import { getBuildingSlots, slotDisplayPos } from "@/data/buildingSlots";
 import {
-    inheritLabMode,
+    inheritLabSettings,
     isStackChild,
     linkStack,
     requiresBase,
     stackBaseFor,
+    stackYawFor,
     stackedZ,
 } from "@/data/stacking";
 
@@ -800,6 +808,8 @@ watchEffect(() => {
 });
 
 let beltStart: { x: number; y: number } | null = null;
+/** A 点落在建筑口上时的口绑定（取出：建筑→带）；null = 普通空格/带格起点 */
+let beltStartPort: BeltPortEnd | null = null;
 const sorterSource = ref<number | null>(null);
 
 // 传送带路径走法（R 键循环切换）：latFirst → lonFirst → straight → latFirst
@@ -1073,6 +1083,7 @@ watchEffect(() => {
     placement.selectedItemId;
     if (!isPlacingBelt()) {
         beltStart = null;
+        beltStartPort = null;
         hideBeltPreview();
     }
     if (!isPlacingSorter()) {
@@ -1130,13 +1141,96 @@ onMounted(() => {
         setupRay(e);
         return ray.intersectSphere(planetSphere, v);
     };
+    /**
+     * 编辑期根区域（放置目标区域）的星球定位。
+     * 必须与 `b.value.pos` 同源：`calcBuildingTrans` 就是用它把局部格换成世界坐标的，
+     * 光标→局部格若用别的前提（例如"根区域原点恒为 -80"）就会与落位整体错开。
+     */
+    const editAreaOrigin = (): AreaGridOrigin | null =>
+        b.value === null ? null : b.value.pos.areas[0];
+    /**
+     * 屏幕位置 → 命中的建筑与命中点高度格（用于区分分流器的地面层/上层口）。
+     * 高度格 = (命中点到星球中心的距离 − R) / (4/3)，与 `calcBuildingTrans` 同一套换算。
+     */
+    const pickBuildingHit = (
+        e: PointerCoords
+    ): { index: number; z: number } | null => {
+        if (b.value === null) return null;
+        setupRay(e);
+        const intersects = b.value.bvh.raycast(ray);
+        if (intersects.length === 0) return null;
+        const hitPlanet = ray.intersectSphere(planetSphere, v);
+        if (
+            hitPlanet !== null &&
+            hitPlanet.distanceToSquared(ray.origin) <
+                intersects[0].distanceSquared
+        )
+            return null;
+        const p = ray.origin
+            .clone()
+            .addScaledVector(ray.direction, Math.sqrt(intersects[0].distanceSquared));
+        return {
+            index: intersects[0].index,
+            z: (p.length() - R) / HEIGHT_GRID_SIZE,
+        };
+    };
+    /**
+     * 光标 → 建筑传送带口绑定（串联用）。
+     * 命中的建筑有口表、且光标在某个口附近（`pickBeltPort` 的 limit）时返回该口；
+     * 否则返回 null（当作普通空格/带格处理）。
+     */
+    const portEndAt = (e: PointerCoords): BeltPortEnd | null => {
+        const queue = commandQueue.value;
+        if (!queue || b.value === null) return null;
+        const hit = pickBuildingHit(e);
+        if (hit === null) return null;
+        const building = queue.data.buildings[hit.index];
+        if (!building) return null;
+        if (!hasBeltPorts(building.itemId, building.modelIndex)) return null;
+        const a = anchorOffset(e);
+        if (a === null) return null;
+        const bp = building.localOffset[0];
+        // 经向环形坐标取短弧
+        let dx = a.x - bp.x;
+        if (dx > ROOT_GRID_SIZE / 2) dx -= ROOT_GRID_SIZE;
+        else if (dx < -ROOT_GRID_SIZE / 2) dx += ROOT_GRID_SIZE;
+        const dy = a.y - bp.y;
+        const area = b.value.pos.areas[building.areaIndex];
+        const cosLat = Math.cos(
+            (area.latitude + bp.y) * ((2 * Math.PI) / (SEGMENT * 5))
+        );
+        const yaw = building.yaw[0];
+        const r = (yaw * Math.PI) / 180;
+        // 网格偏移 → 建筑局部系（x 归一到赤道基准）
+        const lx = (dx * Math.cos(r) - dy * Math.sin(r)) * cosLat;
+        const ly = dx * Math.sin(r) + dy * Math.cos(r);
+        const picked = pickBeltPort(
+            building.itemId,
+            building.modelIndex,
+            lx,
+            ly,
+            hit.z
+        );
+        if (!picked) return null;
+        const off = portWorldOffset(picked.port, yaw, cosLat);
+        const n = portWorldNormal(picked.port, yaw);
+        return {
+            building,
+            slot: picked.slot,
+            point: { x: bp.x + off.x, y: bp.y + off.y, z: off.z },
+            nx: n.x,
+            ny: n.y,
+        };
+    };
     /** 屏幕点击 → 吸附后的网格偏移（placeBuilding 与预览共用，保证坐标逻辑一致） */
     const placementOffset = (e: PointerCoords) => {
         const hit = screenToPlanet(e);
         if (hit === null) return null;
+        const area = editAreaOrigin();
+        if (area === null) return null;
         const latGrid = Math.asin(hit.y / R) * RAD_TO_GRID;
         const lonGrid = Math.atan2(hit.x, hit.z) * RAD_TO_GRID;
-        const offset = planetToLocal(latGrid, lonGrid);
+        const offset = planetToLocal(latGrid, lonGrid, area);
         if (!placement.freePlacement) {
             offset.x = Math.floor(offset.x);
             offset.y = Math.floor(offset.y);
@@ -1171,14 +1265,18 @@ onMounted(() => {
         }
         // 径向投影回球面后再转网格（建筑命中点浮在地表上方）
         anchorPoint.normalize().multiplyScalar(R);
+        const area = editAreaOrigin();
+        if (area === null) return null;
         const latGrid = Math.asin(anchorPoint.y / R) * RAD_TO_GRID;
         const lonGrid = Math.atan2(anchorPoint.x, anchorPoint.z) * RAD_TO_GRID;
-        return planetToLocal(latGrid, lonGrid);
+        return planetToLocal(latGrid, lonGrid, area);
     };
     /**
      * 放置建筑。
-     * 可堆叠建筑（储物仓 / 储液罐 / 矩阵研究站 / 四向分流器）在光标落在底座上时
-     * **叠到该列最上层**（z = 底座 z + 一层高度，x/y 对齐底座中心，写 15/14 堆叠端口）。
+     * 可堆叠建筑（储物仓 / 储液罐 / 矩阵研究站 / 四向分流器 / 战场分析基站）在光标落在
+     * 底座上时**叠到该列最上层**（z = 底座 z + 一层高度，x/y 对齐底座中心，写 15/14 端口）；
+     * 研究站还会沿用底座的模式与配方（一列研究站共享设置）；
+     * 底座对朝向有要求时（分析基站上的大箱子必须转 90°）按 `stackYawFor` 强制对齐。
      * 物流配送器（2107）没有箱子底座时直接拒绝（游戏：只能放在箱盖上方）。
      */
     const placeBuilding = (e: PointerCoords) => {
@@ -1203,12 +1301,12 @@ onMounted(() => {
                       y: parent.localOffset[0].y,
                   }
                 : offset,
-            placement.yaw,
+            (parent ? stackYawFor(parent, itemId) : null) ?? placement.yaw,
             stackedZ(parent, itemId)
         );
         if (parent) {
             linkStack(building, parent);
-            inheritLabMode(building, parent);
+            inheritLabSettings(building, parent);
         }
         try {
             queue.push(new CreateBuildingCommand(building));
@@ -1268,8 +1366,8 @@ onMounted(() => {
             return;
         }
         const itemId = placement.selectedItemId;
-        // 预演堆叠：底座高度 + 对齐底座中心；只能放在底座上的建筑（物流配送器）
-        // 没有箱子时不显示预览（点了也放不下去）
+        // 预演堆叠：底座高度 + 对齐底座中心 + 底座要求的朝向；
+        // 只能放在底座上的建筑（物流配送器）没有箱子时不显示预览（点了也放不下去）
         const parent = placeBaseFor(e, offset, itemId);
         if (requiresBase(itemId) && parent === null) {
             previewVisible.value = false;
@@ -1284,7 +1382,7 @@ onMounted(() => {
                       y: parent.localOffset[0].y,
                   }
                 : offset,
-            placement.yaw,
+            (parent ? stackYawFor(parent, itemId) : null) ?? placement.yaw,
             stackedZ(parent, itemId)
         );
         const trans = calcBuildingTrans(R, b.value.pos, fake)[0];
@@ -1379,7 +1477,7 @@ onMounted(() => {
         queue.push(new PaintReformCellCommand(0, x, y, placement.reformColorSlot));
     };
 
-    /** 未设 A 点时：在鼠标位置显示单个传送带方块 */
+    /** 未设 A 点时：在鼠标位置显示单个传送带方块（悬停建筑口时贴到口上） */
     const showSingleBeltPreview = (e: PointerCoords) => {
         if (
             b.value === null ||
@@ -1387,13 +1485,17 @@ onMounted(() => {
             placement.selectedModelIndex === null
         )
             return;
-        const offset = placementOffset(e);
+        const port = portEndAt(e);
+        const offset = port
+            ? { x: port.point.x, y: port.point.y }
+            : placementOffset(e);
         if (offset === null) return;
         const fake = createBuilding(
             placement.selectedItemId,
             placement.selectedModelIndex,
             offset,
-            placement.yaw
+            placement.yaw,
+            port ? port.point.z : 0
         );
         const t = calcBuildingTrans(R, b.value.pos, fake)[0];
         beltPreviewM.multiplyMatrices(t, beltLift);
@@ -1413,7 +1515,7 @@ onMounted(() => {
             return;
         const cur = placementOffset(e);
         if (cur === null) return;
-
+        const endPort = portEndAt(e);
         // straight 模式：矢量直线预览（沿球面采样，非阶梯状位图）
         if (beltPathMode === "straight") {
             const startPos = gridToWorld(p0);
@@ -1448,17 +1550,21 @@ onMounted(() => {
             return;
         }
 
-        // latFirst / lonFirst：阶梯状传送带方块预览
-        const pts = rasterizeLine(p0.x, p0.y, cur.x, cur.y, beltPathMode);
-        const n = Math.min(pts.length, BELT_PREVIEW_CAP);
+        // latFirst / lonFirst：阶梯状传送带方块预览（复用与落位同一套路径构造，
+        // 起点/终点接建筑口时预览也会贴到口上）
+        const previewBelts = buildBeltLine(
+            placement.selectedItemId,
+            placement.selectedModelIndex,
+            p0,
+            cur,
+            placement.yaw,
+            beltPathMode,
+            beltStartPort,
+            endPort
+        );
+        const n = Math.min(previewBelts.length, BELT_PREVIEW_CAP);
         for (let i = 0; i < n; i++) {
-            const fake = createBuilding(
-                placement.selectedItemId,
-                placement.selectedModelIndex,
-                pts[i],
-                0
-            );
-            const t = calcBuildingTrans(R, b.value.pos, fake)[0];
+            const t = calcBuildingTrans(R, b.value.pos, previewBelts[i])[0];
             beltPreviewM.multiplyMatrices(t, beltLift);
             beltPreviewMesh.setMatrixAt(i, beltPreviewM);
         }
@@ -1486,21 +1592,29 @@ onMounted(() => {
             placement.selectedModelIndex === null
         )
             return;
-        const end = placementOffset(e);
+        // B 点落在建筑口上 → 该口作为"送入"端点（带终止于建筑）
+        const endPort = portEndAt(e);
+        const end = endPort
+            ? { x: Math.round(endPort.point.x), y: Math.round(endPort.point.y) }
+            : placementOffset(e);
         if (end === null) return;
+        const startPort = beltStartPort;
         const belts = buildBeltLine(
             placement.selectedItemId,
             placement.selectedModelIndex,
             start,
             end,
             placement.yaw,
-            beltPathMode
+            beltPathMode,
+            startPort,
+            endPort
         );
         if (belts.length === 0) return;
         beltStart = null;
+        beltStartPort = null;
         hideBeltPreview();
         try {
-            queue.push(new CreateBeltLineCommand(belts));
+            queue.push(new CreateBeltLineCommand(belts, startPort, endPort));
         } catch {
             // Outside equator band — ignore
         }
@@ -1550,9 +1664,16 @@ onMounted(() => {
         const isDrag = dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD;
         // 传送带：拖拽（旋转地图）时不处理；非拖拽点击在 A/B 状态间切换
         if (isPlacingBelt() && !isDrag) {
-            if (beltStart === null)
-                beltStart = placementOffset(e); // 第一次点击：设为 A 点
-            else commitBeltLine(e); // 第二次点击：A→B 放置
+            if (beltStart === null) {
+                // 第一次点击：设为 A 点；落在建筑口上则记下"取出"端点
+                beltStartPort = portEndAt(e);
+                beltStart = beltStartPort
+                    ? {
+                          x: Math.round(beltStartPort.point.x),
+                          y: Math.round(beltStartPort.point.y),
+                      }
+                    : placementOffset(e);
+            } else commitBeltLine(e); // 第二次点击：A→B 放置
         }
     };
     const onPointerMove = (e: PointerCoords) => {
@@ -1646,6 +1767,7 @@ onMounted(() => {
         if (isPlacingBelt() && beltStart !== null) {
             e.preventDefault();
             beltStart = null;
+            beltStartPort = null;
             hideBeltPreview();
             return;
         }

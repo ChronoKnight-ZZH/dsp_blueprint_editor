@@ -1,4 +1,4 @@
-import { BlueprintBuilding, BlueprintData } from "./parser";
+import { BlueprintBuilding, BlueprintData, IODir } from "./parser";
 import { Command } from "@/command";
 import { ensureAreaFor, ROOT_GRID_SIZE } from "./area";
 import { createBuilding } from "./create";
@@ -178,10 +178,72 @@ function cellYaw(
 }
 
 /**
+ * 传送带端点绑定的建筑口（起/止各一个，见 `@/data/beltPorts` 的标定表）。
+ * 起点的口 = **取出**（建筑→带：`inputObjIdx/inputFromSlot`），
+ * 终点的口 = **送入**（带→建筑：`outputObjIdx/outputToSlot`），与游戏一致；
+ * 建筑自身不写反向引用（真实蓝图里建筑的 out/in 恒为 -1/0/0/0）。
+ */
+export interface BeltPortEnd {
+    /** 目标建筑（其 `index` 必须是当前蓝图里的值） */
+    building: BlueprintBuilding;
+    /** 建筑上的口编号（游戏 slot） */
+    slot: number;
+    /** 口的网格坐标：可为分数（口不在整格上），z 为高度格 */
+    point: { x: number; y: number; z: number };
+    /** 口的朝外法线（网格轴向单位向量） */
+    nx: number;
+    /** 口的朝外法线（网格轴向单位向量） */
+    ny: number;
+}
+
+/** 口所在格的**整数身份**（经向回绕到 0..ROOT_GRID_SIZE） */
+function portCell(point: { x: number; y: number }): { x: number; y: number } {
+    return {
+        x: wrapX(Math.round(point.x)),
+        y: Math.round(point.y),
+    };
+}
+
+function wrapX(x: number): number {
+    return ((x % ROOT_GRID_SIZE) + ROOT_GRID_SIZE) % ROOT_GRID_SIZE;
+}
+
+/** 口格的**记录位置**写成口的精确坐标（游戏即如此：带端贴在建筑口上，位置是分数） */
+function placeAtPort(
+    belt: BlueprintBuilding,
+    point: { x: number; y: number; z: number }
+): void {
+    const x = wrapX(point.x);
+    for (const p of belt.localOffset) {
+        p.x = x;
+        p.y = point.y;
+        p.z = point.z;
+    }
+}
+
+/** 已存在传送带按**取整**后的格判定（口格的记录位置是分数） */
+function cellKey(b: BlueprintBuilding): string {
+    return `${wrapX(Math.round(b.localOffset[0].x))},${Math.round(
+        b.localOffset[0].y
+    )}`;
+}
+
+/** 判断某格上是否已有传送带（同 itemId 家族：2001/2002/2003） */
+function isBelt(b: BlueprintBuilding): boolean {
+    return b.itemId >= 2001 && b.itemId <= 2003;
+}
+
+/**
  * 由拖拽起止网格点构造一条传送带（尚未入库）。
  * 每格 yaw = 进入/离开方向的平分角（拐角处为 45° 斜角，与游戏一致）；
  * 末格延续最后一段方向，单点时退回 @param fallbackYaw。
  * 相邻格之间的 outputObjIdx 在命令执行、index 分配后建立。
+ *
+ * 端点绑定建筑口时（@param startPort / @param endPort）：
+ * - 口格的**身份**取 `round(口坐标)`，**记录位置**写成口的精确坐标；
+ * - 口格的外侧一格固定为 `口格 + 口法线`，保证带沿口的面离开/进入（游戏要求）；
+ * - 整条带的高度 = 口的高度（接到 z≠0 的口时整条带在该层，见 `@/data/beltPorts`）；
+ * - 连接字段（out/in + slot + offset）在构造时就写好，由命令分配 index 后生效。
  * @param pathMode 路径走法模式
  */
 export function buildBeltLine(
@@ -190,10 +252,23 @@ export function buildBeltLine(
     p0: { x: number; y: number },
     p1: { x: number; y: number },
     fallbackYaw: number,
-    pathMode: BeltPathMode = "latFirst"
+    pathMode: BeltPathMode = "latFirst",
+    startPort: BeltPortEnd | null = null,
+    endPort: BeltPortEnd | null = null
 ): BlueprintBuilding[] {
-    const pts = rasterizeLine(p0.x, p0.y, p1.x, p1.y, pathMode);
-    const belts = pts.map((p) => createBuilding(itemId, modelIndex, p, 0));
+    const z = startPort ? startPort.point.z : endPort ? endPort.point.z : 0;
+    const g0 = startPort ? portCell(startPort.point) : { ...p0 };
+    const g1 = endPort ? portCell(endPort.point) : { ...p1 };
+    const b0 = startPort
+        ? { x: wrapX(g0.x + startPort.nx), y: g0.y + startPort.ny }
+        : g0;
+    const b1 = endPort
+        ? { x: wrapX(g1.x + endPort.nx), y: g1.y + endPort.ny }
+        : g1;
+    const pts = rasterizeLine(b0.x, b0.y, b1.x, b1.y, pathMode);
+    if (startPort) pts.unshift(g0);
+    if (endPort) pts.push(g1);
+    const belts = pts.map((p) => createBuilding(itemId, modelIndex, p, 0, z));
     for (let i = 0; i < belts.length; i++) {
         const yaw = cellYaw(
             pts[i - 1] ?? null,
@@ -206,12 +281,24 @@ export function buildBeltLine(
         belts[i].inputToSlot = 1;
         belts[i].outputToSlot = i < belts.length - 1 ? 1 : 0;
     }
+    // 口格：记录位置改成口的精确坐标 + 写连接字段
+    if (startPort) {
+        const first = belts[0];
+        placeAtPort(first, startPort.point);
+        first.inputObjIdx = startPort.building.index;
+        first.inputFromSlot = startPort.slot;
+        first.inputToSlot = 1;
+        first.inputOffset = 0;
+    }
+    if (endPort) {
+        const last = belts[belts.length - 1];
+        placeAtPort(last, endPort.point);
+        last.outputObjIdx = endPort.building.index;
+        last.outputToSlot = endPort.slot;
+        last.outputFromSlot = 0;
+        last.outputOffset = 0;
+    }
     return belts;
-}
-
-/** 判断某格上是否已有传送带（同 itemId 家族：2001/2002/2003） */
-function isBelt(b: BlueprintBuilding): boolean {
-    return b.itemId >= 2001 && b.itemId <= 2003;
 }
 
 /**
@@ -237,27 +324,49 @@ export class CreateBeltLineCommand implements Command {
     private added = 0;
     /** 本次建立的路径（新建 + 复用的对象，按路径顺序） */
     private path: BlueprintBuilding[] = [];
+    /** 物流站口方向改动（撤销时逐口还原） */
+    private portDirChanges: {
+        building: BlueprintBuilding;
+        slot: number;
+        prev: number;
+    }[] = [];
+    /** 起点/终点是否真的接上了建筑口（被截断时不算） */
+    private connectedStart = false;
+    private connectedEnd = false;
 
-    constructor(private readonly belts: BlueprintBuilding[]) {}
+    constructor(
+        private readonly belts: BlueprintBuilding[],
+        /** 起点绑定的建筑口（取出：建筑→带） */
+        private readonly startPort: BeltPortEnd | null = null,
+        /** 终点绑定的建筑口（送入：带→建筑） */
+        private readonly endPort: BeltPortEnd | null = null
+    ) {}
 
     do(data: BlueprintData): void {
         this.reused = [];
         this.added = 0;
         this.path = [];
+        this.portDirChanges = [];
+        this.connectedStart = false;
+        this.connectedEnd = false;
         if (this.belts.length === 0) return;
         const root = data.areas[0];
         this.prevSizeX = root.size.x;
 
-        const key = (b: BlueprintBuilding) =>
-            `${b.localOffset[0].x},${b.localOffset[0].y}`;
         const existing = new Map<string, BlueprintBuilding>();
         for (const b of data.buildings) {
-            if (isBelt(b)) existing.set(key(b), b);
+            if (isBelt(b)) existing.set(cellKey(b), b);
         }
 
-        for (const b of this.belts) {
-            const hit = existing.get(key(b));
+        for (let i = 0; i < this.belts.length; i++) {
+            const b = this.belts[i];
+            const portBound =
+                (i === 0 && this.startPort !== null) ||
+                (i === this.belts.length - 1 && this.endPort !== null);
+            const hit = existing.get(cellKey(b));
             if (hit !== undefined) {
+                // 口格已被占用：该口已经有带（游戏里一个口只能接一条），本次拖拽截断
+                if (portBound) break;
                 // 该格已在某条线路**中间**（已有下游）：再接入会形成两个上游，游戏不支持
                 // （需要分流器/集装机）。此时截断本次拖拽：不改动已有格、也不再新建后续格，
                 // 保证老线路完整且不产生非法数据。
@@ -273,7 +382,7 @@ export class CreateBeltLineCommand implements Command {
             b.areaIndex = areaIndex;
             b.index = data.buildings.length;
             data.buildings.push(b);
-            existing.set(key(b), b);
+            existing.set(cellKey(b), b);
             this.path.push(b);
             this.added++;
         }
@@ -288,8 +397,29 @@ export class CreateBeltLineCommand implements Command {
         // 末格终结：与游戏一致 outputObjIdx=-1、outputToSlot=0
         // （复用格必无下游，见上面的截断规则）
         const last = this.path[this.path.length - 1];
-        last.outputObjIdx = -1;
-        last.outputToSlot = 0;
+        const lastIsEndPort =
+            this.endPort !== null &&
+            this.belts.length > 0 &&
+            last === this.belts[this.belts.length - 1];
+        if (lastIsEndPort) {
+            // 送入建筑口：连接字段由 buildBeltLine 写好，这里保留（不能清成 -1）
+            last.outputObjIdx = this.endPort!.building.index;
+            last.outputToSlot = this.endPort!.slot;
+            last.outputFromSlot = 0;
+            last.outputOffset = 0;
+            this.connectedEnd = true;
+        } else {
+            last.outputObjIdx = -1;
+            last.outputToSlot = 0;
+        }
+        // 起点绑定建筑口：buildBeltLine 已写好 inputObjIdx/inputFromSlot
+        const firstIsStartPort =
+            this.startPort !== null &&
+            this.path[0] === this.belts[0] &&
+            this.belts[0].inputObjIdx >= 0;
+        if (firstIsStartPort) this.connectedStart = true;
+        if (this.connectedStart || this.connectedEnd)
+            this.syncStationPorts(data);
 
         // 复用格：yaw 按**实际**上下游重算（多次拖拽拼接时进入方向来自上一次拖拽）
         const byIndex = new Map<number, BlueprintBuilding>();
@@ -319,7 +449,52 @@ export class CreateBeltLineCommand implements Command {
         }
     }
 
+    /**
+     * 传送带接到物流站口时，站自己的口配置要同步方向：
+     * 出塔（带从站取出）= `dir 1`，入塔（带送入站）= `dir 2`；撤销时逐口还原。
+     * 只有参数里带 `slots` 的建筑（物流站）需要，其余建筑不写反向引用。
+     */
+    private syncStationPorts(data: BlueprintData): void {
+        const bindings: { building: BlueprintBuilding; slot: number; dir: number }[] =
+            [];
+        if (this.connectedStart && this.startPort)
+            bindings.push({
+                building: this.startPort.building,
+                slot: this.startPort.slot,
+                dir: IODir.Output,
+            });
+        if (this.connectedEnd && this.endPort)
+            bindings.push({
+                building: this.endPort.building,
+                slot: this.endPort.slot,
+                dir: IODir.Input,
+            });
+        const live = new Set(data.buildings);
+        for (const b of bindings) {
+            if (!live.has(b.building)) continue;
+            const params = b.building.parameters as
+                | { slots?: { dir: number }[] }
+                | null;
+            const slot = params?.slots?.[b.slot];
+            if (!slot) continue;
+            this.portDirChanges.push({
+                building: b.building,
+                slot: b.slot,
+                prev: slot.dir,
+            });
+            slot.dir = b.dir;
+        }
+    }
+
     undo(data: BlueprintData): void {
+        for (const c of this.portDirChanges) {
+            const params = c.building.parameters as
+                | { slots?: { dir: number }[] }
+                | null;
+            const slot = params?.slots?.[c.slot];
+            if (slot) slot.dir = c.prev;
+        }
+        this.portDirChanges = [];
         for (let i = 0; i < this.added; i++) data.buildings.pop();
         for (const r of this.reused) r.belt.yaw = [r.yaw[0], r.yaw[1]];
         data.areas[0].size.x = this.prevSizeX;

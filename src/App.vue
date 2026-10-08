@@ -824,17 +824,21 @@ const hotkey = (event: KeyboardEvent) => {
         enterDeleteMode();
         return;
     }
-    // R：放置模式下 —— 传送带切换路径走法、有变形样式的建筑（四向分流器）切换形态，
-    //    其余建筑旋转 90°；按住 Shift 时始终为旋转 90°（变形建筑也能转向）
+    // Tab：切换变形样式（四向分流器 38/39/40 三种形态），仅放置模式下生效，
+    // 并且要吃掉默认的焦点切换行为（3D 画布不应被 Tab 移走焦点）
+    if (event.code === "Tab" && isEdit && placement.mode === "placing") {
+        event.preventDefault();
+        cycleBuildingVariant();
+        return;
+    }
+    // R：传送带切换路径走法，其他建筑旋转 90°（仅在放置模式）
     if (event.code === "KeyR" && isEdit && placement.mode === "placing") {
-        const id = placement.selectedItemId;
-        if (!event.shiftKey && id !== null && isBelt(id)) {
+        if (
+            placement.selectedItemId !== null &&
+            isBelt(placement.selectedItemId)
+        )
             renderer.value?.cycleBeltPathMode();
-            return;
-        }
-        if (!event.shiftKey && id !== null && cycleBuildingVariant() !== null)
-            return;
-        rotateBuilding();
+        else rotateBuilding();
         return;
     }
     // 1-9：切换分类并展开建筑列表

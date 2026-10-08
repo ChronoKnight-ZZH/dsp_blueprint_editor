@@ -6,7 +6,10 @@ import {
     createEmptyBlueprint,
 } from '@/blueprint/create';
 import { Updater } from '@/command';
-import { SetLabResearchModeCommand } from '@/blueprint/setBuildingRecipe';
+import {
+    SetBuildingRecipeCommand,
+    SetLabResearchModeCommand,
+} from '@/blueprint/setBuildingRecipe';
 import {
     BOX_TOP_SLOT,
     STACK_BOTTOM_SLOT,
@@ -18,8 +21,9 @@ import {
     stackColumn,
     stackOffsetFor,
     stackPortDefaults,
+    stackYawFor,
     stackedZ,
-    inheritLabMode,
+    inheritLabSettings,
 } from '@/data/stacking';
 import { isLab, isSplitter } from '@/data/items';
 import { buildingBoxes } from '@/data/building';
@@ -209,30 +213,32 @@ describe('堆叠列与研究模式联动', () => {
         const b = createBuilding(2901, 70, { x: 4, y: 4 }, 0, 3);
         b.index = 1;
         linkStack(b, a);
-        inheritLabMode(b, a);
+        inheritLabSettings(b, a);
         const c = createBuilding(2901, 70, { x: 4, y: 4 }, 0, 6);
         c.index = 2;
         linkStack(c, b);
-        inheritLabMode(c, b);
+        inheritLabSettings(c, b);
         bp.buildings.push(a, b, c);
         return bp;
     }
 
-    test('堆叠时继承"研究模式"（底座处于研究模式才继承）', () => {
+    test('堆叠时沿用底座研究站的研究模式与配方', () => {
         const bp = labColumn();
         for (const b of bp.buildings)
             expect((b.parameters as LabParamerters).researchMode).toBe(
                 ResearchMode.Research
             );
-        // 底座是选择模式 → 不继承
+        // 底座改成"矩阵合成 + 配方 42" → 新叠上去的研究站直接沿用（不限于研究模式）
         (bp.buildings[0].parameters as LabParamerters).researchMode =
-            ResearchMode.None;
+            ResearchMode.Compose;
+        bp.buildings[0].recipeId = 42;
         const d = createBuilding(2901, 70, { x: 4, y: 4 }, 0, 9);
         linkStack(d, bp.buildings[0]);
-        inheritLabMode(d, bp.buildings[0]);
+        inheritLabSettings(d, bp.buildings[0]);
         expect((d.parameters as LabParamerters).researchMode).toBe(
-            ResearchMode.None
+            ResearchMode.Compose
         );
+        expect(d.recipeId).toBe(42);
     });
 
     test('stackColumn 自下而上取整列，且不跟分拣器连接', () => {
@@ -251,23 +257,124 @@ describe('堆叠列与研究模式联动', () => {
         expect(stackColumn(bp.buildings, bp.buildings[0]).length).toBe(3);
     });
 
-    test('点击任意一层改研究模式 → 整列一起改，撤销逐层恢复', () => {
+    test('点击任意一层改研究模式 → 整列的模式与配方一起改，撤销逐层恢复', () => {
         const bp = labColumn();
         const updater = new Updater();
+        // 被点击那一层带着配方 7（整列共享设置：改模式时配方一起同步）
+        bp.buildings[1].recipeId = 7;
         const cmd = new SetLabResearchModeCommand(
             bp.buildings[1],
             ResearchMode.Compose
         );
         cmd.do(bp, updater);
-        for (const b of bp.buildings)
+        for (const b of bp.buildings) {
             expect((b.parameters as LabParamerters).researchMode).toBe(
                 ResearchMode.Compose
             );
+            expect(b.recipeId).toBe(7);
+        }
         cmd.undo(bp, updater);
-        for (const b of bp.buildings)
+        for (const b of bp.buildings) {
             expect((b.parameters as LabParamerters).researchMode).toBe(
                 ResearchMode.Research
             );
+        }
+        expect(bp.buildings.map((b) => b.recipeId)).toEqual([0, 7, 0]);
+    });
+
+    test('研究站改配方 → 整列一起改（一列 = 一台机器）', () => {
+        const bp = labColumn();
+        const updater = new Updater();
+        const cmd = new SetBuildingRecipeCommand(bp.buildings[2], 9);
+        cmd.do(bp, updater);
+        expect(bp.buildings.map((b) => b.recipeId)).toEqual([9, 9, 9]);
+        cmd.undo(bp, updater);
+        expect(bp.buildings.map((b) => b.recipeId)).toEqual([0, 0, 0]);
+    });
+});
+
+describe('战场分析基站（"分析仪"）上叠箱子（游戏样本）', () => {
+    const game = fromStr(
+        fs
+            .readFileSync(
+                'tests/unit/blueprint/fixtures/analyzer_box_game_sample.txt',
+                'utf-8'
+            )
+            .trim()
+    );
+    const [base, box1, box2, dispenser] = game.buildings;
+
+    test('样本结构：分析基站 → 箱子(6) → 箱子(9) → 配送器(11.981)', () => {
+        expect(base.itemId).toBe(3009);
+        expect(box1.itemId).toBe(2102);
+        expect(box2.itemId).toBe(2102);
+        expect(dispenser.itemId).toBe(2107);
+        expect(box1.localOffset[0].z).toBeCloseTo(6, 4);
+        expect(box2.localOffset[0].z).toBeCloseTo(9, 4);
+        expect(dispenser.localOffset[0].z).toBeCloseTo(11.9812433, 3);
+    });
+
+    test('分析基站：只允许大型储物仓，且底座自己不写 14/15 端口（写 0）', () => {
+        expect(stackOffsetFor(3009, 2102)).toBe(6);
+        expect(stackOffsetFor(3009, 2101)).toBeNull(); // 小箱子放不上去
+        expect(stackOffsetFor(3009, 2107)).toBeNull(); // 配送器仍需箱子
+        expect(stackOffsetFor(3009, 2302)).toBeNull();
+        expect(stackPortDefaults(3009)).toBeUndefined();
+        expect([
+            base.outputToSlot,
+            base.outputFromSlot,
+            base.inputFromSlot,
+            base.inputToSlot,
+        ]).toEqual([0, 0, 0, 0]);
+    });
+
+    test('分析基站上的大箱子必须转到底座 yaw + 90°（长方形台面对齐）', () => {
+        // 样本：底座 yaw=0、箱子 yaw=90
+        expect(stackYawFor(base, 2102)).toBe(base.yaw[0] + 90);
+        expect(stackYawFor(base, 2102)).toBe(box1.yaw[0]);
+        // 其他组合没有朝向要求
+        expect(stackYawFor(box1, 2102)).toBeNull();
+        expect(stackYawFor(box1, 2107)).toBeNull();
+        expect(stackYawFor(base, 2107)).toBeNull();
+        // 旋转的底座同样按相对 90° 计算
+        const rotated = createBuilding(3009, 453, { x: 0, y: 0 }, 180);
+        expect(stackYawFor(rotated, 2102)).toBe(270);
+    });
+
+    test('整条链的 z 与堆叠端口字段都能用规则复现', () => {
+        // 分析基站 ← 箱子
+        expect(box1.inputObjIdx).toBe(base.index);
+        expect(stackedZ(base, 2102)).toBeCloseTo(box1.localOffset[0].z, 4);
+        const fake1 = createBuilding(
+            2102,
+            52,
+            { x: 0, y: 0 },
+            stackYawFor(base, 2102)!
+        );
+        linkStack(fake1, base);
+        expect(fake1.yaw[0]).toBe(box1.yaw[0]);
+        expect(fake1.inputFromSlot).toBe(box1.inputFromSlot);
+        expect(fake1.inputToSlot).toBe(box1.inputToSlot);
+        // 箱子 ← 箱子
+        expect(stackedZ(box1, 2102)).toBeCloseTo(box2.localOffset[0].z, 4);
+        // 箱子 ← 配送器（箱盖）
+        expect(stackedZ(box2, 2107)).toBeCloseTo(
+            dispenser.localOffset[0].z,
+            4
+        );
+        const fake2 = createBuilding(2107, 371, { x: 0, y: 0 }, 90);
+        linkStack(fake2, box2);
+        expect(fake2.inputFromSlot).toBe(BOX_TOP_SLOT);
+        expect(fake2.inputToSlot).toBe(dispenser.inputToSlot);
+        expect(fake2.inputFromSlot).toBe(dispenser.inputFromSlot);
+    });
+
+    test('stackBaseFor 能把大箱子叠到分析基站上', () => {
+        const picked = stackBaseFor([base], base, 0, 0, 2102);
+        expect(picked).toBe(base);
+        // 小箱子/配送器都不能直接放在分析基站上
+        expect(stackBaseFor([base], base, 0, 0, 2101)).toBeNull();
+        expect(stackBaseFor([base], base, 0, 0, 2107)).toBeNull();
     });
 });
 

@@ -1,4 +1,49 @@
 <template>
+    <!-- 端口（12 个口）：方向 + 该口携带的物品（小塔 4 栏 / 大塔 5 栏 + 第 6 项空间翘曲器 / 无） -->
+    <div class="building-params station-ports">
+        <h3>{{ t("端口") }}</h3>
+        <div class="port-row" v-for="port in portList" :key="port.slot">
+            <span class="port-slot">{{ t("口") }} {{ port.slot }}</span>
+            <select
+                class="role"
+                :class="portDirClass(port.dir)"
+                :value="port.dir"
+                @change="
+                    (e) =>
+                        setPortDir(
+                            port.slot,
+                            Number((e.target as HTMLSelectElement).value)
+                        )
+                "
+            >
+                <option :value="IODir.None">{{ t("无") }}</option>
+                <option :value="IODir.Output">{{ t("出塔") }}</option>
+                <option :value="IODir.Input">{{ t("入塔") }}</option>
+            </select>
+            <span
+                class="port-item"
+                :class="{ 'port-item-none': portItemId(port.storageIdx) === 0 }"
+            >
+                {{ portItemLabel(port.storageIdx) }}
+            </span>
+            <select
+                class="role"
+                :value="port.storageIdx"
+                @change="
+                    (e) =>
+                        setPortItem(
+                            port.slot,
+                            Number((e.target as HTMLSelectElement).value)
+                        )
+                "
+            >
+                <option v-for="c in portChoices" :key="c" :value="c">
+                    {{ portItemLabel(c) }}
+                </option>
+            </select>
+        </div>
+    </div>
+
     <template v-for="(s, i) in storageList" :key="i">
         <div class="station-storage">
             <ItemSelect
@@ -215,6 +260,7 @@ import {
     BlueprintBuilding,
     StationParameters,
     BlueprintData,
+    IODir,
 } from "@/blueprint/parser";
 import { Command, Updater } from "@/command";
 import { BuildingInfo } from "@/blueprint/buildingInfo";
@@ -324,6 +370,12 @@ import { useI18n } from "vue-i18n";
 import { AdvancedMiningMachineParameters } from "@/blueprint/parser";
 import { isAdvancedMiningMachine, isInterstellarStation } from "@/data/items";
 import { buildingInfoKey, commandQueueKey } from "@/define";
+import { itemName } from "@/i18n";
+import {
+    SetStationPortCommand,
+    stationPortItemChoices,
+    stationPortItemId,
+} from "@/blueprint/setStationPort";
 import ItemSelect from "./ItemSelect.vue";
 import ParamSlider from "./ParamSlider.vue";
 
@@ -354,7 +406,59 @@ const storageList = computed(() => {
     return [...p.value.storage];
 });
 
+// ---------- 端口（普通/星际站 12 个口；大型采矿机 9 个口）----------
+/** 口列表：方向 + 携带物品序号（`slots[i]`） */
+const portList = computed(() => {
+    stateVersion.value;
+    const slots = (props.building.parameters as StationParameters).slots;
+    // 大型采矿机的口数是 9（`AdvancedMiningMachineDesc.numSlots`），普通/星际站 12
+    const count = isAdvancedMiningMachine(props.building.itemId)
+        ? Math.min(9, slots.length)
+        : slots.length;
+    return slots
+        .slice(0, count)
+        .map((s, slot) => ({ slot, dir: s.dir, storageIdx: s.storageIdx }));
+});
 const inter = computed(() => isInterstellarStation(props.building.itemId));
+/** 口可选的物品序号：0=无 / 1..N=物品栏 / 大塔 N+1=空间翘曲器 */
+const portChoices = computed(() =>
+    stationPortItemChoices(p.value.storage, inter.value)
+);
+const portItemId = (storageIdx: number) =>
+    stationPortItemId(p.value.storage, storageIdx, inter.value);
+/** 序号 → 显示文案（第 6 项固定为空间翘曲器；栏位为空也照实显示） */
+const portItemLabel = (storageIdx: number) => {
+    if (storageIdx <= 0) return t("无");
+    const storage = p.value.storage;
+    if (storageIdx <= storage.length) {
+        const id = storage[storageIdx - 1].itemId;
+        return `${storageIdx} · ${id > 0 ? itemName(id) : t("空栏位")}`;
+    }
+    return storageIdx === storage.length + 1 && inter.value
+        ? t("空间翘曲器")
+        : t("无");
+};
+const portDirClass = (dir: number) =>
+    dir === IODir.Output
+        ? "role-supply"
+        : dir === IODir.Input
+        ? "role-demand"
+        : "role-none";
+const setPortDir = (slot: number, dir: number) => {
+    const s = (props.building.parameters as StationParameters).slots[slot];
+    if (s.dir === dir) return;
+    commandQueue.push(
+        new SetStationPortCommand(props.building, slot, dir as IODir, undefined)
+    );
+};
+const setPortItem = (slot: number, storageIdx: number) => {
+    const s = (props.building.parameters as StationParameters).slots[slot];
+    if (s.storageIdx === storageIdx) return;
+    commandQueue.push(
+        new SetStationPortCommand(props.building, slot, undefined, storageIdx)
+    );
+};
+
 const collector = computed(() =>
     isAdvancedMiningMachine(props.building.itemId)
 );
@@ -494,6 +598,50 @@ const auToWarp = (au: number) => Math.round(au * 40000);
 </script>
 
 <style lang="scss">
+.station-ports {
+    .port-row {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 6px;
+        margin: 4px 0;
+
+        .port-slot {
+            min-width: 3.6em;
+            font-size: 0.85em;
+        }
+        .port-item {
+            min-width: 7em;
+            font-size: 0.85em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+
+            &.port-item-none {
+                color: #999;
+            }
+        }
+        .role {
+            padding: 2px 4px;
+            font-size: 0.8em;
+            text-align: center;
+            min-width: 6em;
+            border: none;
+            color: #fff;
+            cursor: pointer;
+        }
+        .role-none {
+            background: #b2b2b2;
+        }
+        .role-demand {
+            background: #d98a59;
+        }
+        .role-supply {
+            background: #4a8ba8;
+        }
+    }
+}
+
 .station-storage {
     display: flex;
     flex-direction: row;

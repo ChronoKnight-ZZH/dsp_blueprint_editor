@@ -1,5 +1,4 @@
 import type { BlueprintBuilding, LabParamerters } from "@/blueprint/parser";
-import { ResearchMode } from "@/blueprint/parser";
 import { getBuildingSlots } from "./buildingSlots";
 import { buildingBoxes } from "./building";
 import { isLab } from "./items";
@@ -38,6 +37,7 @@ const stackHeight = new Map<number, number>([
     [2106, 3], // 储液罐
     [2901, 3], // 矩阵研究站
     [2902, 3], // 矩阵研究站 Mk.II
+    [3009, 6], // 战场分析基站（"分析仪"）：箱子叠在它上面时整层高度 6（样本实测 z=6）
 ]);
 
 /**
@@ -51,7 +51,17 @@ const stackCompat = new Map<number, number[]>([
     [2106, [2106]], // 储液罐只与储液罐互叠
     [2901, [2901, 2902]], // 研究站之间互叠（含 Mk.I/Mk.II 交叉）
     [2902, [2901, 2902]],
+    // 战场分析基站：台面是长方形（选择盒 5.0×7.0，长轴沿 y），
+    // 只有**大型储物仓**的长边（6.2 沿 x）转 90° 后能对上 → 只允许 2102（样本实测）
+    [3009, [2102]],
 ]);
+
+/**
+ * 会写 `out=14/15`、`in=15/14` 堆叠端口默认值的建筑。
+ * 单独列出而不是复用 {@link stackHeight}：战场分析基站 3009 也是堆叠底座，
+ * 但它自己的端口字段是 `out/in = -1/0/0/0`（样本实测）。
+ */
+const stackPortItems = new Set([2020, 2101, 2102, 2106, 2901, 2902]);
 
 /** 只能放在底座"顶面"上的建筑 → 允许的底座 itemId → 落位高度（格） */
 const onTopOf = new Map<number, Map<number, number>>([
@@ -79,9 +89,11 @@ export function stackOffsetFor(
     return stackHeight.get(parentItemId) ?? null;
 }
 
-/** 该建筑是否可以放在别的建筑之上（子建筑身份，能否叠取决于底座，见 stackOffsetFor） */
+/** 该建筑是否可以放在别的建筑之上（子建筑身份；能否叠取决于底座，见 stackOffsetFor） */
 export function isStackChild(itemId: number): boolean {
-    return stackHeight.has(itemId) || onTopOf.has(itemId);
+    for (const list of stackCompat.values())
+        if (list.indexOf(itemId) >= 0) return true;
+    return false;
 }
 
 /** 该建筑是否可以作为堆叠底座 */
@@ -95,8 +107,27 @@ export function requiresBase(itemId: number): boolean {
 }
 
 /**
+ * 底座对上层建筑**朝向**的要求：某些底座台面是长方形，上层长方形建筑只有转到特定
+ * 方向才放得上（游戏里也确实只有那一个方向能放）。
+ *
+ * 当前只有一条：战场分析基站 (3009) 上的大型储物仓 (2102) 必须是 `底座yaw + 90°`
+ * ——分析基站选择盒 5.0×7.0、大箱子 6.2×4.2，长边对齐才服帖
+ * （样本 `分析仪上放置箱子.txt`：底座 yaw=0、箱子 yaw=90）。
+ *
+ * @returns 上层建筑应使用的 yaw（度）；null = 无特殊要求，用用户当前朝向
+ */
+export function stackYawFor(
+    parent: BlueprintBuilding,
+    childItemId: number
+): number | null {
+    if (parent.itemId === 3009 && childItemId === 2102)
+        return (parent.yaw[0] + 90) % 360;
+    return null;
+}
+
+/**
  * 可堆叠建筑的端口字段默认值（未连接时游戏也这么写）。
- * @returns null = 该建筑没有堆叠端口（保持 0）
+ * @returns undefined = 该建筑没有堆叠端口（保持 0）
  */
 export function stackPortDefaults(itemId: number):
     | {
@@ -106,7 +137,7 @@ export function stackPortDefaults(itemId: number):
           inputToSlot: number;
       }
     | undefined {
-    if (!stackHeight.has(itemId)) return undefined;
+    if (!stackPortItems.has(itemId)) return undefined;
     return {
         outputToSlot: STACK_BOTTOM_SLOT,
         outputFromSlot: STACK_TOP_SLOT,
@@ -136,20 +167,19 @@ export function stackedZ(
 }
 
 /**
- * 堆叠时继承研究模式：底座也是矩阵研究站、且底座处于**研究模式**时，
- * 叠上去的研究站默认为相同模式（游戏行为）。
- * 其余模式（选择模式 / 矩阵合成）不继承。
+ * 堆叠时继承研究站设置：底座也是矩阵研究站时，新建筑直接沿用底座的
+ * **研究模式与配方**（一列堆叠研究站在游戏里是一台机器，模式/配方共享）。
  */
-export function inheritLabMode(
+export function inheritLabSettings(
     child: BlueprintBuilding,
     parent: BlueprintBuilding
 ): void {
     if (!isLab(child.itemId) || !isLab(parent.itemId)) return;
     const p = parent.parameters as LabParamerters | null;
-    if (!p || p.researchMode !== ResearchMode.Research) return;
     const c = child.parameters as LabParamerters | null;
-    if (!c) return;
-    c.researchMode = ResearchMode.Research;
+    if (!p || !c) return;
+    c.researchMode = p.researchMode;
+    child.recipeId = parent.recipeId;
 }
 
 /** 写入堆叠连接字段（与游戏蓝图逐字段一致） */

@@ -216,10 +216,14 @@
 | `setBeaconContent.ts` | `SetBeaconContentCommand`：修改全息信标（itemId=2401）`content` 文本字段，`silent=true` 不触发 3D 重建；`merge` 合并对同一建筑的连续编辑。 |
 | `reform.ts` | 地基（reformData）3D 渲染层：`Reforms extends Group` + `buildReforms`，把 `BlueprintReformData` 渲染为工字铺（IBEAM）/ 直铺（PLAIN）/ 网格（GRID）+ 自定义颜色（共享 CanvasTexture 与 InstancedMesh）。 |
 | `removeBuilding.ts` | `RemoveBuildingsCommand` / `RemoveBuildingCommand` / `RemoveBuildingsByItemCommand`：删除建筑并维护 index 与交叉引用。 |
-| `area.ts` | 编辑期区域坐标：`planetToLocal / localToPlanet / ensureAreaFor`（放置时扩张根区域）与 `normalizeBlueprintAreas`（导出时把根区域收缩到实际建筑区间，环形经度取最小覆盖弧）。归一化时**必须保留 `v2ExtraPose`**（只随 `localOffset[1]` 平移尖端坐标）：它是分拣器的姿态角来源，丢一次就会让导出退化成 `[0,…,0]`，游戏里表现为"分拣器角度偏移"报错。 |
+| `area.ts` | 编辑期区域坐标：`planetToLocal / localToPlanet`（**必须传入区域定位 `AreaGridOrigin` = `findPosForAreas(...).areas[areaIndex]`**，见 §6.19）、`ensureAreaFor`（放置时扩张根区域）与 `normalizeBlueprintAreas`（导出时把根区域收缩到实际建筑区间，环形经度取最小覆盖弧）。归一化时**必须保留 `v2ExtraPose`**（只随 `localOffset[1]` 平移尖端坐标）：它是分拣器的姿态角来源，丢一次就会让导出退化成 `[0,…,0]`，游戏里表现为"分拣器角度偏移"报错。 |
 | `create.ts` | 新建蓝图与入库：`createEmptyBlueprint`（根区域 size 10×161 的临时画布）、`createBuilding`（最小合法 v2 记录，可选 `z` = 堆叠高度；可堆叠建筑按游戏写堆叠端口默认值 `out=14/15`、`in=15/14`，见 §6.14）、`CreateBuildingCommand`。 |
-| `beltLine.ts` | 传送带铺线：`rasterizeLine`（latFirst / lonFirst / straight 三种走法）、`buildBeltLine`（逐格算 yaw，**拐角格 = 进入/离开方向的平分角**，即 45° 斜角，与游戏一致）、`CreateBeltLineCommand`（整条一次撤销；重叠格按"末格复用 / 线路中间截断"处理，避免同格两条带）。 |
-| `sorter.ts` | 分拣器连接构造：`createSorterBetween`（建筑↔建筑 / 建筑↔皮带 / 皮带↔皮带 / 分流器），规则见 §6.12。 |
+| `beltLine.ts` | 传送带铺线：`rasterizeLine`（latFirst / lonFirst / straight 三种走法）、`buildBeltLine`（逐格算 yaw，**拐角格 = 进入/离开方向的平分角**，即 45° 斜角，与游戏一致；起/止可绑定建筑口 `BeltPortEnd`，见 §6.20）、`CreateBeltLineCommand`（整条一次撤销；重叠格按"末格复用 / 线路中间截断 / 口格占用截断"处理，避免同格两条带；接到物流站口时同步该口 `dir`）。 |
+| `sorter.ts` | 分拣器连接构造：`createSorterBetween`（建筑↔建筑 / 建筑↔皮带 / 皮带↔皮带 / 分流器），规则见 §6.12；导出 `splitterPortAt` / `findByIndex` 供分流器口功能复用。 |
+| `splitterPorts.ts` | 分流器口角色与交互规则（§6.17）：`splitterPortKinds / splitterPortKind / hasPrioritizedOutput / splitterPortClickAction`。 |
+| `setSplitterPort.ts` | `SetSplitterPriorityCommand`（优先输入/输出，取消时若无优先输出口则一并清空筛选）、`SetSplitterFilterCommand`（优先输出口的筛选物品），均为 `silent`。 |
+| `setBeltParams.ts` | `SetBeltParamsCommand`：传送带图标/数量；`parameters` 为 null（游戏默认）时按需创建 `{iconId, count}`，见 §6.18。 |
+| `setStationPort.ts` | `SetStationPortCommand`（物流站 12 个口的**方向** `dir` 与**携带物品序号** `storageIdx`，`silent`；改物品时同步口上那条带的显示图标）、`stationPortItemId / stationPortItemChoices`（0=无 / 1..N=物品栏 / 大塔第 N+1 项 = 空间翘曲器 1210），见 §6.20。 |
 
 ### 5.2 命令与状态层 `src/`
 
@@ -255,12 +259,12 @@
 | `BuildingOverview.vue` | 未选中时按 itemId 聚合的建筑图标列表，右键一键剔除同类。 |
 | `BuildingRecipe.vue` | 建筑当前配方的输入/输出图标展示。 |
 | `BuildingIcon.vue` / `BlueprintIcon.vue` | 单个建筑图标 / 蓝图头部图标组合渲染。 |
-| `StationInfo.vue` | 物流塔（普通/星际/大型采矿机）库存、槽位、参数面板；内部定义 `SetStationStorageItemCommand` / `SetStationParamCommand`（均为 `silent=true`）。物流状态用 `role-supply` / `role-demand` / `role-none` 着色区分本地/星际供需；大型采矿机采集速度用 0%-300%、步长 10% 的滑块；不再显示「本地/星际」文字标签。 |
+| `StationInfo.vue` | 物流塔（普通/星际/大型采矿机）库存、槽位、参数面板；内部定义 `SetStationStorageItemCommand` / `SetStationParamCommand`（均为 `silent=true`）。**顶部"端口"区**按 12 个口列出方向（无/出塔/入塔）+ 携带物品（无 / 物品栏 1..N / 大塔第 N+1 项 = 空间翘曲器 1210），走 `SetStationPortCommand`（§6.20）。物流状态用 `role-supply` / `role-demand` / `role-none` 着色区分本地/星际供需；大型采矿机采集速度用 0%-300%、步长 10% 的滑块；不再显示「本地/星际」文字标签。 |
 | `BattleBaseInfo.vue` | 战场分析基站（战斗机编队、自动重建等）。 |
 | `MonitorInfo.vue` | 流速监测器参数面板。 |
 | `StorageInfo.vue` | 储物仓（含过滤网格）。 |
 | `DispenserInfo.vue` | 物流配送器参数。 |
-| `SpitterInfo.vue` | 四向分流器（优先级 + v2 extra）。 |
+| `SpitterInfo.vue` | 四向分流器面板：3D 模型 + 端口示意图 + **口交互**（左键设优先输入/输出、输出口再点设筛选、右键取消优先，见 §6.17）+ 筛选物品选择器。口角色直接由当前蓝图数据算（`splitterPortKinds`），不依赖解析时构建的 `BuildingInfo.adjacency`；优先级/筛选改动经 `Updater.updateStationInfo` bump 版本号重算。 |
 | `HoloBeaconInfo.vue` | 全息信标（itemId=2401）自定义文本编辑面板：`textarea` + dirty 状态检测，失焦或 `Ctrl+Enter` 时 `commit()` 推送 `SetBeaconContentCommand`（连续快速编辑会被 `merge` 合并，避免撤销栈爆炸）。 |
 | `WorkEnergyParam.vue` | 工作能耗通用参数输入。 |
 | `ParamSlider.vue` | 通用滑块控件：接收 `label / value / steps / format / disabled`，拖动时只更新本地预览索引，松手时通过 `change` 事件提交最终值（便于命令合并）。 |
@@ -277,7 +281,9 @@
 | `recipes.ts` | 由 `recipesData.ts` 构建 `recipesMap`。 |
 | `building.ts` | `buildingMeta` 表：每种模型 ID 的颜色、单位盒/选择盒变换、图标位置；`noIconBuildings`、`stationSlotTrans`。 |
 | `buildingSlots.ts` | 建筑 slot 坐标表（下标 = 游戏 slot 编号）+ **面分组表**（每面恰好 3 个，见 §6.15）：`getBuildingSlots / hasSlots / faceSlotIndices / slotFaceOf / slotDisplayPos / findNearestSlot / findNearestFreeSlot`；常量 `FACE_TOL = 0.03`、`SLOT_MARKER_FACE_INSET = 0.18`。 |
-| `stacking.ts` | 建筑堆叠与箱顶放置规则（见 §6.14）：`stackOffsetFor / stackBaseFor / stackedZ / linkStack / stackColumn / inheritLabMode / stackPortDefaults / requiresBase / isStackLink`；常量 `STACK_TOP_SLOT = 15`、`STACK_BOTTOM_SLOT = 14`、`BOX_TOP_SLOT = 13`。 |
+| `beltPorts.ts` | **建筑传送带口表**（下标 = 游戏 slot，`{x, y, z, nx, ny}`；x 为赤道基准、`nx/ny` 为朝外法线）+ 查询：`getBeltPorts / beltPortAt / hasBeltPorts / portWorldOffset / portWorldNormal / nearestBeltPort / pickBeltPort`，见 §6.20。未标定建筑退回 `buildingSlots` 同名 slot（近似）。 |
+| `stacking.ts` | 建筑堆叠与箱顶放置规则（见 §6.14）：`stackOffsetFor / stackBaseFor / stackedZ / linkStack / stackColumn / inheritLabSettings / stackPortDefaults / requiresBase / isStackLink`；常量 `STACK_TOP_SLOT = 15`、`STACK_BOTTOM_SLOT = 14`、`BOX_TOP_SLOT = 13`。 |
+| `splitter.ts` | 四向分流器口几何（见 §6.17）：`splitterPorts(modelIndex)`（十字 4 口 / 一字 2 口）、`splitterPortPos(port)`、`SPLITTER_PORT_HALF = 0.5`。 |
 | `buildingCategories.ts` | 底部建筑面板分类表 `buildingCategories`（1-9 类）+ `CategoryBuilding.variants`（放置时可循环切换的变形样式）+ `variantsOf(itemId)`。 |
 | `icons.ts` | 图标 ID 体系（<1000 信号、<20000 物品、<40000 配方、<60000 科技）；`iconUrl / allIconIds`。 |
 | `color.ts` | 颜色相关工具与地基颜色表。 |
@@ -489,18 +495,19 @@
 
 ### 6.14 建筑堆叠与箱顶放置（`data/stacking.ts`）
 
-标定样本：`tests/tools/特殊用法建筑.txt`（游戏手放，同一格逐层叠放；fixture 副本 `stacking_game_sample.txt`）。游戏 wire 字段规律（逐字段核对样本得到）：
+标定样本：`tests/tools/特殊用法建筑.txt`（游戏手放，同一格逐层叠放；fixture 副本 `stacking_game_sample.txt`）、`tests/tools/分析仪上放置箱子.txt`（分析基站 → 箱子 → 箱子 → 配送器整条链；fixture 副本 `analyzer_box_game_sample.txt`）。游戏 wire 字段规律（逐字段核对样本得到）：
 
 | 内容 | 规则 |
 | --- | --- |
 | 堆叠端口 | 底座顶面 = slot **15**，上层底面 = slot **14**。上层建筑写 `inputObjIdx = 底座index`、`inputFromSlot = 15`、`inputToSlot = 14`、`inputOffset = 0`；**底座侧不改**（`outputObjIdx` 仍 −1，`outputToSlot/outputFromSlot` 保持默认 14/15） |
-| 端口默认值 | 可堆叠建筑（储物仓 2101/2102、储液罐 2106、研究站 2901/2902、四向分流器 2020）**即使没堆叠**也写 `out=-1/14/15/0`、`in=-1/15/14/0`；熔炉/制造台等不可堆叠建筑写 0（`createBuilding` 按 `stackPortDefaults` 区分） |
-| 层高 | 每建筑固定的一层高度（实测 z 差），不是选择盒高度：四向分流器/储物仓·小 = 2，储物仓·大/储液罐/研究站 = 3 |
-| 允许的组合 | 保守表 `stackCompat`：分流器 → 储物仓·小；储物仓·小/大 → 储物仓·小/大 + 物流配送器；储液罐 → 储液罐；研究站 → 研究站（Mk.I/Mk.II 交叉）。游戏不接受的组合宁可放不下去，也不要写进蓝图让游戏报错 |
+| 端口默认值 | 可堆叠建筑（储物仓 2101/2102、储液罐 2106、研究站 2901/2902、四向分流器 2020）**即使没堆叠**也写 `out=-1/14/15/0`、`in=-1/15/14/0`；战场分析基站 3009 虽然也是底座，但它自己写 `out/in = -1/0/0/0`（`stackPortDefaults` 的 `stackPortItems` 单独列出）；熔炉/制造台等写 0 |
+| 层高 | 每建筑固定的一层高度（实测 z 差），不是选择盒高度：四向分流器/储物仓·小 = 2，储物仓·大/储液罐/研究站 = 3，**战场分析基站 = 6**（箱子叠在"分析仪"上，样本 z=6） |
+| 允许的组合 | 保守表 `stackCompat`：分流器 → 储物仓·小；储物仓·小/大 → 储物仓·小/大 + 物流配送器；储液罐 → 储液罐；研究站 → 研究站（Mk.I/Mk.II 交叉）；**战场分析基站 → 只允许大型储物仓 2102**（样本 `分析仪上放置箱子.txt`：台面 5.0×7.0、大箱子 6.2×4.2，长边对齐才放得上）。游戏不接受的组合宁可放不下去，也不要写进蓝图让游戏报错 |
+| 朝向要求 | `stackYawFor(parent, childItemId)`：底座对上层朝向有要求时返回应使用的 yaw，否则 null（用用户当前朝向）。当前唯一一条：分析基站 (3009) 上的大型储物仓 (2102) 必须是 `底座yaw + 90°`（样本：底座 yaw=0、箱子 yaw=90）；放置与预览都会自动对齐 |
 | 物流配送器 2107 | **只能放在箱子箱盖上方**：写 `inputFromSlot = 13`（箱盖接口）、`inputToSlot = 0`，落位高度 = 箱盖高度（储物仓·小 1.875、储物仓·大 2.9812433），与储物仓自身的堆叠层高不同 |
 | 底座判定 | `stackBaseFor`：优先取光标所指建筑（BVH 拾取，与游戏"光标在建筑上就是往上叠"一致），否则取该格内**能承载该子建筑的最高**建筑；同格判定用 slot 环极值当落座半径 + 半格容差，避免仅靠中心整格判定而在点边缘时失效 |
-| 放置联动 | 堆叠时 x/y **对齐底座中心**；研究站叠在研究站上且底座处于"研究模式"时，上层默认继承该模式（`inheritLabMode`） |
-| 整列联动 | `stackColumn` 沿堆叠端口（`inputToSlot=14`）上下走，得到整列（不会把分拣器连接 `inputToSlot=1` 误当堆叠）；`SetLabResearchModeCommand` 作用于整列，撤销逐层恢复各自原模式 |
+| 放置联动 | 堆叠时 x/y **对齐底座中心**；研究站叠在研究站上时，上层直接沿用底座的**研究模式与配方**（`inheritLabSettings`，任意模式都继承） |
+| 整列联动 | `stackColumn` 沿堆叠端口（`inputToSlot=14`）上下走，得到整列（不会把分拣器连接 `inputToSlot=1` 误当堆叠）。一列堆叠研究站在游戏里是**一台机器**：`SetLabResearchModeCommand` 改整列的模式**并把配方一起同步**（取被点击那层当时的配方），`SetBuildingRecipeCommand` 对研究站也作用于整列；撤销逐层恢复各自原值 |
 
 ### 6.15 slot 面分组：四边各三个（`data/buildingSlots.ts`）
 
@@ -516,13 +523,91 @@
 
 | 键 | 行为 |
 | --- | --- |
-| `R` | 放置模式下：传送带 → 切换路径走法（latFirst / lonFirst / straight）；有 `variants` 的建筑（四向分流器 2020，三种形态模型 38/39/40）→ 循环切换形态；其余建筑 → 旋转 90° |
-| `Shift+R` | 始终旋转 90°（变形建筑/传送带也能转向） |
+| `R` | 放置模式下：传送带 → 切换路径走法（latFirst / lonFirst / straight）；其余建筑 → 旋转 90° |
+| `Tab` | **切换变形样式**（四向分流器 2020 的三种形态，模型 38/39/40）；放置模式下 `preventDefault()`，避免 Tab 把焦点移出 3D 画布 |
 | `Shift` | 自由放置（不吸附整格） |
 | `X` | 进入删除模式；`Esc` 分层取消；`1-9` 切分类；`F1-F12` 选建筑；`N` 重置镜头 |
 
 - 变形样式的载体就是 `modelIndex`（`placementState.cycleBuildingVariant()` 改 `selectedModelIndex`），预览与放置自动跟随；面板入口见 `buildingCategories.ts` 的 `variants: [38, 39, 40]`。
 - **鼠标静止时也要刷新预览**：`BlueprintEditor.vue` 中最后一次指针坐标存成 `shallowRef`（`lastPointer`），`watchEffect` 首次执行就不会因"还没动过鼠标"提前 return 而一个依赖都收集不到。用普通变量时表现为"按 R 没反应、动一下鼠标才转"。
+
+### 6.17 分流器优先输入/输出与筛选（`blueprint/splitterPorts.ts` + `data/splitter.ts`）
+
+口编号沿用 §6.12：0=+y、1=+x、2=−y、3=−x（十字形 38/40 四口全开，一字形 39 只有 0/2）。口在四边中点（`SPLITTER_PORT_HALF = 0.5`）；交互全部在**侧栏 SpitterInfo 面板**（3D 视图不占用左/右键）。
+
+**角色判定**（`splitterPortKinds`，数据依据 `tests/unit/blueprint/fixtures/sample_throughput.txt`）：对端把货**送进**分流器 → 该口是**输入口**（可设"优先输入"）；分流器把货**送给**对端 → **输出口**（可设"优先输出"并可挂筛选）。传送带直连时分流器口写在传送带的 `outputToSlot`（送入）/`inputFromSlot`（取出）上（游戏实测）；分拣器直连时游戏写 slot=−1，只能按对端方向反推（复用 `sorter.ts` 的 `splitterPortAt`）。
+
+**交互**（全部在侧栏 `SpitterInfo` 面板里，符合"点端口设置"）：面板上按口列出 端口号 / 输入口·输出口·未连接 / `设为优先`·`取消优先` 按钮，SVG 图里的四个口箭头同样可点：
+
+| 操作 | 行为 |
+| --- | --- |
+| 左键点端口（未设优先） | 设优先输入/输出（`SetSplitterPriorityCommand`，`parameters.priority[port] = true`） |
+| 左键再点（已优先的**输出口**） | 打开"筛选物品"选择器（`SetSplitterFilterCommand` 写建筑级 `filterId`）；输入口无操作 |
+| 右键点已设优先的口 | 取消该口优先；若取消后**已无优先输出口**，`filterId` 一并清空（筛选必须有挂载的口），撤销时一起还原 |
+| 面板"筛选"行 | 只要存在优先输出口就显示，`ItemSelect` 直接改 `filterId`（只作用于优先输出口） |
+
+数据依据：样本里 `priority=[1,0,0,0] + filterId=6001` 的那个分流器，其 0 口上的传送带记录是 `inputFromSlot=0`（分流器从 0 口送出）→ 优先与筛选都挂在输出口上；`priority=[0,0,1,0] + filterId=0` 的那个是输入口优先，无筛选。
+
+### 6.18 传送带的图标与数量（`blueprint/setBeltParams.ts`）
+
+游戏里**没设过图标/数量的传送带没有 `parameters` 字段**（`defaultParamsFor(2001..2003)` 返回 null，工具新建的传送带同样如此），但用户必须能给这类传送带设图标和数字：
+
+- 详情面板按 `parameters === null → {iconId: 0, count: 0}` 显示（`beltIconId` / `beltCount` computed），首次修改时由 `SetBeltParamsCommand` 按需创建参数对象，避免无谓地给每条带子写字段。
+- 编码与游戏一致：`beltParamParser` 的 2 个 int（`iconId`, `count`）。真实蓝图中带参数的传送带样本：`dense_splitters_v1.txt`（8 条）、`facilities_with_foundation_320.txt` / `sample_outpost_ils.txt`（各 2 条）。
+
+### 6.19 光标 ↔ 局部格换算必须用**当前区域定位**（`blueprint/area.ts`）
+
+编辑模式放置建筑/铺地基/架分拣器时，屏幕光标要换算成区域局部格（`placementOffset` / `anchorOffset` → `planetToLocal`），再由 `calcBuildingTrans` 换回世界坐标渲染。这两步必须严格互逆：
+
+| 方向 | 依据 |
+| --- | --- |
+| 局部格 → 世界 | `calcBuildingTrans(R, pos, b)`：`经度 = (pos.areas[areaIndex].longitude + localOffset.x) × 2π/(segment×5)`，`纬度 = (pos.areas[areaIndex].latitude + localOffset.y) × 2π/(200×5)`；`pos` 来自 `findPosForAreas(d.areas, 200)` |
+| 世界 → 局部格 | `planetToLocal(latGrid, lonGrid, area)`，`area` 必须传**同一个** `pos.areas[areaIndex]`（放置只写根区域 `areaIndex=0`） |
+
+换算里有两个容易写错的地方（旧实现都写死了）：
+
+1. **原点纬度不是常数**。工具自建画布（`createEmptyBlueprint`，根区域 `size.y=161`）恰好是 `-80`，但导入蓝图的根区域原点由 `findPosForAreas` 决定（无子区域时为 `-floor(size.y/2)`，有子区域还受锚点约束）。写死 `-80` 会让**每一次放置/预览沿纬向平移 `80 - floor(size.y/2)` 格**：`size.y=6` 的真实蓝图偏 77 格（≈27.7° 纬度），既有建筑会被放到带到别处、甚至落到区域带外被 `ensureAreaFor` 拒绝。这就是"导入蓝图后进入编辑模式，绿盒与光标错开；不导入蓝图（自建画布）则完全对齐"的根因。
+2. **经向尺度与回绕宽度**。全局光标经向格以 200 段（1000 格/圈）为基准，而区域局部格是"该区域自己的一圈 = `areaSegments×5` 格"；低段数（极区）区域一格更宽，须乘 `segment/200` 并按 `segment×5` 回绕。
+
+回归测试：`tests/unit/blueprint/areaPlacement.spec.ts`（对全部 fixture 把建筑端点的世界格反算回局部格，要求等于该建筑自己的 `localOffset`；另有低段数区域尺度、原点偏移互逆、自建画布仍为 -80 三组用例）；诊断探针 `tests/tools/placementOffsetProbe.ts`（逐 fixture 打印区域定位与最大反算误差）。
+
+> 注意 `beltLine.ts` 等模块仍以 `ROOT_GRID_SIZE = 1000` 作为经向画布宽度，这与"自建画布 = 200 段"一致；向非 200 段的导入区域铺带时的回绕宽度暂未按区域段数换算。
+
+### 6.20 传送带 ↔ 建筑直连（串联）与建筑骑带（并联）、物流站端口（`data/beltPorts.ts` + `beltLine.ts` + `setStationPort.ts`）
+
+标定样本（游戏 0.10.35 实测，已副本进 `tests/tools/`）：`传送带连接建筑_串联.txt`（241 个对象，8 处建筑带连接 + 3 个分流器）、`传送带连接建筑_并联.txt`（74 个对象，8 个建筑骑在带上）、`物流塔连接传送带.txt`（126 个对象，两个物流站各 12 口全接带）。三份样本都能字节级 round-trip。
+
+#### 串联：传送带以建筑为终点
+
+| 关系 | wire 字段（建筑自身 `out/in` 保持 `-1/0/0/0`，**不写反向引用**） |
+| --- | --- |
+| 带**送入**建筑（终点） | `带.outputObjIdx = 建筑index`、`带.outputToSlot = 建筑口`、`outputFromSlot=0`、`outputOffset=0`；带朝向 = 口法线**反向**（朝建筑） |
+| 建筑**取出**到带（起点） | `带.inputObjIdx = 建筑index`、`带.inputFromSlot = 建筑口`、`带.inputToSlot=1`、`inputOffset=0`；带朝向 = 口法线（背离建筑） |
+| 带端位置 | 口格的**记录位置写成口的精确坐标**（分数，如 `y=51.11`）：`口格身份 = round(口坐标)`，`口格外侧一格 = 口格 + 口法线`，其余格在整格上 |
+| 高度 | 接到 `z≠0` 的口时整条带都在该层（分流器上下层口） |
+
+- **口表**（`data/beltPorts.ts`）：`getBeltPorts(itemId, modelIndex)` → `下标即 slot` 的 `{x, y, z, nx, ny}`；`x` 已按赤道基准归一（同 `buildingSlots`），`nx/ny` 是朝外法线。已用带样本标定：四向分流器 2020（38/39/40 三形态，4 口分两层）、自动集装机 2040、物流运输站 2103、星际物流运输站 2104（12 口环：+y={0,1,2}、−x={3,4,5}、−y={6,7,8}、+x={9,10,11}）、储液罐 2106、射线接收站 2208、能量枢纽 2209、分馏塔 2314；其余建筑退回 `buildingSlots` 同名 slot（**近似**，待样本标定）。
+- **生成**（`buildBeltLine(..., startPort, endPort)`）：起/止绑定口时按上表构造路径与连接字段；`CreateBeltLineCommand(belts, startPort, endPort)` 负责分配 index、串联内部格、并**同步物流站口方向**（出塔 `dir=1`、入塔 `dir=2`，撤销逐口还原）。口格已被占用 → 本次拖拽在口格前截断（游戏里一个口只能接一条带）。
+- **编辑器交互**：`BlueprintEditor.portEndAt(e)` 用 BVH 命中建筑 + 命中点高度格（`(命中点半径 − R)/(4/3)`）在口表里选口（`pickBeltPort`：先按高度层、再按 xy 最近，`limit = 2.5` 格），铺带的 A/B 点落在口上就自动成"取出 / 送入"，预览与落位共用同一套 `buildBeltLine`。
+
+#### 并联：建筑骑在传送带上
+
+建筑与传送带**同格共存、不写任何连接字段**，带从建筑下直穿（样本：喷涂机 2313、流速器 2030、高斯机枪塔 3001、导弹防御炮 3005、聚爆加农炮 3003、磁化电浆炮 3004、地面电浆炮 3010、干扰塔 3006）。实现上无需特殊分支：只有**线路端点**才接建筑口，线路中间格（含建筑所在格）照常串联；`CreateBuildingCommand` 也不检查格上是否已有带。
+
+#### 物流站端口（12 口）
+
+`parameters.slots[i] = { dir, storageIdx }`：
+
+| 字段 | 取值 |
+| --- | --- |
+| `dir` | `0=无 / 1=出塔(Output，带从站取出) / 2=入塔(Input，带送入站)`；没挂带的口为 0（样本 `sample_outpost_ils` #4/#5 对比） |
+| `storageIdx` | `0=无`；`1..N` = `storage[i-1]` 携带的物品（小塔 2103 `N=4`、大塔 2104 `N=5`）；**大塔第 `N+1`（=6）项 = 空间翘曲器 1210**，它不是 `storage` 数组里的项（样本：storage 5 栏却写 `storageIdx=6`，且 `storage[4]` 是别的物品） |
+
+- 面板：`StationInfo.vue` 顶部"端口"区，12 行 × （方向下拉 + 物品下拉），物品下拉的选项由 `stationPortItemChoices` 生成、显示文案用 `stationPortItemId` 解析成物品名；改动走 `SetStationPortCommand`（`silent`，只增 `stateVersion`），改物品时同步该口上那条带的显示图标（与 `SetStationStorageItemCommand` 的行为一致）。
+- 删除传送带时（`RemoveBuildingsCommand`）会把因此空出来的口 `dir` 清成 0，撤销还原。
+- 大塔（2104）的第 6 项固定为翘曲器，小塔（2103）没有第 6 项（解析器按 `maxItemKind=4` 读，见 §7.4）。
+
+回归测试：`tests/unit/blueprint/beltPorts.spec.ts`（全部样本的带↔建筑连接都能用口表复现带端位置 ≤0.15 格与朝向；分流器分层；站口环绕向）、`beltBuilding.spec.ts`（取出/送入字段与带端坐标、高层口整条带同层、并联不写连接、站口 `dir` 同步与撤销、口占用截断）、`stationPort.spec.ts`（物品序号语义、`SetStationPortCommand` do/undo/导出、带图标同步、删带清空 `dir`）。标定工具：`tests/tools/genBeltPorts.ts`（生成口表）、`analyzeBeltBuilding.ts`（逐条列建筑↔带连接）、`scanStationSlots.ts`（站口 `storageIdx` 分布）、`byteRoundTrip.ts`（字节级 round-trip 检查）。
 
 ---
 
@@ -604,6 +689,7 @@ customReformColorMask(uint32)  colorLen(int32)  customReformColors[colorLen](uin
 - `buildBVH(transforms, buildings)` 为每个建筑算出选择盒（分拣器是沿 z 缩放的 Box，其它取 `selectUnitBoxTrans`），构造 `BVH`。
 - `pickBuilding(e)`：把鼠标 NDC 反投影成 `Ray`，先与星球球求交，若星球比建筑更近则视为命中星球（清空 intersects），否则取 BVH 命中第一项。
 - 左键 → emit `update:selectedBuildingIndex`；右键（区分拖拽与点击）→ `queue.push(new RemoveBuildingCommand(index, ...))`。
+- 编辑模式的**反向**换算（光标 → 放置格）：`placementOffset`（吸附整格，放置与绿盒预览共用）与 `anchorOffset`（不取整，分拣器 slot 锚点 / 地基格），两者都经 `planetToLocal(latGrid, lonGrid, editAreaOrigin())` 换算，其中 `editAreaOrigin()` 取当前 `b.value.pos.areas[0]`——与 `calcBuildingTrans` 同源，见 §6.19。
 
 ### 8.4 命令后重建
 
@@ -648,12 +734,19 @@ App.vue 的 watchEffect 把 codeExpired 置 true（蓝图字符串需重生成�
 | `RemoveBuildingsCommand` | `blueprint/removeBuilding.ts` | 批量删除建筑，维护 index 与交叉引用 |
 | `RemoveBuildingCommand` | 同上 | 单个建筑删除（预览模式 3D 右键 / 删除模式左键） |
 | `RemoveBuildingsByItemCommand` | 同上 | 同 itemId 全部删除（列表右键） |
+| `SetBuildingRecipeCommand` | `blueprint/setBuildingRecipe.ts` | 改配方；**研究站**改整列（一列 = 一台机器） |
+| `SetLabResearchModeCommand` | 同上 | 改研究模式，作用于整列堆叠研究站并同步整列配方 |
+| `SetBeltParamsCommand` | `blueprint/setBeltParams.ts` | 传送带图标/数量；`parameters` 为 null 时按需创建（§6.18） |
+| `SetStationPortCommand` | `blueprint/setStationPort.ts` | 物流站 12 个口的方向（无/出塔/入塔）+ 携带物品序号（0=无 / 1..N=物品栏 / 大塔 N+1=空间翘曲器）；`silent`，改物品同步口上那条带的图标（§6.20） |
+| `SetSplitterPriorityCommand` | `blueprint/setSplitterPort.ts` | 分流器口优先输入/输出；取消时若无优先输出口则清空筛选（§6.17） |
+| `SetSplitterFilterCommand` | 同上 | 分流器优先输出口的筛选物品 |
 
 ### 9.3 快捷键
 
 - `Ctrl+Z` 撤销，`Ctrl+Y` 或 `Ctrl+Shift+Z` 重做（`App.vue` 的 `hotkey`）。
 - `O` / `0`：切换侧栏（非固定状态）。
-- 编辑模式：`1-9` 切分类、`F1-F12` 选建筑、`R` 旋转/切形态/切走法（见 §6.16）、`Shift+R` 强制旋转、`Shift` 自由放置、`X` 删除模式、`Esc` 分层取消、`N` 重置镜头、右键退出放置。
+- 编辑模式：`1-9` 切分类、`F1-F12` 选建筑、`R` 旋转 90°（传送带为切路径走法）、`Tab` 切换变形样式（四向分流器，见 §6.16）、`Shift` 自由放置、`X` 删除模式、`Esc` 分层取消、`N` 重置镜头、右键退出放置。
+- 四向分流器的优先输入/输出与筛选：在侧栏 `SpitterInfo` 面板点端口设置（§6.17），3D 视图不占用左/右键。
 
 ---
 
@@ -727,15 +820,21 @@ python3 i18n.py ... -o ../locales     # 生成 zh/en locale
 | `command.spec.ts` | CommandQueue 版本分流：silent 命令（Replace/SetAccelerator 等）只增 `stateVersion` 不增 `execVersion`，含 push 与 undo 路径。 |
 | `setBuildingRecipe.spec.ts` | 单体配方/研究模式命令的 do/undo 与 silent 性质、merge 行为。 |
 | `normalizeArea.spec.ts` | `normalizeBlueprintAreas`：远处成簇收缩、跨 0 经线取最小弧、北半球赤道居中、单建筑 1×1；校验入参不被修改。 |
+| `areaPlacement.spec.ts` | 光标 ↔ 局部格换算（§6.19）：全部 fixture 的建筑端点世界格反算回局部格 = 该建筑自己的 `localOffset`（≥100 个端点）；导入蓝图原点非 -80（`sample_outpost_ils` 按 -80 会偏 77 格）；自建画布仍为 -80；低段数区域经向尺度与回绕宽度；`localToPlanet`/`planetToLocal` 互逆。 |
 | `stats.spec.ts` | `calculateProductionStats`：分馏塔特例、普通配方建筑、增产剂各等级倍率与自身消耗、研究站科研模式。 |
 | `sorter.spec.ts` | 分拣器连接：slot 表与同款模型复用、slot 占用切换、皮带 `offset = floor(main×21)` 编码、建筑↔皮带 / 建筑↔建筑端点、主轴与 45° 拒绝、分流器口唯一性、重复/重叠拒绝、点击锚点选 slot、方建筑角 slot 面归属、分拣器姿态字段启发式。 |
 | `sorter_replay.spec.ts` | 真实蓝图全量复现：`sorter_belt_replay`（3 根皮带↔皮带）、`sorter_building_belt_replay`（29 根建筑/皮带混合，`tests/tools/分拣器.txt` 副本）、`sorter_multi_building_replay`（23 根、12 种建筑 × 输入/输出两个方向 + 长度 1/2，`tests/tools/分拣器示例.txt` 副本）逐字段比对。 |
 | `beltGameConsistency.spec.ts` | 传送带约定：游戏样本 `belt_inserter_game_sample.txt` 的 `pose[4]≈yaw[0]`、串联/slot/parameters 约定、拐角平分角；工具侧拐角 yaw、多次拖拽重叠格复用与截断、撤销恢复。 |
 | `createdExport.spec.ts` | 工具"新建蓝图→铺带→加分拣器→保存"链路：导出再解析后 `pose[4]` 仍等于 `yaw[0]`（四朝向）、`normalizeBlueprintAreas` 平移尖端但保留姿态角且不改入参、缺 pose 时兜底写 `yaw[0]`，以及早期坏文件（fixture `tool_export_pose_broken.txt`）导入自愈。 |
 | `slotFace.spec.ts` | slot 面分组：12 slot 环建筑每面恰好 3 个且四面覆盖 0-11、角 slot 归属唯一（电弧熔炉 +x 面只有 3/4/5）、矩阵研究站反向绕向、`slotDisplayPos` 把重合角 slot 分开且 12 个显示点两两可分辨；并用 fixture `slot_face_game_sample.txt`（游戏 14 种建筑 × 全部 slot 的分拣器环）复现每根分拣器的建筑端 slot，与游戏写死的编号逐条一致（≥24 条）。 |
-| `stacking.spec.ts` | 堆叠规则：用 fixture `stacking_game_sample.txt` 逐条校验 10 组堆叠样本的层高/z/端口字段（15/14、配送器 13）、未连接时的端口默认值、允许/禁止的组合表、`stackBaseFor` 底座判定（光标所指、同格最上层、物流配送器只在箱盖）、`stackColumn` 整列解析、研究模式继承与整列联动（含撤销）、分流器 38/39/40 循环切换，以及"叠出来 → 导出 → 再解析"的端到端字段一致性。 |
+| `stacking.spec.ts` | 堆叠规则：用 fixture `stacking_game_sample.txt` 逐条校验 10 组堆叠样本的层高/z/端口字段（15/14、配送器 13）、未连接时的端口默认值、允许/禁止的组合表、`stackBaseFor` 底座判定（光标所指、同格最上层、物流配送器只在箱盖）、`stackColumn` 整列解析、研究模式+配方继承与整列联动（含撤销）、分流器 38/39/40 循环切换，以及"叠出来 → 导出 → 再解析"的端到端字段一致性；另用 `analyzer_box_game_sample.txt` 校验"战场分析基站 → 箱子(6) → 箱子(9) → 配送器(11.981)"整条链。 |
+| `splitterPorts.spec.ts` | 分流器口几何（十字 4 口 / 一字 2 口、四边中点坐标）、口角色判定（样本 `sample_throughput.txt` 的 #47 输出口 + 筛选 6001、#30 输入口无筛选）、左键行为（未优先→设优先 / 优先输出→筛选 / 优先输入→无操作）、右键取消优先时"无优先输出口则清空筛选"与撤销还原、优先/筛选随蓝图导出再解析。 |
+| `beltParams.spec.ts` | 传送带图标/数量：工具新建传送带 `parameters` 为 null，设置后按需创建 `{iconId, count}`、导出再解析保持、撤销恢复，以及真实蓝图里带参数传送带的编码形态。 |
+| `beltPorts.spec.ts` | 建筑传送带口标定表（§6.20）：全部样本里每个"带↔建筑"连接都能用口表复现带端位置（≤0.15 格）与朝向（取出沿法线、送入沿法线反向）；分流器口分两层（接 z=1 的口时带端也在 z=1）；物流站 12 口环绕向与法线。 |
+| `beltBuilding.spec.ts` | 传送带直连建筑（串联）与建筑骑带（并联）：取出/送入的连接字段与带端精确坐标、串联链路与末格终结、高层口整条带同层、导出再解析保持；带从建筑格中间穿过或建筑放在带格上都不写任何连接字段；站口 `dir` 随连接同步与撤销、口已被占用时截断。 |
+| `stationPort.spec.ts` | 物流站端口物品序号语义（小塔 1..4 / 大塔 1..5 + 第 6 项空间翘曲器 1210，`sample_outpost_ils` #5 的 `storageIdx=6`）；`SetStationPortCommand` 的 do/undo、`silent`、导出再解析、改物品时同步口上那条带的图标、删带时口方向归零与撤销还原。 |
 
-fixtures 位于 `tests/unit/blueprint/fixtures/`：除原有蓝图外新增 `starting_base_01029.txt`（0.10.29 老版本基地）、`foundation_only_99.txt`、`facilities_with_foundation_320.txt`、`sorter_belt_replay.txt`、`sorter_building_belt_replay.txt`、`sorter_multi_building_replay.txt`、`tool_export_pose_broken.txt`（早期工具导出的坏 pose）、`slot_face_game_sample.txt`（游戏 14 种建筑 × 全部 slot 的分拣器环）、`stacking_game_sample.txt`（游戏逐层堆叠样本）。调试/标定脚本位于 `tests/tools/`（`parseBlueprint.ts` 蓝图→JSON、`sorterReplay.ts` 分拣器连接复现比对、`dumpBuildings.ts` 紧凑建筑表、`deriveSlots.ts` slot 表反推/校验、`dumpSlotSamples.ts` 逐 slot 原始样本、`replaySlots.ts` slot 面归属复现比对、`slotScaleProbe.ts` 分区尺度诊断、`fitBeltOffset.ts` 皮带 offset 分段数拟合、`compareBlueprints.ts` / `checkPoseConsistency.ts` / `reproToolExport.ts` 导出姿态回归），样本 `分拣器.txt` / `分拣器示例.txt` / `特殊用法建筑.txt` / `特殊用法_生成.txt` 为游戏 0.10.35 实测蓝图。
+fixtures 位于 `tests/unit/blueprint/fixtures/`：除原有蓝图外新增 `starting_base_01029.txt`（0.10.29 老版本基地）、`foundation_only_99.txt`、`facilities_with_foundation_320.txt`、`sorter_belt_replay.txt`、`sorter_building_belt_replay.txt`、`sorter_multi_building_replay.txt`、`tool_export_pose_broken.txt`（早期工具导出的坏 pose）、`slot_face_game_sample.txt`（游戏 14 种建筑 × 全部 slot 的分拣器环）、`stacking_game_sample.txt`（游戏逐层堆叠样本）、`analyzer_box_game_sample.txt`（分析基站上叠箱子整条链）。调试/标定脚本位于 `tests/tools/`（`parseBlueprint.ts` 蓝图→JSON、`sorterReplay.ts` 分拣器连接复现比对、`dumpBuildings.ts` 紧凑建筑表、`dumpParams.ts` 参数级样本扫描（带参数的传送带 / 设了优先或筛选的分流器 / 研究站）、`deriveSlots.ts` slot 表反推/校验、`dumpSlotSamples.ts` 逐 slot 原始样本、`replaySlots.ts` slot 面归属复现比对、`placementOffsetProbe.ts` 光标→放置格偏移诊断（逐 fixture 打印区域定位与最大反算误差）、`genBeltPorts.ts` 建筑传送带口标定表生成（逐 (itemId, model, slot) 聚合口坐标与法线）、`analyzeBeltBuilding.ts` 逐条列出建筑↔传送带连接（送入/取出、slot、带端位置）、`scanStationSlots.ts` 物流站端口 `storageIdx` 分布扫描、`byteRoundTrip.ts` 解析→重出的字节级比对（判断字段是否被解析器丢掉）、`slotScaleProbe.ts` 分区尺度诊断、`fitBeltOffset.ts` 皮带 offset 分段数拟合、`compareBlueprints.ts` / `checkPoseConsistency.ts` / `reproToolExport.ts` 导出姿态回归），样本 `分拣器.txt` / `分拣器示例.txt` / `特殊用法建筑.txt` / `特殊用法_生成.txt` / `分析仪上放置箱子.txt` / `传送带连接建筑_串联.txt` / `传送带连接建筑_并联.txt` / `物流塔连接传送带.txt` 为游戏 0.10.35 实测蓝图（后三份对应 §6.20 的三类交互）。
 
 ### 12.3 运行
 
@@ -839,6 +938,7 @@ cat blueprint.txt | yarn cli > bp.json
 | `buildingMeta` | 每个模型 ID 的颜色/单位盒/选择盒/图标位置变换。 |
 | `findPosForAreas` | 把蓝图多个分区摆回 200 段标准星球的经纬度。 |
 | `calcBuildingTrans` | 把建筑 `localOffset` 转为 3D 世界变换矩阵（两个端点）。 |
+| `AreaGridOrigin` | 区域定位 `{latitude, longitude, segment}` = `findPosForAreas(...).areas[i]`；`planetToLocal / localToPlanet` 的必传参数（§6.19）。原点纬度不是常数（自建画布才恰好 -80），经向还要按 `segment/200` 换算尺度。 |
 | `CommandQueue` | 容量 256 的撤销栈，支持 `merge` 合并连续命令。 |
 | `noIconBuildings` | 分流器/集装机/监测器/喷涂机/电力感应塔/无线输电塔不渲染图标。 |
 | `VERSION` | 来自 `git describe`，由 webpack DefinePlugin 注入。 |
@@ -856,9 +956,16 @@ cat blueprint.txt | yarn cli > bp.json
 | `slotFaceGroups` / `slotDisplayPos` | 逐建筑的面分组表（`[+y, +x, -y, -x]` 各 3 个 slot，绕向因建筑而异）；显示专用坐标 `slotDisplayPos` 把真实坐标重合的角 slot 沿所属面内缩 `SLOT_MARKER_FACE_INSET = 0.18`，让 UI 呈现"四边各三个"。 |
 | `stackOffsetFor` / `stackBaseFor` | 堆叠规则（§6.14）：底座 itemId + 上层 itemId → 一层高度（不允许返回 `null`）；`stackBaseFor` 按"光标所指建筑优先、其次同格能承载的最高建筑"求底座。 |
 | `STACK_TOP_SLOT` / `STACK_BOTTOM_SLOT` / `BOX_TOP_SLOT` | 15 / 14 / 13：底座顶面端口、上层底面端口、储物仓箱盖接口（物流配送器专用）。 |
-| `linkStack` / `stackColumn` / `inheritLabMode` | 写堆叠连接字段；自下而上取整列（只跟 `inputToSlot=14` 的堆叠端口，不跟分拣器连接）；堆叠时研究站继承底座的"研究模式"。 |
-| `SetLabResearchModeCommand` | 修改研究站研究模式（`silent`）：作用于**整列**堆叠研究站，撤销时逐层恢复各自原模式。 |
-| `variantsOf` / `cycleBuildingVariant` | 建筑放置时可循环切换的变形样式（模型序号列表，如四向分流器 38/39/40）；`R` 键在放置模式下切换。 |
+| `stackYawFor` | 堆叠时的朝向要求（§6.14）：分析基站上的大型储物仓必须是 `底座yaw + 90°`；其余返回 null（用用户当前朝向）。 |
+| `linkStack` / `stackColumn` / `inheritLabSettings` | 写堆叠连接字段；自下而上取整列（只跟 `inputToSlot=14` 的堆叠端口，不跟分拣器连接）；堆叠时研究站沿用底座的研究模式与配方。 |
+| `SetBuildingRecipeCommand` / `SetLabResearchModeCommand` | 改配方 / 改研究模式（均 `silent`）：对研究站作用于**整列**堆叠，模式改动同时把配方同步到整列，撤销逐层恢复各自原值。 |
+| `splitterPorts` / `splitterPortPos` | 分流器可用口（十字 4 / 一字 2）与口在建筑局部系的坐标（四边中点，§6.17）。 |
+| `splitterPortKinds` / `splitterPortClickAction` | 口角色（输入=对端送入、输出=分流器送出）与左键行为（设优先 / 开筛选 / 无操作）；右键取消优先，无优先输出口时筛选一并清空。UI 见侧栏 `SpitterInfo` 面板（§6.17）。 |
+| `variantsOf` / `cycleBuildingVariant` | 建筑放置时可循环切换的变形样式（模型序号列表，如四向分流器 38/39/40）；放置模式下按 `Tab` 切换。 |
+| `SetBeltParamsCommand` | 传送带图标/数量命令：`parameters` 为 null（游戏默认）时按需创建 `{iconId, count}`（§6.18）。 |
+| `beltPorts` / `BeltPort` | 建筑传送带口表（§6.20）：`下标 = 游戏 slot`，`{x(赤道基准), y, z, nx, ny(朝外法线)}`；已标定分流器 2020（三形态、分两层 z）、集装机 2040、物流站 2103/2104（12 口环）、储液罐 2106、射线接收站 2208、能量枢纽 2209、分馏塔 2314，其余退回 `buildingSlots`（近似）。 |
+| `BeltPortEnd` | 铺带端点绑定的建筑口 `{building, slot, point(可为分数、含 z), nx, ny}`；起点 = 取出、终点 = 送入，`buildBeltLine(..., startPort, endPort)` 据此写连接字段并把口格记录位置写成口的精确坐标。 |
+| `SetStationPortCommand` | 物流站端口命令（§6.20）：`slots[i] = {dir(0 无/1 出塔/2 入塔), storageIdx}`；`storageIdx` 0=无、1..N=物品栏、大塔（2104）N+1=空间翘曲器 1210；`silent`，改物品时同步口上那条带的图标；删带时由 `RemoveBuildingsCommand` 把口方向清 0。 |
 
 ---
 

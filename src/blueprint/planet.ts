@@ -210,7 +210,8 @@ export function findPosForAreas(
     return pos;
 }
 
-const HEIGHT_GRID_SIZE = 4 / 3;
+/** 高度格 → 世界单位（`localOffset[].z` 的换算系数；分流器的上下层口差 1 格 ≈ 1.33 单位） */
+export const HEIGHT_GRID_SIZE = 4 / 3;
 
 const temp = new Matrix4();
 const rotation = new Euler();

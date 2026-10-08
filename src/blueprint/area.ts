@@ -4,33 +4,62 @@ import { BlueprintData } from "./parser";
 const ROOT_SEGMENT = 200;
 const GRID_PER_SEGMENT = 5;
 export const ROOT_GRID_SIZE = ROOT_SEGMENT * GRID_PER_SEGMENT; // 1000 grid columns
-const ROOT_LATITUDE = -80; // Derived from size.y=161 via findPosForAreas
 
 /**
- * Convert planet grid coordinates (latGrid, lonGrid) to local offsets within the root area.
- * Grid units: 1000 per full circumference (200 segments * 5 grids/segment).
+ * 区域在星球上的定位（= `findPosForAreas(...).areas[areaIndex]`）。
+ * 光标 ↔ 局部格的换算必须与 `calcBuildingTrans` 用**同一份**定位，否则放置预览会与光标错开。
+ * 注意原点纬度不是常数：工具自建空画布（`createEmptyBlueprint`，size.y=161）恰好是 -80，
+ * 导入蓝图则由 `findPosForAreas` 按其区域元数据算出（无子区域时为 `-floor(size.y/2)`）。
  */
-export function planetToLocal(
-    latGrid: number,
-    lonGrid: number
-): { x: number; y: number } {
-    // Wrap longitude to [0, ROOT_GRID_SIZE)
-    const x = ((lonGrid % ROOT_GRID_SIZE) + ROOT_GRID_SIZE) % ROOT_GRID_SIZE;
-    // Shift latitude so that root area's latitude (-80) maps to offset.y=0
-    const y = latGrid - ROOT_LATITUDE;
-    return { x, y };
+export interface AreaGridOrigin {
+    /** 区域原点纬度：绝对纬向格（纬向格全星球统一，1000 格/圈） */
+    latitude: number;
+    /** 区域原点经度：以该区域自己的经向格计 */
+    longitude: number;
+    /** 区域经向段数（`BlueprintArea.areaSegments`）：决定经向格的宽度 */
+    segment: number;
+}
+
+function wrapGrid(x: number, turn: number): number {
+    return ((x % turn) + turn) % turn;
 }
 
 /**
- * Convert local offsets within the root area to planet grid coordinates.
+ * 星球网格坐标（latGrid / lonGrid，全局 1000 格/圈 = 200 段 × 5 格）→ 区域局部格偏移。
+ *
+ * 两个必须用传入区域信息的理由：
+ * - **纬向**：局部 y 相对区域原点 `area.latitude`，不是固定 -80。根区域原点随 `size.y` 变化
+ *   （`-floor(size.y/2)`，多区域蓝图还受子区域锚点约束），用常数会让整个放置位置沿纬向平移
+ *   约 `80 - floor(size.y/2)` 格——表现为"导入蓝图后绿盒/落位与光标错开几十格"。
+ * - **经向**：全局 1000 格/圈与区域自己的经向格之间差一个 `segment / 200` 的尺度
+ *   （极区/低段数区域的格更宽），按 1000 取模也会错。
  */
-export function localToPlanet(offset: { x: number; y: number }): {
+export function planetToLocal(
+    latGrid: number,
+    lonGrid: number,
+    area: AreaGridOrigin
+): { x: number; y: number } {
+    const turn = area.segment * GRID_PER_SEGMENT; // 该区域一整圈的经向格数
+    const x = wrapGrid(
+        lonGrid * (area.segment / ROOT_SEGMENT) - area.longitude,
+        turn
+    );
+    return { x, y: latGrid - area.latitude };
+}
+
+/**
+ * `planetToLocal` 的逆变换：区域局部格偏移 → 星球网格坐标（全局 1000 格/圈）。
+ */
+export function localToPlanet(
+    offset: { x: number; y: number },
+    area: AreaGridOrigin
+): {
     lat: number;
     lon: number;
 } {
     return {
-        lat: offset.y + ROOT_LATITUDE,
-        lon: offset.x,
+        lat: offset.y + area.latitude,
+        lon: (area.longitude + offset.x) * (ROOT_SEGMENT / area.segment),
     };
 }
 
