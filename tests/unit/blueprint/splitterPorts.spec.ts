@@ -97,6 +97,97 @@ describe('分流器口角色（真实游戏蓝图）', () => {
     });
 });
 
+describe('分流器 6 种状态样本（面板显示与交互依据）', () => {
+    const game = fromStr(
+        fs
+            .readFileSync(
+                'tests/unit/blueprint/fixtures/splitter_6states_game_sample.txt',
+                'utf-8'
+            )
+            .trim()
+    );
+    const at = (index: number) =>
+        game.buildings.find((b) => b.index === index)!;
+    const state = (index: number) => {
+        const sp = at(index);
+        const kinds = splitterPortKinds(game.buildings, sp.index);
+        const p = sp.parameters as SplitterParameters;
+        return {
+            itemId: sp.itemId,
+            dirs: [0, 1, 2, 3].map((i) => kinds.get(i) ?? null),
+            priority: p.priority.map((x) => (x ? 1 : 0)).join(''),
+            filterId: sp.filterId,
+        };
+    };
+
+    test('6 个分流器的连接状态与设置逐项一致', () => {
+        // #0 (15,2)：0 口优先输出 + 筛选 1001，2 口输入
+        expect(state(0)).toEqual({
+            itemId: 2020,
+            dirs: ['out', null, 'in', null],
+            priority: '1000',
+            filterId: 1001,
+        });
+        // #2 (0,2)：只有 2 口输入（无优先、无筛选）
+        expect(state(2)).toEqual({
+            itemId: 2020,
+            dirs: [null, null, 'in', null],
+            priority: '0000',
+            filterId: 0,
+        });
+        // #6 (3,2)：只有 0 口输出
+        expect(state(6)).toEqual({
+            itemId: 2020,
+            dirs: ['out', null, null, null],
+            priority: '0000',
+            filterId: 0,
+        });
+        // #11 (6,2)：0 输出 + 2 输入，均未设优先
+        expect(state(11)).toEqual({
+            itemId: 2020,
+            dirs: ['out', null, 'in', null],
+            priority: '0000',
+            filterId: 0,
+        });
+        // #19 (9,2)：优先**输入**（2 口），无筛选
+        expect(state(19)).toEqual({
+            itemId: 2020,
+            dirs: ['out', null, 'in', null],
+            priority: '0010',
+            filterId: 0,
+        });
+        // #27 (12,2)：优先**输出**（0 口），无筛选
+        expect(state(27)).toEqual({
+            itemId: 2020,
+            dirs: ['out', null, 'in', null],
+            priority: '1000',
+            filterId: 0,
+        });
+    });
+
+    test('6 种状态下的左键行为：设优先 / 开筛选 / 无操作', () => {
+        const action = (index: number, port: number) => {
+            const sp = at(index);
+            const p = sp.parameters as SplitterParameters;
+            return splitterPortClickAction(
+                p.priority[port] === true,
+                splitterPortKinds(game.buildings, sp.index).get(port) ?? null
+            );
+        };
+        // 未设优先的连接口 → 设优先（输入口/输出口一样）
+        expect(action(6, 0)).toBe('priority');
+        expect(action(2, 2)).toBe('priority');
+        expect(action(11, 0)).toBe('priority');
+        // 已设优先的输出口 → 再点开筛选
+        expect(action(27, 0)).toBe('filter');
+        expect(action(0, 0)).toBe('filter');
+        // 已设优先的输入口 → 无操作（取消用右键）
+        expect(action(19, 2)).toBe('none');
+        // 未连接的口也可以先设优先
+        expect(action(6, 1)).toBe('priority');
+    });
+});
+
 describe('优先输入/输出与筛选命令', () => {
     /** 分流器 (10,10)：南侧传送带送入（口 2 = 输入），东侧传送带取出（口 1 = 输出） */
     function splitterBp() {

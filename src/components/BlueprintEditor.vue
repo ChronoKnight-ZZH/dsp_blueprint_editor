@@ -14,6 +14,8 @@ import {
     MeshBasicMaterial,
     CylinderGeometry,
     BoxGeometry,
+    PlaneGeometry,
+    DoubleSide,
     Matrix4,
     DirectionalLight,
     Vector3,
@@ -626,10 +628,12 @@ import {
     type BeltPortEnd,
 } from "@/blueprint/beltLine";
 import {
+    getBeltPorts,
     hasBeltPorts,
     pickBeltPort,
     portWorldNormal,
     portWorldOffset,
+    type BeltPort,
 } from "@/data/beltPorts";
 import { createSorterBetween, collectOccupiedSlots } from "@/blueprint/sorter";
 import {
@@ -906,6 +910,28 @@ const SLOT_COLORS = {
     target: new Color(0xffd700), // 本次将连接（含被占后切换到的平行 slot）
 };
 
+/**
+ * 建筑**传送带口**标记（正方形）：与分拣器口（圆点）配套，
+ * 铺传送带时悬停建筑就显示"这个建筑有哪些口可以接带"——绿色空闲、红色已有带、黄色本次将接。
+ */
+const PORT_MARKER_CAP = 12; // 建筑传送带口数上限（物流站 12 口）
+const portMarkers = new InstancedMesh(
+    new PlaneGeometry(0.2, 0.2),
+    new MeshBasicMaterial({
+        transparent: true,
+        opacity: 0.9,
+        depthTest: false,
+        side: DoubleSide,
+    }),
+    PORT_MARKER_CAP
+);
+portMarkers.matrixAutoUpdate = false;
+portMarkers.count = 0;
+portMarkers.renderOrder = 10;
+const portMarkersVisible = ref(false);
+/** 悬停点的相对高度（格）：用于区分分流器的地面层/上层口 */
+const sorterHoverZ = ref(0);
+
 // 皮带可连接范围（沿主轴 ±0.5 格 = offset ±10 段，与 sorter.ts 的 main 区间一致）
 const beltRangeMesh = new Mesh(
     new BoxGeometry(0.1, 1.0, 0.1),
@@ -937,6 +963,8 @@ const sorterPreviewVisible = ref(false);
 watchEffect(() => {
     if (slotMarkersVisible.value) scene.add(slotMarkers);
     else scene.remove(slotMarkers);
+    if (portMarkersVisible.value) scene.add(portMarkers);
+    else scene.remove(portMarkers);
     if (beltRangeVisible.value) scene.add(beltRangeMesh);
     else scene.remove(beltRangeMesh);
     if (sorterPreviewVisible.value) scene.add(sorterPreviewMesh);
@@ -953,23 +981,77 @@ const overlayX = new Vector3();
 const overlayY = new Vector3();
 
 /**
- * 刷新分拣器架接覆盖层。
+ * 光标（连续网格坐标）→ 建筑上的传送带口。
+ * 与 `BlueprintEditor.portEndAt` / 标记覆盖层共用同一套换算：
+ * 命中点 → 建筑局部系（`x` 按纬度归一到赤道基准）→ `pickBeltPort`（先按高度层、再按 xy 最近）。
+ */
+function beltPortAtPointer(
+    building: BlueprintBuilding,
+    anchor: { x: number; y: number },
+    hitZ: number,
+    pos: PositionedBlueprint
+): { slot: number; port: BeltPort } | null {
+    if (!hasBeltPorts(building.itemId, building.modelIndex)) return null;
+    const bp = building.localOffset[0];
+    // 经向环形坐标取短弧
+    let dx = anchor.x - bp.x;
+    if (dx > ROOT_GRID_SIZE / 2) dx -= ROOT_GRID_SIZE;
+    else if (dx < -ROOT_GRID_SIZE / 2) dx += ROOT_GRID_SIZE;
+    const dy = anchor.y - bp.y;
+    const area = pos.areas[building.areaIndex];
+    const cosLat = Math.cos(
+        (area.latitude + bp.y) * ((2 * Math.PI) / (SEGMENT * 5))
+    );
+    const yaw = building.yaw[0];
+    const r = (yaw * Math.PI) / 180;
+    // 网格偏移 → 建筑局部系（x 归一到赤道基准）
+    const lx = (dx * Math.cos(r) - dy * Math.sin(r)) * cosLat;
+    const ly = dx * Math.sin(r) + dy * Math.cos(r);
+    return pickBeltPort(
+        building.itemId,
+        building.modelIndex,
+        lx,
+        ly,
+        hitZ
+    );
+}
+
+/** 该口上是否已经挂着传送带（口带：带以建筑口为端点） */
+function portHasBelt(
+    buildings: readonly BlueprintBuilding[],
+    building: BlueprintBuilding,
+    slot: number
+): boolean {
+    return buildings.some(
+        (b) =>
+            isBelt(b.itemId) &&
+            ((b.inputObjIdx === building.index && b.inputFromSlot === slot) ||
+                (b.outputObjIdx === building.index &&
+                    b.outputToSlot === slot))
+    );
+}
+
+/**
+ * 刷新架接/铺带覆盖层。
  * 依赖 b.value / sorterHover / sorterSource / placement，任一变化自动重跑：
- * - 悬停有 slot 的建筑：显示全部 slot（绿=空闲，红=占用，黄=将连接）
- * - 悬停皮带：显示主轴 segIndex 范围条
- * - 已选源且悬停有效目标：调 createSorterBetween 全真预演（含占用切换），
+ * - 悬停建筑：显示**分拣器口（圆点）**与**传送带口（方块）**，绿=空闲，红=已占用，黄=本次将连接
+ * - 悬停皮带（分拣器模式）：显示主轴 segIndex 范围条
+ * - 已选源且悬停有效目标（分拣器模式）：调 createSorterBetween 全真预演（含占用切换），
  *   绿线=可放置，红线=不可（平行组占满 / 距离超 3 格）
  */
 function refreshSorterOverlay() {
     slotMarkersVisible.value = false;
+    portMarkersVisible.value = false;
     beltRangeVisible.value = false;
     sorterPreviewVisible.value = false;
     const bp = b.value;
     const queue = commandQueue.value;
+    const placingSorter = isPlacingSorter();
+    const placingBelt = isPlacingBelt();
     if (
         !bp ||
         !queue ||
-        !isPlacingSorter() ||
+        (!placingSorter && !placingBelt) ||
         placement.selectedItemId === null ||
         placement.selectedModelIndex === null
     )
@@ -980,7 +1062,7 @@ function refreshSorterOverlay() {
     const hoverBuilding = data.buildings[hover];
     const trans = calcBuildingTrans(R, bp.pos, hoverBuilding);
 
-    if (isBelt(hoverBuilding.itemId)) {
+    if (placingSorter && isBelt(hoverBuilding.itemId)) {
         // 皮带：青色范围条沿主轴（盒 y 轴随 yaw 旋转对齐）
         overlayLift.makeTranslation(0, 0, 0.25);
         beltRangeMesh.matrix.multiplyMatrices(trans[0], overlayLift);
@@ -989,7 +1071,7 @@ function refreshSorterOverlay() {
     }
 
     // 已选源且悬停有效目标 → 全真预演（含被占后的平行切换；与实际放置完全一致）
-    const src = sorterSource.value;
+    const src = placingSorter ? sorterSource.value : null;
     let preview: BlueprintBuilding | null = null;
     if (src !== null && src !== hover) {
         preview = createSorterBetween(
@@ -1035,6 +1117,52 @@ function refreshSorterOverlay() {
         if (slotMarkers.instanceColor)
             slotMarkers.instanceColor.needsUpdate = true;
         slotMarkersVisible.value = true;
+    }
+
+    // 传送带口（正方形）：所有有带口表的建筑都画；绿=空闲、红=已挂带、黄=本次光标选中的口
+    const ports = getBeltPorts(hoverBuilding.itemId, hoverBuilding.modelIndex);
+    if (ports.some((p) => p !== null)) {
+        const anchor = sorterHoverAnchor.value;
+        const targetPort =
+            placingBelt && anchor !== null
+                ? beltPortAtPointer(
+                      hoverBuilding,
+                      anchor,
+                      sorterHoverZ.value,
+                      bp.pos
+                  )?.slot ?? -1
+                : -1;
+        let count = 0;
+        for (
+            let slot = 0;
+            slot < ports.length && count < PORT_MARKER_CAP;
+            slot++
+        ) {
+            const port = ports[slot];
+            if (!port) continue;
+            // z 是高度格：换算成局部单位（分流器的上下层口差 1 格 ≈ 1.33 单位）
+            overlayLift.makeTranslation(
+                port.x,
+                port.y,
+                port.z * HEIGHT_GRID_SIZE + 0.35
+            );
+            overlayM.multiplyMatrices(trans[0], overlayLift);
+            portMarkers.setMatrixAt(count, overlayM);
+            portMarkers.setColorAt(
+                count,
+                slot === targetPort
+                    ? SLOT_COLORS.target
+                    : portHasBelt(data.buildings, hoverBuilding, slot)
+                    ? SLOT_COLORS.used
+                    : SLOT_COLORS.free
+            );
+            count++;
+        }
+        portMarkers.count = count;
+        portMarkers.instanceMatrix.needsUpdate = true;
+        if (portMarkers.instanceColor)
+            portMarkers.instanceColor.needsUpdate = true;
+        portMarkersVisible.value = true;
     }
 
     // 预览连线（建筑有无 slot 数据均显示；绿=可放置，红=不可）
@@ -1177,7 +1305,7 @@ onMounted(() => {
     /**
      * 光标 → 建筑传送带口绑定（串联用）。
      * 命中的建筑有口表、且光标在某个口附近（`pickBeltPort` 的 limit）时返回该口；
-     * 否则返回 null（当作普通空格/带格处理）。
+     * 否则返回 null（当作普通空格/带格处理）。换算与标记覆盖层共用 `beltPortAtPointer`。
      */
     const portEndAt = (e: PointerCoords): BeltPortEnd | null => {
         const queue = commandQueue.value;
@@ -1186,34 +1314,17 @@ onMounted(() => {
         if (hit === null) return null;
         const building = queue.data.buildings[hit.index];
         if (!building) return null;
-        if (!hasBeltPorts(building.itemId, building.modelIndex)) return null;
         const a = anchorOffset(e);
         if (a === null) return null;
+        const picked = beltPortAtPointer(building, a, hit.z, b.value.pos);
+        if (!picked) return null;
         const bp = building.localOffset[0];
-        // 经向环形坐标取短弧
-        let dx = a.x - bp.x;
-        if (dx > ROOT_GRID_SIZE / 2) dx -= ROOT_GRID_SIZE;
-        else if (dx < -ROOT_GRID_SIZE / 2) dx += ROOT_GRID_SIZE;
-        const dy = a.y - bp.y;
         const area = b.value.pos.areas[building.areaIndex];
         const cosLat = Math.cos(
             (area.latitude + bp.y) * ((2 * Math.PI) / (SEGMENT * 5))
         );
-        const yaw = building.yaw[0];
-        const r = (yaw * Math.PI) / 180;
-        // 网格偏移 → 建筑局部系（x 归一到赤道基准）
-        const lx = (dx * Math.cos(r) - dy * Math.sin(r)) * cosLat;
-        const ly = dx * Math.sin(r) + dy * Math.cos(r);
-        const picked = pickBeltPort(
-            building.itemId,
-            building.modelIndex,
-            lx,
-            ly,
-            hit.z
-        );
-        if (!picked) return null;
-        const off = portWorldOffset(picked.port, yaw, cosLat);
-        const n = portWorldNormal(picked.port, yaw);
+        const off = portWorldOffset(picked.port, building.yaw[0], cosLat);
+        const n = portWorldNormal(picked.port, building.yaw[0]);
         return {
             building,
             slot: picked.slot,
@@ -1686,9 +1797,12 @@ onMounted(() => {
         } else {
             updatePreview(e);
         }
-        // 分拣器架接模式：追踪悬停建筑与悬停锚点，驱动 slot/范围/连线覆盖层
-        if (isPlacingSorter()) {
-            sorterHover.value = pickBuilding(e);
+        // 架接（分拣器）/ 铺带（传送带）模式：追踪悬停建筑与悬停锚点，
+        // 驱动 分拣器口（圆点）/ 传送带口（方块）/ 范围条 / 预览连线 覆盖层
+        if (isPlacingSorter() || isPlacingBelt()) {
+            const hit = pickBuildingHit(e);
+            sorterHover.value = hit === null ? null : hit.index;
+            sorterHoverZ.value = hit === null ? 0 : hit.z;
             sorterHoverAnchor.value =
                 sorterHover.value === null ? null : anchorOffset(e) ?? null;
         }
@@ -1699,6 +1813,7 @@ onMounted(() => {
         reformCursorVisible.value = false;
         sorterHover.value = null;
         sorterHoverAnchor.value = null;
+        sorterHoverZ.value = 0;
         hideBeltPreview(); // 隐藏路径预览，但保留 A 点
     };
     // 鼠标静止时，键盘切换建筑 / R 旋转 / Shift 吸附变化也要刷新预览

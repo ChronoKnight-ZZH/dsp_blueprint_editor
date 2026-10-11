@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import { fromStr, toStr, ResearchMode, LabParamerters } from '@/blueprint/parser';
+import { fromStr, toStr, ResearchMode, LabParamerters, BlueprintBuilding } from '@/blueprint/parser';
 import {
     CreateBuildingCommand,
     createBuilding,
@@ -467,5 +467,132 @@ describe('分流器变形样式切换', () => {
         expect(isLab(2901)).toBe(true);
         expect(isLab(2902)).toBe(true);
         expect(isLab(2302)).toBe(false);
+    });
+});
+
+/**
+ * 用户样本 `stack_upward_game_sample.txt`（= `tests/tools/新蓝图002.txt`，0.10.35）：
+ * 三对**同类自叠**——四向分流器→四向分流器（z=2）、喷涂机→喷涂机（z=2）、
+ * 自动集装机→自动集装机（z=1.999）。此前兼容表里没有这三条，编辑器落位时会当成
+ * "同格两栋建筑"（都写 z=0）而不是向上叠放。
+ */
+describe('建筑向上叠放（同类自叠样本）', () => {
+    const game = fromStr(
+        fs
+            .readFileSync(
+                'tests/unit/blueprint/fixtures/stack_upward_game_sample.txt',
+                'utf-8'
+            )
+            .trim()
+    );
+    const at = (i: number) => game.buildings[i];
+    /** 样本里的 [底座下标, 上层下标] 配对 */
+    const PAIRS: [number, number][] = [
+        [0, 1], // 四向分流器 叠 四向分流器（z +2）
+        [2, 3], // 喷涂机 叠 喷涂机（z +2）
+        [4, 5], // 自动集装机 叠 自动集装机（z +1.999）
+    ];
+
+    test('三条同类自叠的层高、z 与端口字段都与样本一致', () => {
+        for (const [pi, ci] of PAIRS) {
+            const parent = at(pi);
+            const child = at(ci);
+            const label = `${parent.itemId}#${pi} ← ${child.itemId}#${ci}`;
+            // 兼容表放行
+            const off = stackOffsetFor(parent.itemId, child.itemId);
+            expect([label, off]).not.toEqual([label, null]);
+            // 层高与样本 z 差一致（集装机样本是 1.999，容 0.01）
+            const dz =
+                child.localOffset[0].z - parent.localOffset[0].z;
+            expect([label, Math.abs(off! - dz) <= 0.01]).toEqual([
+                label,
+                true,
+            ]);
+            // 落位 z
+            expect(stackedZ(parent, child.itemId)).toBeCloseTo(
+                child.localOffset[0].z,
+                2
+            );
+            // 上层建筑写 15/14 堆叠端口 + 指向底座；底座保持默认值
+            expect([label, child.inputObjIdx]).toEqual([
+                label,
+                parent.index,
+            ]);
+            expect([label, child.inputFromSlot]).toEqual([
+                label,
+                STACK_TOP_SLOT,
+            ]);
+            expect([label, child.inputToSlot]).toEqual([
+                label,
+                STACK_BOTTOM_SLOT,
+            ]);
+            expect([label, child.inputOffset]).toEqual([label, 0]);
+            expect([label, isStackLink(child)]).toEqual([label, true]);
+            expect([label, parent.inputObjIdx]).toEqual([label, -1]);
+            expect([label, parent.outputObjIdx]).toEqual([label, -1]);
+        }
+    });
+
+    test('未叠放时这三类建筑的堆叠端口默认值也有（与样本底座一致）', () => {
+        for (const b of game.buildings) {
+            const d = stackPortDefaults(b.itemId);
+            expect(d).not.toBeUndefined();
+            expect(b.outputToSlot).toBe(d!.outputToSlot);
+            expect(b.outputFromSlot).toBe(d!.outputFromSlot);
+            expect(b.inputFromSlot).toBe(d!.inputFromSlot);
+            expect(b.inputToSlot).toBe(d!.inputToSlot);
+        }
+    });
+
+    test('编辑器落位链路：预览/放置都会叠到上一层并写 15/14', () => {
+        const bp = createEmptyBlueprint();
+        const base = createBuilding(2313, 120, { x: 5, y: 80 }, 0);
+        new CreateBuildingCommand(base).do(bp);
+        // 光标落在底座上 → 底座判定 + 落位高度
+        const parent = stackBaseFor(bp.buildings, base, 5, 80, 2313);
+        expect(parent).toBe(base);
+        expect(stackedZ(parent, 2313)).toBe(2);
+        // 新建筑按堆叠链路写入
+        const child = createBuilding(
+            2313,
+            120,
+            { x: 5, y: 80 },
+            0,
+            stackedZ(parent, 2313)
+        );
+        linkStack(child, parent as BlueprintBuilding);
+        new CreateBuildingCommand(child).do(bp);
+        expect(child.localOffset[0].z).toBe(2);
+        expect(child.inputObjIdx).toBe(base.index);
+        expect(child.inputFromSlot).toBe(STACK_TOP_SLOT);
+        expect(child.inputToSlot).toBe(STACK_BOTTOM_SLOT);
+        // 导出再解析：三层链路字段保持（一列两台）
+        const back = fromStr(toStr(bp));
+        const top = back.buildings.find((b) => b.localOffset[0].z === 2)!;
+        expect(top.itemId).toBe(2313);
+        expect(top.inputFromSlot).toBe(STACK_TOP_SLOT);
+        expect(top.inputToSlot).toBe(STACK_BOTTOM_SLOT);
+    });
+
+    test('喷涂机/集装机也能连续向上叠（stackBaseFor 取该格最高建筑）', () => {
+        const bp = createEmptyBlueprint();
+        const base = createBuilding(2040, 257, { x: 5, y: 80 }, 0);
+        new CreateBuildingCommand(base).do(bp);
+        const mid = createBuilding(
+            2040,
+            257,
+            { x: 5, y: 80 },
+            0,
+            stackedZ(base, 2040)
+        );
+        linkStack(mid, base);
+        new CreateBuildingCommand(mid).do(bp);
+        // 光标还在同一格：底座应取"能承载的最高建筑"（mid）
+        const parent = stackBaseFor(bp.buildings, mid, 5, 80, 2040);
+        expect(parent?.index).toBe(mid.index);
+        expect(stackedZ(parent as BlueprintBuilding, 2040)).toBeCloseTo(
+            4,
+            4
+        );
     });
 });

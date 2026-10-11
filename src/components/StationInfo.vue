@@ -4,22 +4,17 @@
         <h3>{{ t("端口") }}</h3>
         <div class="port-row" v-for="port in portList" :key="port.slot">
             <span class="port-slot">{{ t("口") }} {{ port.slot }}</span>
-            <select
-                class="role"
+            <!--
+                口方向（无 / 出塔 / 入塔）**只读**：它由传送带连接自动维护
+                （`CreateBeltLineCommand.syncStationPorts`：带从站取出 → 出塔、带送入站 → 入塔），
+                所以这里不再提供修改下拉框，避免用户手改出与传送带不一致的数据。
+            -->
+            <span
+                class="role role-readonly"
                 :class="portDirClass(port.dir)"
-                :value="port.dir"
-                @change="
-                    (e) =>
-                        setPortDir(
-                            port.slot,
-                            Number((e.target as HTMLSelectElement).value)
-                        )
-                "
             >
-                <option :value="IODir.None">{{ t("无") }}</option>
-                <option :value="IODir.Output">{{ t("出塔") }}</option>
-                <option :value="IODir.Input">{{ t("入塔") }}</option>
-            </select>
+                {{ portDirText(port.dir) }}
+            </span>
             <span
                 class="port-item"
                 :class="{ 'port-item-none': portItemId(port.storageIdx) === 0 }"
@@ -444,13 +439,9 @@ const portDirClass = (dir: number) =>
         : dir === IODir.Input
         ? "role-demand"
         : "role-none";
-const setPortDir = (slot: number, dir: number) => {
-    const s = (props.building.parameters as StationParameters).slots[slot];
-    if (s.dir === dir) return;
-    commandQueue.push(
-        new SetStationPortCommand(props.building, slot, dir as IODir, undefined)
-    );
-};
+/** 口方向文案（只读展示；方向由传送带连接自动维护） */
+const portDirText = (dir: number) =>
+    dir === IODir.Output ? t("出塔") : dir === IODir.Input ? t("入塔") : t("无");
 const setPortItem = (slot: number, storageIdx: number) => {
     const s = (props.building.parameters as StationParameters).slots[slot];
     if (s.storageIdx === storageIdx) return;
@@ -629,6 +620,11 @@ const auToWarp = (au: number) => Math.round(au * 40000);
             border: none;
             color: #fff;
             cursor: pointer;
+        }
+        /* 只读的口方向徽标：与下拉框同样式，但不可点、不可改 */
+        .role-readonly {
+            cursor: default;
+            opacity: 0.9;
         }
         .role-none {
             background: #b2b2b2;

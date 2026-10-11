@@ -230,3 +230,95 @@ describe('物流站口方向随传送带连接同步', () => {
         expect(params.slots[1].dir).toBe(IODir.Output);
     });
 });
+
+/**
+ * 用户反馈："传送带接分流器没有连接"。
+ * 根因：分流器四个口的记录位置都在 ±0.2 格（口贴在建筑上，游戏如此），`round()` 后
+ * **全部落在分流器自己那一格**；旧实现按"格"判重，于是给第二个口接带时被判成
+ * "该格已有带"而整条丢弃 → 看起来完全没反应。
+ * 现在口带按**口身份**（取/送方向 + 建筑 + 口编号 + 高度层）判重，同一分流器的不同口互不冲突。
+ * 字段形态与游戏样本 `splitter_6states_game_sample.txt` 一致：
+ * 送入 = `out=<分流器>/<口>/0/0 in=-1/0/1/0`，取出 = `in=<分流器>/<口>/1/0 out=<下一格>/1/0/0`。
+ */
+describe('四向分流器：同一分流器的多个口各接一条带', () => {
+    test('2 口送入 + 0 口取出 都能接上（旧实现第二条会被整条丢弃）', () => {
+        const bp = createEmptyBlueprint();
+        const splitter = addBuilding(bp, 2020, 38, 15, Y0);
+
+        // 送入 2 口（-y）：带从南侧进来
+        const end2 = portEnd(splitter, 2);
+        expect(end2.point.z).toBe(0);
+        expect(end2.point.y).toBeCloseTo(Y0 - 0.2, 6);
+        const incoming = buildBeltLine(2001, 35, { x: 15, y: Y0 - 4 }, { x: 15, y: Y0 }, 0, 'latFirst', null, end2);
+        new CreateBeltLineCommand(incoming, null, end2).do(bp);
+        const lastIn = incoming[incoming.length - 1];
+        expect(lastIn.outputObjIdx).toBe(splitter.index);
+        expect(lastIn.outputToSlot).toBe(2);
+        expect(lastIn.outputFromSlot).toBe(0);
+        expect(lastIn.outputOffset).toBe(0);
+        expect(lastIn.localOffset[0].y).toBeCloseTo(Y0 - 0.2, 2);
+        expect(lastIn.inputObjIdx).toBe(-1);
+        expect(lastIn.inputToSlot).toBe(1);
+
+        // 取出 0 口（+y）：带向北离开 —— 关键回归点
+        const start0 = portEnd(splitter, 0);
+        expect(start0.point.y).toBeCloseTo(Y0 + 0.2, 6);
+        const outgoing = buildBeltLine(2001, 35, { x: 15, y: Y0 }, { x: 15, y: Y0 + 4 }, 0, 'latFirst', start0, null);
+        new CreateBeltLineCommand(outgoing, start0, null).do(bp);
+        const firstOut = outgoing[0];
+        expect(firstOut.inputObjIdx).toBe(splitter.index);
+        expect(firstOut.inputFromSlot).toBe(0);
+        expect(firstOut.inputToSlot).toBe(1);
+        expect(firstOut.inputOffset).toBe(0);
+        expect(firstOut.localOffset[0].y).toBeCloseTo(Y0 + 0.2, 2);
+        // 取出带的链首仍要指向下一格（不能因为口绑定把链路写丢）
+        expect(firstOut.outputObjIdx).toBe(outgoing[1].index);
+        expect(firstOut.outputToSlot).toBe(1);
+
+        // 导出再解析：两条口带都在、连接字段都在
+        const back = fromStr(toStr(bp));
+        const sp = back.buildings.find((b) => b.itemId === 2020)!;
+        const belts = back.buildings.filter((b) => isBelt(b.itemId));
+        expect(belts.some((b) => b.outputObjIdx === sp.index && b.outputToSlot === 2)).toBe(true);
+        expect(belts.some((b) => b.inputObjIdx === sp.index && b.inputFromSlot === 0)).toBe(true);
+    });
+
+    test('同一个口再接第二条 → 在口格前截断，该口仍只有第一条带', () => {
+        const bp = createEmptyBlueprint();
+        const splitter = addBuilding(bp, 2020, 38, 15, Y0);
+        const end2 = portEnd(splitter, 2);
+        const first = buildBeltLine(2001, 35, { x: 15, y: Y0 - 4 }, { x: 15, y: Y0 }, 0, 'latFirst', null, end2);
+        new CreateBeltLineCommand(first, null, end2).do(bp);
+
+        const end2b = portEnd(splitter, 2);
+        const again = buildBeltLine(2001, 35, { x: 15, y: Y0 - 6 }, { x: 15, y: Y0 }, 0, 'latFirst', null, end2b);
+        new CreateBeltLineCommand(again, null, end2b).do(bp);
+        // 口上仍只有第一条带（第二次拖拽在口格前截断，前缀格保留为普通带）
+        const bound = bp.buildings.filter(
+            (b) =>
+                isBelt(b.itemId) &&
+                b.outputObjIdx === splitter.index &&
+                b.outputToSlot === 2
+        );
+        expect(bound).toHaveLength(1);
+        expect(bound[0].localOffset[0].y).toBeCloseTo(Y0 - 0.2, 2);
+    });
+
+    test('同一格不同高度层是允许的（游戏里的桥接带）', () => {
+        const bp = createEmptyBlueprint();
+        // 地面层一条直带
+        const ground = buildBeltLine(2001, 35, { x: 5, y: Y0 - 3 }, { x: 5, y: Y0 + 3 }, 0);
+        new CreateBeltLineCommand(ground).do(bp);
+        expect(bp.buildings.filter((b) => isBelt(b.itemId))).toHaveLength(7);
+        // 同一格放一条 z=0.5 的带：不判重、照常新增
+        const raised = buildBeltLine(2001, 35, { x: 5, y: Y0 }, { x: 5, y: Y0 + 2 }, 0);
+        for (const b of raised) {
+            for (const p of b.localOffset) p.z = 0.5;
+        }
+        new CreateBeltLineCommand(raised).do(bp);
+        const atY0 = bp.buildings.filter(
+            (b) => isBelt(b.itemId) && Math.round(b.localOffset[0].y) === Y0
+        );
+        expect(atY0).toHaveLength(2);
+    });
+});

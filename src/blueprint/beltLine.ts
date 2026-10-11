@@ -221,11 +221,51 @@ function placeAtPort(
     }
 }
 
-/** 已存在传送带按**取整**后的格判定（口格的记录位置是分数） */
+/** 高度层（0.1 格精度）：同一格不同高度是游戏允许的桥接（样本有同格 z=0 / z=0.5 两条带） */
+function zLayer(z: number): number {
+    return Math.round(z * 10) / 10;
+}
+
+/** 普通传送带的"格身份"：格 + 高度层 */
 function cellKey(b: BlueprintBuilding): string {
     return `${wrapX(Math.round(b.localOffset[0].x))},${Math.round(
         b.localOffset[0].y
+    )},${zLayer(b.localOffset[0].z)}`;
+}
+
+/**
+ * 接在建筑口上的传送带的身份 = **口**（取/送方向 + 建筑 index + 口编号 + 高度层）。
+ *
+ * 为什么不能按格判重：口格的记录位置是口的**精确坐标**（游戏如此，见 {@link placeAtPort}），
+ * 四向分流器四个口都在 ±0.2 格处 → `round()` 后全部落在**分流器自己那一格**。
+ * 按格判重会把"给第二个口接带"误判成"该格已有带"而整条丢弃，
+ * 表现为"传送带接分流器没反应 / 没有连接"（用户反馈，样本 `分流器6状态.txt` 里
+ * 同一分流器的 0 口与 2 口各有一条带）。
+ *
+ * 注意：只有被连接的一端是**建筑**时才算"口带"；带↔带的串联仍是普通格身份
+ * （否则每一条串联带都会变成"口带"，同格截断判定就失效了）。
+ */
+function portKey(
+    b: BlueprintBuilding,
+    byIndex: ReadonlyMap<number, BlueprintBuilding>
+): string | null {
+    const isInput = b.inputObjIdx >= 0;
+    const idx = isInput ? b.inputObjIdx : b.outputObjIdx;
+    if (idx < 0) return null;
+    const other = byIndex.get(idx);
+    if (!other || isBelt(other)) return null;
+    const slot = isInput ? b.inputFromSlot : b.outputToSlot;
+    return `${isInput ? "in" : "out"}:${idx}:${slot}:${zLayer(
+        b.localOffset[0].z
     )}`;
+}
+
+/** 传送带在占用表里的键：口带按口身份，普通带按格身份 */
+function occupancyKey(
+    b: BlueprintBuilding,
+    byIndex: ReadonlyMap<number, BlueprintBuilding>
+): string {
+    return portKey(b, byIndex) ?? cellKey(b);
 }
 
 /** 判断某格上是否已有传送带（同 itemId 家族：2001/2002/2003） */
@@ -354,8 +394,11 @@ export class CreateBeltLineCommand implements Command {
         this.prevSizeX = root.size.x;
 
         const existing = new Map<string, BlueprintBuilding>();
+        /** index → 建筑（判断"带接的是建筑还是带"用） */
+        const byIndex = new Map<number, BlueprintBuilding>();
+        for (const b of data.buildings) byIndex.set(b.index, b);
         for (const b of data.buildings) {
-            if (isBelt(b)) existing.set(cellKey(b), b);
+            if (isBelt(b)) existing.set(occupancyKey(b, byIndex), b);
         }
 
         for (let i = 0; i < this.belts.length; i++) {
@@ -363,9 +406,9 @@ export class CreateBeltLineCommand implements Command {
             const portBound =
                 (i === 0 && this.startPort !== null) ||
                 (i === this.belts.length - 1 && this.endPort !== null);
-            const hit = existing.get(cellKey(b));
+            const hit = existing.get(occupancyKey(b, byIndex));
             if (hit !== undefined) {
-                // 口格已被占用：该口已经有带（游戏里一个口只能接一条），本次拖拽截断
+                // 口已被占用：该口已经有带（游戏里一个口只能接一条），本次拖拽截断
                 if (portBound) break;
                 // 该格已在某条线路**中间**（已有下游）：再接入会形成两个上游，游戏不支持
                 // （需要分流器/集装机）。此时截断本次拖拽：不改动已有格、也不再新建后续格，
@@ -382,7 +425,8 @@ export class CreateBeltLineCommand implements Command {
             b.areaIndex = areaIndex;
             b.index = data.buildings.length;
             data.buildings.push(b);
-            existing.set(cellKey(b), b);
+            byIndex.set(b.index, b);
+            existing.set(occupancyKey(b, byIndex), b);
             this.path.push(b);
             this.added++;
         }
@@ -422,8 +466,6 @@ export class CreateBeltLineCommand implements Command {
             this.syncStationPorts(data);
 
         // 复用格：yaw 按**实际**上下游重算（多次拖拽拼接时进入方向来自上一次拖拽）
-        const byIndex = new Map<number, BlueprintBuilding>();
-        for (const b of data.buildings) byIndex.set(b.index, b);
         for (const r of this.reused) {
             const cell = r.belt;
             const succ =
