@@ -472,6 +472,10 @@ const selectedBuilding = computed(() => {
 });
 const buildingInfo = computed(() => {
     if (data.value === null) return null;
+    // 拓扑类命令（铺传送带 / 架分拣器 / 增删建筑）后重建邻接表：
+    // data 是 shallowRef，命令原地改 buildings 数组不会触发 computed 重算，
+    // 依赖 execVersion 才能让侧栏（分流器面板等）的邻接关系与 3D 场景同步刷新。
+    commandQueue.value?.execVersion.value;
     return new BuildingInfo(data.value.buildings);
 });
 provide(buildingInfoKey, buildingInfo);
