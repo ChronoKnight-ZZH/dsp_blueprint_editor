@@ -5,4 +5,9 @@ declare module "*.vue" {
     export default component;
 }
 
+declare module "*.md" {
+    const content: string;
+    export default content;
+}
+
 declare function gtag(...args: any[]): void;

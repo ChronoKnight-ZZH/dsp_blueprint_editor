@@ -330,7 +330,8 @@
             @change="onPhotoFile"
         />
         <ReformColorDialog v-if="rgbaOpen" @close="rgbaOpen = false" />
-        <ShortcutHint />
+        <ShortcutHint @open-tutorial="tutorialModal?.open()" />
+        <TutorialModal ref="tutorialModal" />
     </div>
 </template>
 
@@ -383,6 +384,7 @@ import { CommandQueue } from "./command";
 import BuildingOverview from "./components/BuildingOverview.vue";
 import BuildingPalette from "./components/BuildingPalette.vue";
 import ShortcutHint from "./components/ShortcutHint.vue";
+import TutorialModal from "./components/TutorialModal.vue";
 import ReformColorDialog from "./components/ReformColorDialog.vue";
 import { photoToBlueprint } from "@/blueprint/reformImage";
 import { useLang } from "./i18n";
@@ -401,6 +403,8 @@ const lang = useLang();
 const renderer = ref<null | InstanceType<typeof BlueprintEditorImpl>>(null);
 const replaceModal = ref<null | InstanceType<typeof ReplaceModal>>(null);
 const iconPickerModal = ref<null | InstanceType<typeof IconPickerModal>>(null);
+const tutorialModal =
+    ref<null | InstanceType<typeof TutorialModal>>(null);
 provide(rendererKey, renderer);
 
 const bpStr = ref("");
@@ -895,6 +899,12 @@ const hotkey = (event: KeyboardEvent) => {
         target?.isContentEditable
     )
         return;
+
+    // /：打开使用教程
+    if (event.key === "/") {
+        event.preventDefault();
+        tutorialModal.value?.open();
+    }
 };
 
 // Shift
@@ -1022,7 +1032,7 @@ body {
     right: 0;
     top: 0;
     bottom: 0;
-    width: 420px;
+    width: 360px;
     overflow-y: auto;
     box-sizing: border-box;
     background: #000000b0;

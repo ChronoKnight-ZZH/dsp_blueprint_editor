@@ -14,6 +14,10 @@ module.exports = defineConfig({
                 }, {
                     test: /\/assets\/icons\/(item_recipe|signal|tech)\//,
                     type: 'asset/resource',
+                }, {
+                    // 教程 Markdown 以原始文本内联（供 TutorialModal 渲染）
+                    test: /\.md$/,
+                    type: 'asset/source',
                 },
             ],
         },

@@ -9,6 +9,17 @@
                 <span class="hint-key">{{ t(row[0]) }}</span>
                 <span class="hint-action">{{ t(row[1]) }}</span>
             </div>
+            <div
+                class="hint-row tutorial-row"
+                role="button"
+                tabindex="0"
+                :title="t('使用教程')"
+                @click="emit('open-tutorial')"
+                @keydown.enter="emit('open-tutorial')"
+            >
+                <span class="hint-key">?</span>
+                <span class="hint-action">{{ t("使用教程") }}</span>
+            </div>
         </div>
     </div>
 </template>
@@ -20,6 +31,10 @@ import { usePlacement } from "@/editor/placementState";
 
 const { t } = useI18n();
 const placement = usePlacement();
+
+const emit = defineEmits<{
+    (event: "open-tutorial"): void;
+}>();
 
 const collapsed = ref(false);
 
@@ -123,6 +138,21 @@ const rows = computed<[string, string][]>(() => {
         color: #ddd;
     }
 }
+
+.tutorial-row {
+    margin-top: 4px;
+    padding-top: 3px;
+    border-top: 1px solid #ffffff33;
+    cursor: pointer;
+    outline: none;
+
+    &:hover,
+    &:focus-visible {
+        .hint-action {
+            color: #a8d0f0;
+        }
+    }
+}
 </style>
 
 <i18n>
@@ -160,7 +190,8 @@ const rows = computed<[string, string][]>(() => {
         "0 / O": "0 / O",
         "WASD": "WASD",
         "N": "N",
-        "右键 / Esc": "右键 / Esc"
+        "右键 / Esc": "右键 / Esc",
+        "使用教程": "使用教程"
     },
     "en": {
         "当前模式": "Mode",
@@ -194,7 +225,8 @@ const rows = computed<[string, string][]>(() => {
         "0 / O": "0 / O",
         "WASD": "WASD",
         "N": "N",
-        "右键 / Esc": "Right click / Esc"
+        "右键 / Esc": "Right click / Esc",
+        "使用教程": "Tutorial"
     }
 }
 </i18n>
