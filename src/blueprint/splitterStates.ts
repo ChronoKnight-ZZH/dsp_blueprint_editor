@@ -60,7 +60,8 @@ export function splitterStateOf(
     }
 
     // 状态 1/2/3：只有连接数量，没有任何优先级/筛选设置
-    const noSettings = !priorityInput && !priorityOutput && splitter.filterId === 0;
+    const noSettings =
+        !priorityInput && !priorityOutput && splitter.filterId === 0;
     if (noSettings) {
         if (inputs.length === 1 && outputs.length === 0) return 1; // 一进
         if (inputs.length === 0 && outputs.length === 1) return 2; // 溢出

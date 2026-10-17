@@ -72,7 +72,8 @@ export class SetStationPortCommand implements Command {
                 b.outputObjIdx === this.building.index &&
                 b.outputToSlot === this.slot;
             if (!fromPort && !toPort) continue;
-            b.parameters = itemId > 0 ? { iconId: itemIconId(itemId), count: 0 } : null;
+            b.parameters =
+                itemId > 0 ? { iconId: itemIconId(itemId), count: 0 } : null;
             updater.updateBeltIcon.dispatch(b);
         }
     }

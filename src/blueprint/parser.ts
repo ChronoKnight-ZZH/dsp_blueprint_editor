@@ -1078,7 +1078,7 @@ const V2_INSERTER_ITEM_IDS = new Set([2011, 2012, 2013, 2014]);
 
 /** 两个角度（度）之间的最小夹角（0..180） */
 export function angleDiffDeg(a: number, b: number): number {
-    return Math.abs((((a - b) % 360) + 540) % 360 - 180);
+    return Math.abs(((((a - b) % 360) + 540) % 360) - 180);
 }
 
 function isV2RecordMarkerAt(bytes: Uint8Array, off: number): boolean {

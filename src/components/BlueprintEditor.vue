@@ -619,7 +619,11 @@ import { Scene, PerspectiveCamera, SphereGeometry, AmbientLight } from "three";
 import { PlanetMapControls } from "@/PlanetMapControls";
 import { attachCamera, attachRenderer } from "@/utils";
 import { usePlacement, resetToIdle } from "@/editor/placementState";
-import { planetToLocal, ROOT_GRID_SIZE, type AreaGridOrigin } from "@/blueprint/area";
+import {
+    planetToLocal,
+    ROOT_GRID_SIZE,
+    type AreaGridOrigin,
+} from "@/blueprint/area";
 import { createBuilding, CreateBuildingCommand } from "@/blueprint/create";
 import {
     buildBeltLine,
@@ -636,10 +640,7 @@ import {
     type BeltPort,
 } from "@/data/beltPorts";
 import { createSorterBetween, collectOccupiedSlots } from "@/blueprint/sorter";
-import {
-    PaintReformCellCommand,
-    reformColorHex,
-} from "@/blueprint/reformEdit";
+import { PaintReformCellCommand, reformColorHex } from "@/blueprint/reformEdit";
 import { getBuildingSlots, slotDisplayPos } from "@/data/buildingSlots";
 import {
     inheritLabSettings,
@@ -1007,13 +1008,7 @@ function beltPortAtPointer(
     // 网格偏移 → 建筑局部系（x 归一到赤道基准）
     const lx = (dx * Math.cos(r) - dy * Math.sin(r)) * cosLat;
     const ly = dx * Math.sin(r) + dy * Math.cos(r);
-    return pickBeltPort(
-        building.itemId,
-        building.modelIndex,
-        lx,
-        ly,
-        hitZ
-    );
+    return pickBeltPort(building.itemId, building.modelIndex, lx, ly, hitZ);
 }
 
 /** 该口上是否已经挂着传送带（口带：带以建筑口为端点） */
@@ -1026,8 +1021,7 @@ function portHasBelt(
         (b) =>
             isBelt(b.itemId) &&
             ((b.inputObjIdx === building.index && b.inputFromSlot === slot) ||
-                (b.outputObjIdx === building.index &&
-                    b.outputToSlot === slot))
+                (b.outputObjIdx === building.index && b.outputToSlot === slot))
     );
 }
 
@@ -1296,7 +1290,10 @@ onMounted(() => {
             return null;
         const p = ray.origin
             .clone()
-            .addScaledVector(ray.direction, Math.sqrt(intersects[0].distanceSquared));
+            .addScaledVector(
+                ray.direction,
+                Math.sqrt(intersects[0].distanceSquared)
+            );
         return {
             index: intersects[0].index,
             z: (p.length() - R) / HEIGHT_GRID_SIZE,
@@ -1525,9 +1522,10 @@ onMounted(() => {
 
     // ---- 地基模式：逐格铺/涂 ----
     /** 网格偏移 → 地基光标世界矩阵（薄板贴于格子中心，朝向球面法线） */
-    const reformCellMatrix = (
-        offset: { x: number; y: number }
-    ): Matrix4 | null => {
+    const reformCellMatrix = (offset: {
+        x: number;
+        y: number;
+    }): Matrix4 | null => {
         if (b.value === null) return null;
         const fake = createBuilding(1131, 0, offset, 0);
         const t = calcBuildingTrans(R, b.value.pos, fake)[0].clone();
@@ -1537,10 +1535,7 @@ onMounted(() => {
 
     /** 地基模式：鼠标所在格 → 目标格高亮（颜色 = 当前槽位色） */
     const updateReformCursor = (e: PointerCoords) => {
-        if (
-            placement.appMode !== "edit" ||
-            placement.mode !== "reforming"
-        ) {
+        if (placement.appMode !== "edit" || placement.mode !== "reforming") {
             reformCursorVisible.value = false;
             return;
         }
@@ -1585,7 +1580,9 @@ onMounted(() => {
         const y = Math.floor(a.y);
         const root = queue.data.areas[0];
         if (y < 0 || y >= root.size.y || x < 0 || x >= root.size.x) return;
-        queue.push(new PaintReformCellCommand(0, x, y, placement.reformColorSlot));
+        queue.push(
+            new PaintReformCellCommand(0, x, y, placement.reformColorSlot)
+        );
     };
 
     /** 未设 A 点时：在鼠标位置显示单个传送带方块（悬停建筑口时贴到口上） */

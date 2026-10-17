@@ -220,18 +220,14 @@ export class SetReformCustomColorCommand implements Command {
     private prev: number | null = null;
     private prevMaskBit = false;
 
-    constructor(
-        private readonly slot: number,
-        private readonly rgba: number
-    ) {}
+    constructor(private readonly slot: number, private readonly rgba: number) {}
 
     do(data: BlueprintData): void {
         const rd = ensureReformData(data);
         const idx = this.slot - CUSTOM_COLOR_SLOT_BASE;
         if (idx < 0 || idx >= CUSTOM_COLOR_SLOTS) return;
         this.prev = rd.customReformColors[idx] ?? null;
-        this.prevMaskBit =
-            ((rd.customReformColorMask >>> this.slot) & 1) !== 0;
+        this.prevMaskBit = ((rd.customReformColorMask >>> this.slot) & 1) !== 0;
         setCustomSlotColor(rd, this.slot, this.rgba);
     }
 

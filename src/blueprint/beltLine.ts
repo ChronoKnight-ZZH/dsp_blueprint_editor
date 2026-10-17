@@ -497,8 +497,11 @@ export class CreateBeltLineCommand implements Command {
      * 只有参数里带 `slots` 的建筑（物流站）需要，其余建筑不写反向引用。
      */
     private syncStationPorts(data: BlueprintData): void {
-        const bindings: { building: BlueprintBuilding; slot: number; dir: number }[] =
-            [];
+        const bindings: {
+            building: BlueprintBuilding;
+            slot: number;
+            dir: number;
+        }[] = [];
         if (this.connectedStart && this.startPort)
             bindings.push({
                 building: this.startPort.building,
@@ -514,9 +517,9 @@ export class CreateBeltLineCommand implements Command {
         const live = new Set(data.buildings);
         for (const b of bindings) {
             if (!live.has(b.building)) continue;
-            const params = b.building.parameters as
-                | { slots?: { dir: number }[] }
-                | null;
+            const params = b.building.parameters as {
+                slots?: { dir: number }[];
+            } | null;
             const slot = params?.slots?.[b.slot];
             if (!slot) continue;
             this.portDirChanges.push({
@@ -530,9 +533,9 @@ export class CreateBeltLineCommand implements Command {
 
     undo(data: BlueprintData): void {
         for (const c of this.portDirChanges) {
-            const params = c.building.parameters as
-                | { slots?: { dir: number }[] }
-                | null;
+            const params = c.building.parameters as {
+                slots?: { dir: number }[];
+            } | null;
             const slot = params?.slots?.[c.slot];
             if (slot) slot.dir = c.prev;
         }

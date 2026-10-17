@@ -1,4 +1,9 @@
-import { BlueprintBuilding, BlueprintData, IODir, StationParameters } from "./parser";
+import {
+    BlueprintBuilding,
+    BlueprintData,
+    IODir,
+    StationParameters,
+} from "./parser";
 import { Command } from "@/command";
 import { isBelt } from "@/data/items";
 
@@ -61,7 +66,8 @@ export class RemoveBuildingsCommand implements Command {
             const b = r.building;
             if (!isBelt(b.itemId)) continue;
             const links: [number, number][] = [];
-            if (b.inputObjIdx >= 0) links.push([b.inputObjIdx, b.inputFromSlot]);
+            if (b.inputObjIdx >= 0)
+                links.push([b.inputObjIdx, b.inputFromSlot]);
             if (b.outputObjIdx >= 0)
                 links.push([b.outputObjIdx, b.outputToSlot]);
             for (const [target, slot] of links) {

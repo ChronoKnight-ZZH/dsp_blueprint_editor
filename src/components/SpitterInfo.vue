@@ -1,26 +1,63 @@
 <template>
     <div class="splitter-pannel" @contextmenu.prevent>
         <svg viewBox="-125 -125 250 250" xmlns="http://www.w3.org/2000/svg">
-            <circle cx=0 cy=0 r=50 stroke="currentcolor" fill="#0006" stroke-width=".5" opacity="0.6" />
-            <template v-for="(a, i) in adjacency" :key="i" >
-                <g v-if="a"
+            <circle
+                cx="0"
+                cy="0"
+                r="50"
+                stroke="currentcolor"
+                fill="#0006"
+                stroke-width=".5"
+                opacity="0.6"
+            />
+            <template v-for="(a, i) in adjacency" :key="i">
+                <g
+                    v-if="a"
                     class="splitter-port"
                     :opacity="params.priority[i] ? 1 : 0.5"
                     @click.left.prevent.stop="onPortLeft(i)"
-                    @contextmenu.prevent.stop="onPortRight(i)">
-                    <path d="M-5 -55l5 10 5 -10z" :fill="color(i)"
-                        :transform="`rotate(${yaw[i]})` + (isInput(i) ? '' : 'rotate(180 0 -50)')"/>
+                    @contextmenu.prevent.stop="onPortRight(i)"
+                >
+                    <path
+                        d="M-5 -55l5 10 5 -10z"
+                        :fill="color(i)"
+                        :transform="
+                            `rotate(${yaw[i]})` +
+                            (isInput(i) ? '' : 'rotate(180 0 -50)')
+                        "
+                    />
                     <g :transform="circleTrans[i]">
                         <template v-if="!isInput(i) && params.priority[i]">
-                            <circle cx=0 cy=0 r=16 fill="none" :stroke="color(i)" stroke-width="3"/>
-                            <image v-if="props.building.filterId > 0"
-                                :href="filterIcon" width=24 height=24 x=-12 y=-12></image>
-                            <text v-else fill="currentcolor" x=0 y=0 textLength="24"
-                                font-size="8" text-anchor="middle" dominant-baseline="middle">
+                            <circle
+                                cx="0"
+                                cy="0"
+                                r="16"
+                                fill="none"
+                                :stroke="color(i)"
+                                stroke-width="3"
+                            />
+                            <image
+                                v-if="props.building.filterId > 0"
+                                :href="filterIcon"
+                                width="24"
+                                height="24"
+                                x="-12"
+                                y="-12"
+                            ></image>
+                            <text
+                                v-else
+                                fill="currentcolor"
+                                x="0"
+                                y="0"
+                                textLength="24"
+                                font-size="8"
+                                text-anchor="middle"
+                                dominant-baseline="middle"
+                            >
                                 过滤器
                             </text>
                         </template>
-                        <circle v-else cx=0 cy=0 r=12 :fill="color(i)"/>
+                        <circle v-else cx="0" cy="0" r="12" :fill="color(i)" />
                     </g>
                 </g>
             </template>
@@ -37,22 +74,37 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, inject, ref, watch, watchEffect } from 'vue';
+import { computed, inject, ref, watch, watchEffect } from "vue";
 import { BlueprintBuilding, SplitterParameters } from "@/blueprint/parser";
-import { itemsMap } from '@/data';
-import { AmbientLight, BoxGeometry, DirectionalLight, Matrix4, Mesh, MeshStandardMaterial, PerspectiveCamera, Scene, Vector2, Vector3, WebGLRenderer } from 'three';
-import { attachRenderer } from '@/utils';
-import { itemRecipeIconUrl } from '@/data/icons';
-import { buildingInfoKey, commandQueueKey, rendererKey } from '@/define';
+import { itemsMap } from "@/data";
+import {
+    AmbientLight,
+    BoxGeometry,
+    DirectionalLight,
+    Matrix4,
+    Mesh,
+    MeshStandardMaterial,
+    PerspectiveCamera,
+    Scene,
+    Vector2,
+    Vector3,
+    WebGLRenderer,
+} from "three";
+import { attachRenderer } from "@/utils";
+import { itemRecipeIconUrl } from "@/data/icons";
+import { buildingInfoKey, commandQueueKey, rendererKey } from "@/define";
 import {
     SetSplitterFilterCommand,
     SetSplitterPriorityCommand,
-} from '@/blueprint/setSplitterPort';
-import { splitterPortClickAction, splitterPortKind } from '@/blueprint/splitterPorts';
-import ItemSelect from './ItemSelect.vue';
+} from "@/blueprint/setSplitterPort";
+import {
+    splitterPortClickAction,
+    splitterPortKind,
+} from "@/blueprint/splitterPorts";
+import ItemSelect from "./ItemSelect.vue";
 
 const props = defineProps<{
-    building: BlueprintBuilding,
+    building: BlueprintBuilding;
 }>();
 
 const mainRenderer = inject(rendererKey)!.value!;
@@ -74,19 +126,20 @@ const stateVersion = queue.stateVersion;
 const adjacency = computed(() => {
     stateVersion.value;
     return buildingInfoRef.value?.adjacency[props.building.index] ?? [];
-})
+});
 const isInput = (i: number) => {
     return adjacency.value[i].outputObjIdx === props.building.index;
-}
+};
 const color = (i: number) => {
-    return isInput(i) ? '#AFFFFF' : '#FCE88F';
-}
+    return isInput(i) ? "#AFFFFF" : "#FCE88F";
+};
 
 const posFromCamera = computed(() => {
     const pos = new Matrix4();
     mainRenderer.cameraPosVersion;
     const model = mainRenderer.getModel(props.building.index);
-    if (model) {  // may be null when closing blueprint
+    if (model) {
+        // may be null when closing blueprint
         pos.multiplyMatrices(mainRenderer.camera.matrixWorldInverse, model);
     }
     return pos;
@@ -97,42 +150,48 @@ const pos = new Vector3();
 const defaultR = 90;
 const offsetR = 16;
 const circlePos = (i: number) => {
-    const singleLine = props.building.modelIndex === 39
+    const singleLine = props.building.modelIndex === 39;
     let deg;
     let r = defaultR;
     if (singleLine) {
         deg = Math.floor(i / 2) * 180.0;
     } else {
         deg = 90 * i;
-        r -= offsetR
+        r -= offsetR;
     }
-    const rad = (deg + props.building.yaw[0]) / 180.0 * Math.PI;
+    const rad = ((deg + props.building.yaw[0]) / 180.0) * Math.PI;
     const c = new Vector2(Math.sin(rad), -Math.cos(rad)).multiplyScalar(r);
 
     if (singleLine) {
         pos.setFromMatrixPosition(posFromCamera.value);
         const up = i % 2 === 1 ? 1 : -1;
-        offset.set(pos.x, -pos.y).normalize().multiplyScalar(offsetR * up);
+        offset
+            .set(pos.x, -pos.y)
+            .normalize()
+            .multiplyScalar(offsetR * up);
         c.add(offset);
     }
     return c;
-}
+};
 const circlePoses = computed(() => {
     const ps = new Array<Vector2>(4);
     for (let i = 0; i < ps.length; i++) {
         ps[i] = circlePos(i);
     }
     return ps;
-})
-const circleTrans = computed(() => circlePoses.value.map(p => `translate(${p.x} ${p.y})`))
-const yaw = computed(() => circlePoses.value.map(p => Math.atan2(p.y, p.x) / Math.PI * 180 + 90))
+});
+const circleTrans = computed(() =>
+    circlePoses.value.map((p) => `translate(${p.x} ${p.y})`)
+);
+const yaw = computed(() =>
+    circlePoses.value.map((p) => (Math.atan2(p.y, p.x) / Math.PI) * 180 + 90)
+);
 
-const filterIcon = ref('');
+const filterIcon = ref("");
 watchEffect(async () => {
     stateVersion.value;
-    filterIcon.value = '';
-    if (props.building.filterId <= 0)
-        return;
+    filterIcon.value = "";
+    if (props.building.filterId <= 0) return;
     const name = itemsMap.get(props.building.filterId)!.icon;
     filterIcon.value = await itemRecipeIconUrl(name);
 });
@@ -141,12 +200,12 @@ const camera = new PerspectiveCamera(50.0);
 const renderer = new WebGLRenderer({ antialias: true });
 renderer.setClearAlpha(0.0);
 const glRoot = ref<HTMLElement | null>(null);
-attachRenderer(glRoot, renderer)
+attachRenderer(glRoot, renderer);
 
 const scene = new Scene();
 const geometry = new BoxGeometry(1.0, 1.0, 1.0);
 const material = new MeshStandardMaterial({
-    color: 0xFFFFFF,
+    color: 0xffffff,
     opacity: 0.5,
     transparent: true,
     depthWrite: false,
@@ -156,7 +215,7 @@ model.matrixAutoUpdate = false;
 const dirLight = new DirectionalLight();
 dirLight.position.set(0, 0, 1);
 dirLight.target = model;
-const envLight = new AmbientLight(0xFFFFFF, 0.3);
+const envLight = new AmbientLight(0xffffff, 0.3);
 scene.add(model, dirLight, envLight);
 
 let animationFrame: null | number = null;
@@ -168,13 +227,17 @@ const updateModel = () => {
     model.matrix.setPosition(pos);
     camera.lookAt(pos);
     renderer.render(scene, camera);
-}
+};
 
-watch(posFromCamera, () => {
-    if (animationFrame === null) {
-        animationFrame = requestAnimationFrame(updateModel);
-    }
-}, { immediate: true });
+watch(
+    posFromCamera,
+    () => {
+        if (animationFrame === null) {
+            animationFrame = requestAnimationFrame(updateModel);
+        }
+    },
+    { immediate: true }
+);
 
 const params = computed(() => {
     stateVersion.value;
@@ -197,9 +260,9 @@ const onPortLeft = (i: number) => {
     const p = props.building.parameters as SplitterParameters | null;
     const prioritized = p !== null && p.priority[i] === true;
     const action = splitterPortClickAction(prioritized, portKindAt(i));
-    if (action === 'priority') {
+    if (action === "priority") {
         queue.push(new SetSplitterPriorityCommand(props.building, i, true));
-    } else if (action === 'filter') {
+    } else if (action === "filter") {
         itemSelect.value?.open();
     }
 };

@@ -9,10 +9,7 @@
                 （`CreateBeltLineCommand.syncStationPorts`：带从站取出 → 出塔、带送入站 → 入塔），
                 所以这里不再提供修改下拉框，避免用户手改出与传送带不一致的数据。
             -->
-            <span
-                class="role role-readonly"
-                :class="portDirClass(port.dir)"
-            >
+            <span class="role role-readonly" :class="portDirClass(port.dir)">
                 {{ portDirText(port.dir) }}
             </span>
             <span
@@ -441,7 +438,11 @@ const portDirClass = (dir: number) =>
         : "role-none";
 /** 口方向文案（只读展示；方向由传送带连接自动维护） */
 const portDirText = (dir: number) =>
-    dir === IODir.Output ? t("出塔") : dir === IODir.Input ? t("入塔") : t("无");
+    dir === IODir.Output
+        ? t("出塔")
+        : dir === IODir.Input
+        ? t("入塔")
+        : t("无");
 const setPortItem = (slot: number, storageIdx: number) => {
     const s = (props.building.parameters as StationParameters).slots[slot];
     if (s.storageIdx === storageIdx) return;

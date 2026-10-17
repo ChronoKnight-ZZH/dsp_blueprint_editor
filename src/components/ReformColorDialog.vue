@@ -7,7 +7,11 @@
                     <span class="rgba-close" @click="emit('close')">×</span>
                 </div>
                 <p class="rgba-hint">
-                    {{ t("点击色块选择当前地基颜色；自定义色槽可修改 RGBA 值。") }}
+                    {{
+                        t(
+                            "点击色块选择当前地基颜色；自定义色槽可修改 RGBA 值。"
+                        )
+                    }}
                 </p>
 
                 <div class="rgba-current">
@@ -16,8 +20,8 @@
                         :style="{ background: currentColorCss }"
                     ></span>
                     <span>
-                        {{ t("当前颜色") }}：
-                        {{ t("槽位") }} {{ placement.reformColorSlot }}
+                        {{ t("当前颜色") }}： {{ t("槽位") }}
+                        {{ placement.reformColorSlot }}
                         <span class="rgba-hex">#{{ currentHex }}</span>
                     </span>
                 </div>
@@ -53,7 +57,11 @@
                                 used: isCustomUsed(i),
                             }"
                             :style="{ background: customColorCss(i) }"
-                            :title="`${i} #${customHexStr(i)} (${i === placement.reformColorSlot ? t('当前') : t('点击选中')})`"
+                            :title="`${i} #${customHexStr(i)} (${
+                                i === placement.reformColorSlot
+                                    ? t('当前')
+                                    : t('点击选中')
+                            })`"
                             @click="selectCustom(i)"
                         ></div>
                     </div>
@@ -108,9 +116,7 @@ function hexToCss(hex: number): string {
     return `rgb(${(h >> 16) & 0xff},${(h >> 8) & 0xff},${h & 0xff})`;
 }
 
-const reformData = computed(
-    () => commandQueue.value?.data.reformData ?? null
-);
+const reformData = computed(() => commandQueue.value?.data.reformData ?? null);
 
 const isCustomUsed = (slot: number): boolean => {
     const rd = reformData.value;
@@ -123,7 +129,9 @@ const customColorCss = (slot: number): string => {
     if (!rd) return "transparent";
     const v = customSlotColor(rd, slot);
     if (v === null) return "transparent";
-    return `rgba(${(v >>> 24) & 0xff},${(v >>> 16) & 0xff},${(v >>> 8) & 0xff},${(v >>> 0) & 0xff})`;
+    return `rgba(${(v >>> 24) & 0xff},${(v >>> 16) & 0xff},${
+        (v >>> 8) & 0xff
+    },${(v >>> 0) & 0xff})`;
 };
 
 const customHexStr = (slot: number): string => {
@@ -148,7 +156,9 @@ const currentColorCss = computed(() => {
     const rd = reformData.value;
     if (!rd) return "transparent";
     const v = customSlotColor(rd, placement.reformColorSlot);
-    return v === null ? "transparent" : customColorCss(placement.reformColorSlot);
+    return v === null
+        ? "transparent"
+        : customColorCss(placement.reformColorSlot);
 });
 
 // ---- 自定义槽编辑 ----

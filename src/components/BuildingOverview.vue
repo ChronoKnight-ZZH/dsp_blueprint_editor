@@ -9,7 +9,11 @@
             v-for="[itemId, count] in buildingCounter"
             :key="itemId"
             class="overview-icon-item"
-            :title="itemId === FOUNDATION_ITEM_ID ? t('地基不可在此剔除') : t('右键删除全部此类建筑')"
+            :title="
+                itemId === FOUNDATION_ITEM_ID
+                    ? t('地基不可在此剔除')
+                    : t('右键删除全部此类建筑')
+            "
             @contextmenu.prevent="onIconContextMenu(itemId)"
         >
             <BuildingIcon
@@ -74,7 +78,10 @@ const buildingCounter = computed(() => {
     // 地基按瓦片数作为一项建筑计入列表
     const tiles = foundationTiles.value;
     if (tiles > 0)
-        counter.set(FOUNDATION_ITEM_ID, (counter.get(FOUNDATION_ITEM_ID) ?? 0) + tiles);
+        counter.set(
+            FOUNDATION_ITEM_ID,
+            (counter.get(FOUNDATION_ITEM_ID) ?? 0) + tiles
+        );
     return counter;
 });
 </script>

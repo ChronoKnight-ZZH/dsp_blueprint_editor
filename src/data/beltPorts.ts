@@ -48,9 +48,9 @@ type PortRow = [number, number, number, number, number, number];
 
 function tableOf(rows: PortRow[]): BeltPortTable {
     const out: BeltPortTable = [];
-    for (const [slot, x, y, z, nx, ny] of rows)
-        out[slot] = { x, y, z, nx, ny };
-    for (let i = 0; i < out.length; i++) if (out[i] === undefined) out[i] = null;
+    for (const [slot, x, y, z, nx, ny] of rows) out[slot] = { x, y, z, nx, ny };
+    for (let i = 0; i < out.length; i++)
+        if (out[i] === undefined) out[i] = null;
     return out;
 }
 
@@ -321,4 +321,3 @@ export function pickBeltPort(
     };
     return pick(layer.length > 0 ? layer : table);
 }
-

@@ -32,9 +32,7 @@ class CargoMaterial extends MeshLambertMaterial {
     cargoMoveUniform = { value: 0 };
 
     // this overrides base class method
-    onBeforeCompile(
-        parameters: WebGLProgramParametersWithUniforms,
-    ) {
+    onBeforeCompile(parameters: WebGLProgramParametersWithUniforms) {
         parameters.vertexShader = parameters.vertexShader
             .replace(
                 "#include <common>",

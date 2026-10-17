@@ -1,8 +1,4 @@
-import {
-    BlueprintBuilding,
-    BlueprintData,
-    SplitterParameters,
-} from "./parser";
+import { BlueprintBuilding, BlueprintData, SplitterParameters } from "./parser";
 import { Command, Updater } from "@/command";
 import { hasPrioritizedOutput } from "./splitterPorts";
 

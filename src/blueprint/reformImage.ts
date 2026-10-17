@@ -170,11 +170,7 @@ export function buildRectsFromSlots(
         while (x < width) {
             const slot = slotsPerCell[i];
             let w = 1;
-            while (
-                x + w < width &&
-                slotsPerCell[i + w] === slot &&
-                w < 255
-            )
+            while (x + w < width && slotsPerCell[i + w] === slot && w < 255)
                 w++;
             const key = `${x}|${w}|${slot}`;
             const existing = open.get(key);
@@ -319,9 +315,5 @@ export async function photoToBlueprint(
     const canvas = await loadPhotoImage(source);
     const ctx = canvas.getContext("2d")!;
     const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    return buildBlueprintFromPixels(
-        imgData.data,
-        canvas.width,
-        canvas.height
-    );
+    return buildBlueprintFromPixels(imgData.data, canvas.width, canvas.height);
 }

@@ -32,7 +32,8 @@ export function splitterPorts(modelIndex: number): SplitterPort[] {
         { port: 2, dir: { x: 0, y: -1 } },
         { port: 3, dir: { x: -1, y: 0 } },
     ];
-    if (modelIndex === 39) return all.filter((p) => p.port === 0 || p.port === 2);
+    if (modelIndex === 39)
+        return all.filter((p) => p.port === 0 || p.port === 2);
     return all;
 }
 

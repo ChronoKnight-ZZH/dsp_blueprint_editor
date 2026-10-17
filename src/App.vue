@@ -329,10 +329,7 @@
             style="display: none"
             @change="onPhotoFile"
         />
-        <ReformColorDialog
-            v-if="rgbaOpen"
-            @close="rgbaOpen = false"
-        />
+        <ReformColorDialog v-if="rgbaOpen" @close="rgbaOpen = false" />
         <ShortcutHint />
     </div>
 </template>

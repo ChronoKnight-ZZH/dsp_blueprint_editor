@@ -247,11 +247,7 @@ function footprintHalf(itemId: number, modelIndex: number): [number, number] {
 }
 
 /** 网格点是否落在建筑落座范围内（建筑 yaw=0 局部系，容差半格） */
-function containsPoint(
-    b: BlueprintBuilding,
-    x: number,
-    y: number
-): boolean {
+function containsPoint(b: BlueprintBuilding, x: number, y: number): boolean {
     if (sameCell(b, x, y)) return true;
     const c = b.localOffset[0];
     const rad = (b.yaw[0] * Math.PI) / 180;
