@@ -3,11 +3,23 @@
         <dialog
             ref="dlg"
             class="tutorial-dialog"
+            :class="{ dragging, resizing }"
             @close="onClose"
             @click="onBackdropClick"
         >
+            <!-- 8 个方向缩放手柄：四边 + 四角 -->
+            <div
+                v-for="dir in resizeDirs"
+                :key="dir"
+                class="resize-handle"
+                :class="'resize-' + dir"
+                @pointerdown="startResize($event, dir)"
+            ></div>
             <div class="tutorial-modal" @dragstart.prevent>
-                <header class="tutorial-header">
+                <header
+                    class="tutorial-header"
+                    @pointerdown="startDrag"
+                >
                     <h1 class="tutorial-title">{{ t("使用教程") }}</h1>
                     <button
                         type="button"
@@ -46,7 +58,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { ref, watch, onMounted, onUnmounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -79,6 +91,156 @@ const open = ref(false);
 const dlg = ref<HTMLDialogElement | null>(null);
 const content = ref<HTMLElement | null>(null);
 
+// ---------------- 窗口拖拽移动 / 尺寸缩放 ----------------
+const dragging = ref(false);
+const resizing = ref(false);
+
+/** 缩放手柄方向（8 个：四边 + 四角） */
+const resizeDirs = ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const;
+type ResizeDir = (typeof resizeDirs)[number];
+
+/** 最小窗口尺寸与窗口距视口边距 */
+const MIN_W = 420;
+const MIN_H = 300;
+const EDGE = 12;
+
+interface PointerAction {
+    mode: "move" | "resize";
+    dir: ResizeDir;
+    startX: number;
+    startY: number;
+    origLeft: number;
+    origTop: number;
+    origW: number;
+    origH: number;
+}
+let action: PointerAction | null = null;
+/** 是否发生了实际位移（用于区分拖拽结束的点击与真正的点击遮罩关闭） */
+let moved = false;
+
+const clamp = (v: number, min: number, max: number) =>
+    Math.min(Math.max(v, min), max);
+
+/** 打开弹窗时恢复默认尺寸（86vw/84vh，上限 1100×800）并居中 */
+const resetWindow = () => {
+    const el = dlg.value;
+    if (!el) return;
+    const w = Math.min(Math.floor(window.innerWidth * 0.86), 1100);
+    const h = Math.min(Math.floor(window.innerHeight * 0.84), 800);
+    el.style.width = w + "px";
+    el.style.height = h + "px";
+    el.style.left = Math.round((window.innerWidth - w) / 2) + "px";
+    el.style.top = Math.round((window.innerHeight - h) / 2) + "px";
+};
+
+/** 按下标题栏开始拖拽移动（排除关闭按钮） */
+const startDrag = (e: PointerEvent) => {
+    if ((e.target as HTMLElement).closest("button")) return;
+    const el = dlg.value!;
+    e.preventDefault();
+    moved = false;
+    action = {
+        mode: "move",
+        dir: "" as ResizeDir,
+        startX: e.clientX,
+        startY: e.clientY,
+        origLeft: el.offsetLeft,
+        origTop: el.offsetTop,
+        origW: el.offsetWidth,
+        origH: el.offsetHeight,
+    };
+    dragging.value = true;
+};
+
+/** 按下缩放手柄开始调整尺寸 */
+const startResize = (e: PointerEvent, dir: ResizeDir) => {
+    e.stopPropagation();
+    const el = dlg.value!;
+    e.preventDefault();
+    moved = false;
+    action = {
+        mode: "resize",
+        dir,
+        startX: e.clientX,
+        startY: e.clientY,
+        origLeft: el.offsetLeft,
+        origTop: el.offsetTop,
+        origW: el.offsetWidth,
+        origH: el.offsetHeight,
+    };
+    resizing.value = true;
+};
+
+const onPointerMove = (e: PointerEvent) => {
+    if (!action) return;
+    const el = dlg.value!;
+    const dx = e.clientX - action.startX;
+    const dy = e.clientY - action.startY;
+    if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
+    const maxW = window.innerWidth - EDGE * 2;
+    const maxH = window.innerHeight - EDGE * 2;
+
+    // 拖拽移动：至少保留一部分窗口在视口内
+    if (action.mode === "move") {
+        el.style.left =
+            clamp(
+                action.origLeft + dx,
+                EDGE - el.offsetWidth + 120,
+                window.innerWidth - EDGE - 120
+            ) + "px";
+        el.style.top =
+            clamp(
+                action.origTop + dy,
+                EDGE - el.offsetHeight + 60,
+                window.innerHeight - EDGE - 60
+            ) + "px";
+        return;
+    }
+
+    // 缩放：按方向分别调整宽度/高度，并修正锚定位置
+    let left = action.origLeft;
+    let top = action.origTop;
+    let width = action.origW;
+    let height = action.origH;
+    const dir = action.dir;
+    if (dir.includes("e")) width = clamp(action.origW + dx, MIN_W, maxW);
+    if (dir.includes("s")) height = clamp(action.origH + dy, MIN_H, maxH);
+    if (dir.includes("w")) {
+        width = clamp(action.origW - dx, MIN_W, maxW);
+        left = action.origLeft + (action.origW - width);
+    }
+    if (dir.includes("n")) {
+        height = clamp(action.origH - dy, MIN_H, maxH);
+        top = action.origTop + (action.origH - height);
+    }
+    el.style.left = left + "px";
+    el.style.top = top + "px";
+    el.style.width = width + "px";
+    el.style.height = height + "px";
+};
+
+const endPointer = () => {
+    if (!action) return;
+    action = null;
+    dragging.value = false;
+    resizing.value = false;
+    // click 事件在 pointerup 之后、宏任务之前触发；延迟复位以吞掉拖拽结束的那次点击
+    setTimeout(() => {
+        moved = false;
+    }, 0);
+};
+
+onMounted(() => {
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", endPointer);
+    window.addEventListener("pointercancel", endPointer);
+});
+onUnmounted(() => {
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", endPointer);
+    window.removeEventListener("pointercancel", endPointer);
+});
+
 const openModal = () => {
     open.value = true;
 };
@@ -89,13 +251,18 @@ const onClose = () => {
     open.value = false;
 };
 const onBackdropClick = (e: MouseEvent) => {
-    // 点击遮罩（dialog 自身）关闭
-    if (e.target === dlg.value) close();
+    // 点击遮罩（dialog 自身）关闭；拖拽/缩放结束的点击不关闭
+    if (e.target !== dlg.value || moved) return;
+    close();
 };
 
 watch(open, (v) => {
-    if (v) dlg.value?.showModal();
-    else dlg.value?.close();
+    if (v) {
+        dlg.value?.showModal();
+        resetWindow();
+    } else {
+        dlg.value?.close();
+    }
 });
 
 defineExpose({ open: openModal });
@@ -150,29 +317,113 @@ const jumpTo = (id: string) => {
 </script>
 
 <style lang="scss" scoped>
+/* 弹窗容器：深灰半透明、可拖拽可缩放、窗口 chrome 都在此 */
 .tutorial-dialog {
+    position: fixed;
+    margin: 0;
+    box-sizing: border-box;
     padding: 0;
     border: none;
+    /* 覆盖原生 <dialog> UA 样式表的 max-width/max-height 上限，
+       否则渲染尺寸与内联尺寸不一致，导致边缘/角落缩放计算偏移 */
+    max-width: none;
+    max-height: none;
+    background: rgba(60, 60, 60, 0.55);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45);
+    min-width: 420px;
+    min-height: 300px;
+
+    &.dragging,
+    &.resizing {
+        user-select: none;
+        -webkit-user-select: none;
+    }
+
+    /* 拖拽移动中标题栏光标改为抓取 */
+    &.dragging .tutorial-header {
+        cursor: grabbing;
+    }
+}
+
+/* 遮罩：完全无色透明（透明度为 0，无任何颜色叠加） */
+.tutorial-dialog::backdrop {
     background: transparent;
 }
 
-/* 遮罩：淡灰色且透明 */
-.tutorial-dialog::backdrop {
-    background: rgba(185, 185, 185, 0.45);
+/* 缩放手柄：贴边细条 + 四角方块，触屏拖拽不触发滚动 */
+.resize-handle {
+    position: absolute;
+    z-index: 5;
+    touch-action: none;
 }
 
+.resize-n,
+.resize-s {
+    left: 8px;
+    right: 8px;
+    height: 7px;
+    cursor: ns-resize;
+}
+.resize-e,
+.resize-w {
+    top: 8px;
+    bottom: 8px;
+    width: 7px;
+    cursor: ew-resize;
+}
+.resize-nw,
+.resize-se {
+    width: 15px;
+    height: 15px;
+    cursor: nwse-resize;
+}
+.resize-ne,
+.resize-sw {
+    width: 15px;
+    height: 15px;
+    cursor: nesw-resize;
+}
+.resize-n {
+    top: 0;
+}
+.resize-s {
+    bottom: 0;
+}
+.resize-e {
+    right: 0;
+}
+.resize-w {
+    left: 0;
+}
+.resize-nw {
+    top: 0;
+    left: 0;
+}
+.resize-ne {
+    top: 0;
+    right: 0;
+}
+.resize-sw {
+    bottom: 0;
+    left: 0;
+}
+.resize-se {
+    bottom: 0;
+    right: 0;
+}
+
+/* 弹窗内容容器：深色主题，撑满窗口 */
 .tutorial-modal {
     display: flex;
     flex-direction: column;
-    width: 86vw;
-    max-width: 1100px;
-    height: 84vh;
-    max-height: 800px;
-    background: #f3f3f3;
-    color: #222;
-    border-radius: 8px;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    background: rgba(16, 24, 33, 0.85);
+    color: #dfe8f0;
     overflow: hidden;
-    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.35);
 }
 
 .tutorial-header {
@@ -181,18 +432,22 @@ const jumpTo = (id: string) => {
     justify-content: space-between;
     flex: none;
     padding: 10px 16px;
-    background: #e8e8e8;
-    border-bottom: 1px solid #cfcfcf;
+    background: rgba(0, 0, 0, 0.35);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    cursor: move;
+    user-select: none;
+    touch-action: none;
 
     .tutorial-title {
         margin: 0;
-        font-size: 1.1rem;
+        font-size: 1.05rem;
+        color: #dfe8f0;
     }
 
     .tutorial-close {
         border: none;
         background: transparent;
-        color: #444;
+        color: #dfe8f0;
         font-size: 1.4rem;
         line-height: 1;
         cursor: pointer;
@@ -200,7 +455,8 @@ const jumpTo = (id: string) => {
         border-radius: 4px;
 
         &:hover {
-            background: rgba(0, 0, 0, 0.12);
+            background: rgba(255, 255, 255, 0.12);
+            color: #dfe8f0;
         }
     }
 }
@@ -216,8 +472,8 @@ const jumpTo = (id: string) => {
     width: 20%;
     overflow-y: auto;
     padding: 10px 8px;
-    background: #ececec;
-    border-right: 1px solid #d5d5d5;
+    background: rgba(0, 0, 0, 0.25);
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
     box-sizing: border-box;
 }
 
@@ -226,20 +482,20 @@ const jumpTo = (id: string) => {
     padding: 3px 6px;
     border-radius: 4px;
     font-size: 0.85rem;
-    color: #444;
+    color: #dfe8f0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 
     &:hover {
-        background: rgba(0, 0, 0, 0.08);
-        color: #111;
+        background: rgba(100, 160, 220, 0.2);
+        color: #dfe8f0;
     }
 }
 
 .toc-h1 {
     font-weight: 700;
-    margin-top: 8px;
+    color: #dfe8f0;
 }
 
 .toc-h2 {
@@ -254,15 +510,35 @@ const jumpTo = (id: string) => {
     position: relative;
 }
 
-/* markdown 还原样式 */
+/* 深色滚动条 */
+.tutorial-toc,
+.tutorial-content {
+    scrollbar-color: rgba(100, 160, 220, 0.4) rgba(255, 255, 255, 0.08);
+    scrollbar-width: thin;
+
+    &::-webkit-scrollbar {
+        width: 10px;
+    }
+    &::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.05);
+    }
+    &::-webkit-scrollbar-thumb {
+        background: rgba(100, 160, 220, 0.35);
+        border-radius: 5px;
+    }
+}
+
+/* markdown 深色主题还原 */
 .markdown-body {
     font-size: 0.92rem;
     line-height: 1.65;
+    color: #dfe8f0;
 
     :deep(h1),
     :deep(h2) {
-        border-bottom: 1px solid #d5d5d5;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.15);
         padding-bottom: 4px;
+        color: #dfe8f0;
     }
 
     :deep(h1) {
@@ -275,6 +551,11 @@ const jumpTo = (id: string) => {
 
     :deep(h3) {
         font-size: 1rem;
+        color: #dfe8f0;
+    }
+
+    :deep(a) {
+        color: #64a0dc;
     }
 
     :deep(img) {
@@ -291,38 +572,49 @@ const jumpTo = (id: string) => {
 
     :deep(th),
     :deep(td) {
-        border: 1px solid #b8b8b8;
+        border: 1px solid rgba(255, 255, 255, 0.18);
         padding: 4px 10px;
     }
 
     :deep(th) {
-        background: #e2e2e2;
+        background: rgba(100, 160, 220, 0.22);
+        color: #dfe8f0;
     }
 
     :deep(pre) {
-        background: #2d2d2d;
-        color: #e8e8e8;
+        background: #1e2a33;
+        color: #dfe8f0;
         padding: 8px 12px;
         border-radius: 6px;
         overflow: auto;
+        border: 1px solid rgba(255, 255, 255, 0.1);
     }
 
     :deep(code) {
         font-family: "Menlo", "Consolas", monospace;
         font-size: 0.85em;
+        color: #dfe8f0;
+        background: rgba(255, 255, 255, 0.08);
+        padding: 1px 4px;
+        border-radius: 3px;
+    }
+
+    :deep(pre code) {
+        background: none;
+        padding: 0;
     }
 
     :deep(blockquote) {
         margin: 8px 0;
         padding: 4px 12px;
-        border-left: 4px solid #b5b5b5;
-        background: #e9e9e9;
-        color: #555;
+        border-left: 4px solid #64a0dc;
+        background: rgba(100, 160, 220, 0.12);
+        color: #dfe8f0;
     }
 
     :deep(hr) {
         border: none;
-        border-top: 1px solid #cfcfcf;
+        border-top: 1px solid rgba(255, 255, 255, 0.15);
         margin: 16px 0;
     }
 }
