@@ -1,8 +1,8 @@
 /// <reference types="node" />
 
 import { fromStr } from "./blueprint/parser";
-import { writeFileSync } from "fs";
-import { resolve } from "path";
+import { readFileSync, writeFileSync } from "fs";
+import { resolve as resolvePath } from "path";
 
 function readStdin() {
     return new Promise<string>((resolve) => {
@@ -21,14 +21,34 @@ function readStdin() {
     });
 }
 
+function parseArgs(args: string[]) {
+    let inputFile: string | undefined;
+    let outFile: string | undefined;
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        if (arg === "--out" || arg === "-o") {
+            outFile = args[++i];
+        } else if (!arg.startsWith("-")) {
+            inputFile = arg;
+        }
+    }
+    return { inputFile, outFile };
+}
+
 async function main() {
-    const input = (await readStdin()).trim();
+    const { inputFile, outFile } = parseArgs(process.argv.slice(2));
+
+    // 有输入文件参数则读文件，否则从 stdin 读取
+    const raw = inputFile
+        ? readFileSync(resolvePath(inputFile), "utf8")
+        : await readStdin();
+    const input = raw.replace(/^\uFEFF/, "").trim();
+
     const result = JSON.stringify(fromStr(input));
 
-    // 如果命令行传了额外参数，将结果保存到该文件
-    const outFile = process.argv[2];
+    // 指定了 --out 则写入文件，否则输出到 stdout
     if (outFile) {
-        writeFileSync(resolve(outFile), result, "utf8");
+        writeFileSync(resolvePath(outFile), result, "utf8");
         process.stderr.write(`Saved to ${outFile}\n`);
     } else {
         process.stdout.write(result);
