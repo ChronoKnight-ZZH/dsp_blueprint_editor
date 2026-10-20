@@ -1,0 +1,38 @@
+diff --git a/node_modules/vue-cli-plugin-i18n/report.js b/node_modules/vue-cli-plugin-i18n/report.js
+index f049a8f..ebb4b32 100644
+--- a/node_modules/vue-cli-plugin-i18n/report.js
++++ b/node_modules/vue-cli-plugin-i18n/report.js
+@@ -48,7 +48,32 @@ async function service(args = {}, api) {
+     localeFiles,
+     extractType
+   )
+-  i18nExtract.logI18NReport(i18nReport)
++
++  // logI18NReport was removed in vue-i18n-extract v1.2+, implement inline
++  function logI18NReport (report) {
++    const missing = report.missingKeys || []
++    const unused = report.unusedKeys || []
++    console.log('')
++    if (missing.length > 0) {
++      console.log(chalk.yellow(`Missing keys (${missing.length}):`))
++      for (const m of missing) {
++        console.log(`  ${m.path ? m.path + ': ' : ''}${m.key}`)
++      }
++    } else {
++      console.log(chalk.green('No missing keys found.'))
++    }
++    console.log('')
++    if (unused.length > 0) {
++      console.log(chalk.yellow(`Unused keys (${unused.length}):`))
++      for (const u of unused) {
++        console.log(`  ${u.path ? u.path + ': ' : ''}${u.key}`)
++      }
++    } else {
++      console.log(chalk.green('No unused keys found.'))
++    }
++    console.log('')
++  }
++  logI18NReport(i18nReport)
+ 
+   if (args.output) {
+     await i18nExtract.writeReportToFile(i18nReport, args.output)

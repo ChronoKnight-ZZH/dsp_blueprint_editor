@@ -5,7 +5,6 @@
             class="tutorial-dialog"
             :class="{ dragging, resizing }"
             @close="onClose"
-            @click="onBackdropClick"
         >
             <!-- 8 个方向缩放手柄：四边 + 四角 -->
             <div
@@ -115,8 +114,6 @@ interface PointerAction {
     origH: number;
 }
 let action: PointerAction | null = null;
-/** 是否发生了实际位移（用于区分拖拽结束的点击与真正的点击遮罩关闭） */
-let moved = false;
 
 const clamp = (v: number, min: number, max: number) =>
     Math.min(Math.max(v, min), max);
@@ -138,7 +135,6 @@ const startDrag = (e: PointerEvent) => {
     if ((e.target as HTMLElement).closest("button")) return;
     const el = dlg.value!;
     e.preventDefault();
-    moved = false;
     action = {
         mode: "move",
         dir: "" as ResizeDir,
@@ -157,7 +153,6 @@ const startResize = (e: PointerEvent, dir: ResizeDir) => {
     e.stopPropagation();
     const el = dlg.value!;
     e.preventDefault();
-    moved = false;
     action = {
         mode: "resize",
         dir,
@@ -176,7 +171,6 @@ const onPointerMove = (e: PointerEvent) => {
     const el = dlg.value!;
     const dx = e.clientX - action.startX;
     const dy = e.clientY - action.startY;
-    if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
     const maxW = window.innerWidth - EDGE * 2;
     const maxH = window.innerHeight - EDGE * 2;
 
@@ -224,21 +218,29 @@ const endPointer = () => {
     action = null;
     dragging.value = false;
     resizing.value = false;
-    // click 事件在 pointerup 之后、宏任务之前触发；延迟复位以吞掉拖拽结束的那次点击
-    setTimeout(() => {
-        moved = false;
-    }, 0);
+};
+
+/** 键盘关闭：仅 / 与 Esc 可关闭（捕获阶段拦截，避免触发 App 全局快捷键） */
+const onKeydown = (e: KeyboardEvent) => {
+    if (!open.value) return;
+    if (e.key === "/" || e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        close();
+    }
 };
 
 onMounted(() => {
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", endPointer);
     window.addEventListener("pointercancel", endPointer);
+    window.addEventListener("keydown", onKeydown, true);
 });
 onUnmounted(() => {
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", endPointer);
     window.removeEventListener("pointercancel", endPointer);
+    window.removeEventListener("keydown", onKeydown, true);
 });
 
 const openModal = () => {
@@ -249,11 +251,6 @@ const close = () => {
 };
 const onClose = () => {
     open.value = false;
-};
-const onBackdropClick = (e: MouseEvent) => {
-    // 点击遮罩（dialog 自身）关闭；拖拽/缩放结束的点击不关闭
-    if (e.target !== dlg.value || moved) return;
-    close();
 };
 
 watch(open, (v) => {
