@@ -14,6 +14,15 @@ module.exports = defineConfig({
                 }, {
                     test: /\/assets\/icons\/(item_recipe|signal|tech)\//,
                     type: 'asset/resource',
+                }, {
+                    // 建筑 GLB 模型：强制输出独立文件（不走 <8KB 内联），
+                    // 由 webpack 生成带 publicPath 的最终 URL，部署到任意子路径都正确。
+                    // 必须排在 `/\/assets\//` 之后，后匹配的规则会覆盖前面的 type。
+                    test: /\.glb$/i,
+                    type: 'asset/resource',
+                    generator: {
+                        filename: 'models/[name].[contenthash:8][ext]',
+                    },
                 },
             ],
         },

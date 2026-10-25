@@ -23,6 +23,15 @@ import { BVH } from '@/bvh';
 import { Updater } from '@/command';
 import { RemoveBuildingCommand } from '@/blueprint/removeBuilding';
 import { commandQueueKey } from '@/define';
+import { onBuildingModelsChanged, requestBuildingModel, resolveBuildingModel } from '@/models/buildingModel';
+import type { ResolvedBuildingModel } from '@/models/buildingModel';
+import { GlbModelInstances } from '@/models/glbInstances';
+import type { LoadedGlbModel } from '@/models/glbLoader';
+
+/** 外部 GLB 模型开关：false 时完全走元数据表（保留给排查/回归用） */
+const GLB_MODELS_ENABLED = true;
+/** 单个模型的实例数上限：超过就整组回退元数据盒，避免高模 + 大量实例拖垮帧率（临时设为无上限做验证） */
+const MAX_GLB_INSTANCES_PER_MODEL = Number.POSITIVE_INFINITY;
 
 function buildPlanetGrid(radius = 1, segment = 200) {
 	const allGrids = new Group();
@@ -48,13 +57,26 @@ function buildPlanetGrid(radius = 1, segment = 200) {
 	return allGrids;
 }
 
+/** 回退建筑（元数据盒 / 程序化几何）的实例引用 */
+interface ModelRefInstanced {
+    mesh: InstancedMesh;
+    instance: number;
+}
+
+/** 外部 GLB 建筑：直接给出建筑中心的世界矩阵，保持旧 `getModel` 的投影语义 */
+interface ModelRefMatrix {
+    matrix: Matrix4;
+}
+
+type BuildingModelRef = ModelRefInstanced | ModelRefMatrix;
+
 class AllBuildings extends Object3D {
     constructor(
         objects: Object3D[],
         public readonly iconsMesh: Icons,
         public readonly iconTexture: IconTexture,
         public readonly cargos: Cargos,
-        public readonly modelRef: { mesh: InstancedMesh, instance: number }[],
+        public readonly modelRef: BuildingModelRef[],
         public readonly subscriptMesh: IconSubscript | null = null,
         /** 建筑 → 下标文本在 subscriptMesh 中的起始字符位置与长度；belt count 变化时用于局部刷新 */
         public readonly subscriptMap: Map<BlueprintBuilding, { startIdx: number; length: number }> = new Map(),
@@ -74,11 +96,15 @@ class AllBuildings extends Object3D {
 
     public dispose() {
         this.traverse(o => {
-            if (o instanceof Mesh) {
-                (o as Mesh).geometry.dispose();
-            }
             if (o instanceof InstancedMesh) {
                 o.dispose();
+                // GLB 的几何是跨场景复用的缓存对象，这里不能释放
+                if (!o.userData.sharedResource)
+                    o.geometry.dispose();
+                return;
+            }
+            if (o instanceof Mesh && !o.userData.sharedResource) {
+                (o as Mesh).geometry.dispose();
             }
         });
     }
@@ -222,23 +248,110 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
 		return [mesh];
 	}
 	const buildBoxes = (boxes: BlueprintBuilding[]) => {
-		const geometry = new BoxGeometry(1.0, 1.0, 1.0);
-		const material = new MeshLambertMaterial();
-		const mesh = new InstancedMesh(geometry, material, boxes.length);
-		const trans = new Matrix4();
+		const objects: Object3D[] = [];
+
+		// 1) 解析每个建筑的模型来源：已加载的外部 GLB 优先，其余回退元数据表
+		const resolved: (ResolvedBuildingModel | null)[] = boxes.map(b => {
+			try {
+				return resolveBuildingModel(b.modelIndex);
+			} catch {
+				return null;  // resolver 内部已兜底，这里只是双保险
+			}
+		});
+
+		// 同一模型的实例数过多时整组回退（高模 × 上千实例会明显掉帧）
+		const glbInstanceCounts = new Map<number, number>();
+		if (GLB_MODELS_ENABLED) {
+			for (const r of resolved) {
+				if (r !== null && r.glb !== null && r.meta !== undefined)
+					glbInstanceCounts.set(r.modelIndex, (glbInstanceCounts.get(r.modelIndex) ?? 0) + 1);
+			}
+		}
+
+		// 2) 分组：外部 GLB 组 / 元数据盒回退组
+		const glbGroups = new Map<number, { model: LoadedGlbModel; placement: Matrix4; buildings: BlueprintBuilding[] }>();
+		const fallback: BlueprintBuilding[] = [];
 		for (let i = 0; i < boxes.length; i++) {
 			const b = boxes[i];
-			const meta = buildingMeta.get(b.modelIndex);
-			if (meta === undefined)
-				continue
-			trans.multiplyMatrices(transforms[b.index][0], meta.unitBoxTrans);
-			mesh.setMatrixAt(i, trans);
-			mesh.setColorAt(i, meta.color);
-			modelRef[b.index] = { mesh, instance: i };
+			const r = resolved[i];
+			if (GLB_MODELS_ENABLED && r !== null && r.glb !== null && r.meta !== undefined
+				&& (glbInstanceCounts.get(r.modelIndex) ?? 0) <= MAX_GLB_INSTANCES_PER_MODEL) {
+				let group = glbGroups.get(r.modelIndex);
+				if (group === undefined) {
+					group = { model: r.glb, placement: r.placement, buildings: [] };
+					glbGroups.set(r.modelIndex, group);
+				}
+				group.buildings.push(b);
+				continue;
+			}
+			fallback.push(b);
+			// 有外部模型但还没加载 → 按需触发懒加载（加载器内部并发去重 + 缓存 + 超时）
+			// 没有元数据就既定位不了也画不了，因此不为它下载 GLB
+			if (r !== null && r.glbName !== null && r.glb === null && r.meta !== undefined)
+				requestBuildingModel(b.modelIndex);
 		}
-		mesh.instanceMatrix.needsUpdate = true;
-		mesh.instanceColor!.needsUpdate = true;
-		return [mesh];
+
+		// 3) GLB 实例化渲染；任一环节出错都整组退回元数据盒，不影响其余建筑
+		const anchor = new Matrix4();
+		const anchorPos = new Vector3();
+		const anchorTrans = new Matrix4();
+		for (const group of glbGroups.values()) {
+			let instances: GlbModelInstances | null = null;
+			try {
+				instances = new GlbModelInstances(
+					group.model,
+					group.placement,
+					group.buildings.map(b => transforms[b.index][0]),
+				);
+			} catch (e) {
+				console.warn('[glb] 实例化渲染失败，该模型组回退元数据表', e);
+				instances = null;
+			}
+			if (instances === null || instances.meshes.length === 0) {
+				fallback.push(...group.buildings);
+				continue;
+			}
+			objects.push(instances);
+			for (const b of group.buildings) {
+				// modelRef 沿用旧语义：建筑中心的世界矩阵（供 SpitterInfo 等做投影）
+				anchor.copy(transforms[b.index][0]);
+				const meta = buildingMeta.get(b.modelIndex);
+				if (meta !== undefined) {
+					anchorPos.setFromMatrixPosition(meta.selectUnitBoxTrans);
+					anchor.multiply(anchorTrans.makeTranslation(anchorPos.x, anchorPos.y, anchorPos.z));
+				}
+				modelRef[b.index] = { matrix: anchor.clone() };
+			}
+		}
+
+		// 4) 元数据盒回退：与改动前完全一致的渲染方式
+		if (fallback.length) {
+			const geometry = new BoxGeometry(1.0, 1.0, 1.0);
+			const material = new MeshLambertMaterial();
+			const mesh = new InstancedMesh(geometry, material, fallback.length);
+			const trans = new Matrix4();
+			const hidden = new Matrix4().makeScale(0, 0, 0);
+			const defaultColor = new Color(0xdddddd);
+			for (let i = 0; i < fallback.length; i++) {
+				const b = fallback[i];
+				const meta = buildingMeta.get(b.modelIndex);
+				if (meta === undefined) {
+					// 未知建筑：放退化矩阵占位（不可见），保持“不抛错、不白屏”的旧行为
+					mesh.setMatrixAt(i, hidden);
+					mesh.setColorAt(i, defaultColor);
+					continue;
+				}
+				trans.multiplyMatrices(transforms[b.index][0], meta.unitBoxTrans);
+				mesh.setMatrixAt(i, trans);
+				mesh.setColorAt(i, meta.color);
+				modelRef[b.index] = { mesh, instance: i };
+			}
+			mesh.instanceMatrix.needsUpdate = true;
+			mesh.instanceColor!.needsUpdate = true;
+			objects.push(mesh);
+		}
+
+		return objects;
 	}
 	const buildIcons = (iconBuildings: BlueprintBuilding[], iconBelts: BlueprintBuilding[], iconInsterters: BlueprintBuilding[]) => {
 		const subscripts = new Map<BlueprintBuilding, string>();
@@ -316,7 +429,7 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
 	const iconBelts = belts.filter(b => b.parameters && (b.parameters as BeltParameters).iconId > 0);
 	const iconInsterters = inserters.filter(b => b.filterId > 0);
 
-	const modelRef = new Array<{ mesh: InstancedMesh, instance: number }>(buildings.length);
+	const modelRef = new Array<BuildingModelRef>(buildings.length);
 	const cargosMesh = new Cargos(belts.length + inserters.length);
 	let numCargos = 0;
 	const addCargo = (trans: Matrix4, color: Color, distance: number) => {
@@ -495,9 +608,14 @@ const commandQueue = inject(commandQueueKey)!;
 
 let controls: PlanetMapControls | null = null;
 
+/** 外部 GLB 模型到达时自增，触发场景按“GLB 优先”重建 */
+const modelVersion = ref(0);
+
 const b = computed(() => {
 	// 任意命令（剔除建筑 / 撤销 / 重做）后整体重建场景
 	commandQueue.value?.execVersion.value;
+	// 外部 GLB 模型加载完成 → 重建场景，让新模型接管渲染（旧场景由下面的 watchEffect 回收）
+	modelVersion.value;
 	if (!commandQueue.value)
 		return null;
     const d = commandQueue.value.data;
@@ -632,6 +750,24 @@ onMounted(() => {
 		}
 	}
 	requestAnimationFrame(animate);
+
+	// 外部 GLB 模型到达：合并成一次重建，避免几十个模型各触发一次整场景重建
+	let modelRefreshTimer: number | null = null;
+	const offModelsChanged = onBuildingModelsChanged(() => {
+		if (modelRefreshTimer !== null)
+			return;
+		modelRefreshTimer = window.setTimeout(() => {
+			modelRefreshTimer = null;
+			modelVersion.value++;
+		}, 150);
+	});
+	onUnmounted(() => {
+		offModelsChanged();
+		if (modelRefreshTimer !== null) {
+			window.clearTimeout(modelRefreshTimer);
+			modelRefreshTimer = null;
+		}
+	});
 });
 
 const selectBoxes = computed(() => b.value?.bvh.boxes);
@@ -639,10 +775,15 @@ const cameraPosVersion = ref(0);
 const getModel = (index: number) => {
 	if (b.value === null)
 		return null
-	const ref = b.value.buildings.modelRef[index]
-	const m = new Matrix4();
-	ref.mesh.getMatrixAt(ref.instance, m)
-	return m;
+	const ref = b.value.buildings.modelRef[index] as BuildingModelRef | undefined
+	if (ref === undefined)
+		return null
+	if ('mesh' in ref) {
+		const m = new Matrix4()
+		ref.mesh.getMatrixAt(ref.instance, m)
+		return m;
+	}
+	return ref.matrix
 }
 /** 重置相机视角到默认位置（星球正上方默认距离） */
 const resetCamera = () => {
