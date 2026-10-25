@@ -5,6 +5,17 @@ export interface BuildingMeta {
     unitBoxTrans: Matrix4;
     selectUnitBoxTrans: Matrix4;
     iconTrans: Matrix4;
+    /**
+     * 建筑在**局部 z 轴向上**坐标系里的尺寸 `[x 宽, y 深, 高度]`。
+     * 由下方 `buildingMetaRaw` 的 `box` 字段派生（`box[1]` 是高度），
+     * 供外部 GLB 模型的等比缩放/对齐使用；不改变原有字段含义。
+     */
+    readonly boxSize: readonly [number, number, number];
+    /**
+     * 建筑在**局部 z 轴向上**坐标系里的中心 `[x, y, z]`。
+     * 由 `buildingMetaRaw` 的 `offset` 字段派生，同样只为 GLB 对齐服务。
+     */
+    readonly boxCenter: readonly [number, number, number];
 }
 
 // 'box' from selectSize in SlotConfig
@@ -96,6 +107,10 @@ for (const [id, d] of buildingMetaRaw) {
         unitBoxTrans,
         selectUnitBoxTrans,
         iconTrans,
+        // 局部 z 轴向上的尺寸/中心：box[1] 是高度、offset[1] 是高度位移，
+        // 与上面 Rx90 的变换结果严格一致（仅做轴向重排，不改表里的数值）
+        boxSize: [d.box[0], d.box[2], d.box[1]],
+        boxCenter: [d.offset[0], d.offset[2], d.offset[1]],
     });
 }
 

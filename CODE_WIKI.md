@@ -232,6 +232,10 @@
 | `iconSubscript.ts` | 传送带货物计数（如 `12k`）下标渲染。 |
 | `cargos.ts` | 传送带/分拣器上滑动的货物 `InstancedMesh`，通过自定义 shader 的 `cargoMove` uniform 实现沿 z 轴移动动画。 |
 | `data/building.ts` | 每种建筑模型的 `color/unitBoxTrans/selectUnitBoxTrans/iconTrans`，以及"无图标建筑"集合、物流塔槽位变换。 |
+| `models/glbAssets.ts` | 外部 GLB 模型注册表：`require.context` 索引 `assets/icons/models/*.glb`，`icon → 文件名` 别名/变形表，按需解析 URL（模块导出是字符串，兼容 `{ default }`）。 |
+| `models/glbLoader.ts` | GLB 加载器：懒加载、缓存、并发去重、8s 超时、错误吞掉、失败负缓存、资源释放（契约：永不 reject）。 |
+| `models/buildingModel.ts` | Model resolver：GLB 优先 + 元数据表回退、GLB 放置矩阵（y-up→z-up、按元数据高度等比、居中）、按需加载、`getModelMappingReport()`。 |
+| `models/glbInstances.ts` | 把已加载 GLB 按建筑实例化渲染（每个子网格一个 `InstancedMesh`，几何/材质复用一份）。 |
 
 ### 5.4 UI 组件层 `src/components/`
 
@@ -495,6 +499,7 @@ customReformColorMask(uint32)  colorLen(int32)  customReformColors[colorLen](uin
 `buildBuildings(transforms, buildings, renderer)`：
 
 - 把建筑分成 belts / inserters / boxes 三类，分别用 `InstancedMesh` 渲染（CylinderGeometry/BoxGeometry + `MeshLambertMaterial`），`setColorAt` 染色取自 `buildingMeta`。
+- boxes 再按模型来源分流：已加载外部 GLB 的建筑 → `GlbModelInstances`（子网格级实例化，材质/贴图原样保留）；其余 → 原元数据盒（未知建筑用退化矩阵占位）。GLB 加载完成后经 150ms 节流触发一次场景重建；单模型实例数超过 `MAX_GLB_INSTANCES_PER_MODEL` 时整组回退方块。传送带/分拣器仍是程序化几何。
 - 传送带与分拣器还会生成 `Cargos`（滑动货物）InstancedMesh，shader 在 `onBeforeCompile` 注入 `cargoMove` uniform 实现沿 z 移动。
 - 图标：`IconTexture` + `IconGeometry`，按 `buildingIconId/beltIconId/sorterIconId` 计算位置与缩放，传送带 count 还会生成 `IconSubscript` 文字。
 - 返回 `AllBuildings`，持有 `modelRef[index] = { mesh, instance }`，供 `getModel` 查询。
@@ -571,6 +576,7 @@ App.vue 的 watchEffect 把 codeExpired 置 true（蓝图字符串需重生成�
 
 - `buildingMetaRaw`：手工维护的 `[modelIndex, {color, box:[w,h,d], offset:[x,y,z]}]` 表。
 - 派生 `unitBoxTrans`（渲染盒，缩放 0.9/0.999/0.9）、`selectUnitBoxTrans`（拾取盒，原尺寸）、`iconTrans`（图标位置：高度 `<4` 取一半，否则 `box[1]-2`）。
+- `boxSize` / `boxCenter`：派生只读字段，把 `box/offset` 换算到「z 轴向上」的建筑局部空间（`box[1]` 是高度），仅供外部 GLB 对齐使用，不改变原有字段含义。
 - `noIconBuildings`：分流器/集装机/监测器/喷涂机/电力感应塔/无线输电塔不显示图标。
 - `stationSlotTrans`：物流塔 12 个槽位的局部平移。
 
@@ -592,6 +598,15 @@ python3 i18n.py ... -o ../locales     # 生成 zh/en locale
 `isBelt(2001..2003) / isInserter(2011..2014) / isStation(2103,2104,2316) / isInterstellarStation(2104) / isSplitter(2020) / isLab(2901,2902) / isStorage(2101,2102,3009) / isTank(2106) / isEjector(2311) / isRayReciver(2208) / isArtificialStar(2210) / isEnergyExchanger(2209) / isAdvancedMiningMachine(2316) / isMonitor(2030) / isBattleBase(3009) / isDispenser(2107)`。
 
 `allAssemblers`：所有制造台/熔炉/精炼厂/化工厂/对撞机/研究站集合，在 `parser.ts` 中为它们注册 `assembleParamParser`。
+
+### 10.5 外部 GLB 建筑模型（`src/models/`）
+
+- 资源：`assets/icons/models/*.glb`（60 个）。**文件名 = `itemsData.ts` 的 `icon` 字段**，不是中文名。
+- 解析链：`modelIndex → Item.models 下标 → Item.icon → 别名/变形表 → 磁盘文件`。用 `require.context` 做编译期索引（只内联 URL 字符串），`.glb` 是独立资源，只在建筑真的需要时才 `fetch`（不预加载、不进首屏）。
+- 别名/变形：`splitter-4dir → splitter-1/2/3`（按 `models` 下标，对应四向分流器三种变形）、`assembler-1 → assembler-1`（回退 `assembler`）、`accumulator-full → accumulator`。
+- 回退：文件缺失 / fetch 失败 / 解析失败 / 8s 超时 → 静默回退 `data/building.ts` 元数据盒；`GLB_MODELS_ENABLED=false` 可整体关闭。未知建筑仍用退化矩阵占位（不抛错、不白屏）。
+- 放置：默认 glTF y-up → `Rx(90°)` 转 z-up，再按元数据高度等比缩放并居中到 `boxCenter`；逐模型可用 `modelPlacementOverrides` 覆盖 `upAxis/align/yaw/scale`。
+- 完整映射表、未匹配清单、可调参数与验收清单见 [docs/GLB_MODEL_INTEGRATION.md](docs/GLB_MODEL_INTEGRATION.md)；运行时权威版本见 `getModelMappingReport()`。
 
 ---
 
