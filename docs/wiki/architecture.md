@@ -92,9 +92,16 @@ App.vue.watchEffect(codeExpired = true)
 
 以下流程图展示了项目的主要组件及其依赖流向。
 
+这是总图
+
+![diagram](images/diagram.svg)
+
+#### 图 1：UI 交互 → 命令系统 → 蓝图逻辑
+
 ```mermaid
 flowchart TB
     subgraph UI["UI 组件层"]
+        direction TB
         App["App.vue<br/>根布局 + 侧栏"]
         Editor["BlueprintEditor.vue<br/>3D 渲染主体"]
         InfoPanel["BuildingInfoPanel.vue<br/>建筑详情"]
@@ -105,14 +112,16 @@ flowchart TB
     end
 
     subgraph Command["命令系统"]
-        CQ["CommandQueue<br/>容量 256<br/>silent/non-silent 分流"]
+        direction TB
+        CQ["CommandQueue<br/>容量 256<br/>silent / non-silent 分流"]
+        Cmd["Command 接口<br/>do / undo / merge"]
         Updater["Updater<br/>5 个 EventDispatcher"]
-        Cmd["Command 接口<br/>do/undo/merge"]
     end
 
     subgraph BP["蓝图逻辑层"]
+        direction TB
         Parser["parser.ts<br/>字符串 ↔ BlueprintData<br/>v1/v2 双格式"]
-        Planet["planet.ts<br/>区域定位<br/>建筑变换"]
+        Planet["planet.ts<br/>区域定位 / 建筑变换"]
         Edit["建筑编辑<br/>replace / upgrade<br/>setBeltParams / setStationPort"]
         Reform["地基系统<br/>reform.ts · reformEdit.ts<br/>PaintReformCellCommand"]
         Img2BP["照片转蓝图<br/>reformImage.ts<br/>中位切分量化"]
@@ -121,14 +130,72 @@ flowchart TB
         Remove["删除命令<br/>removeBuilding.ts"]
     end
 
+    App -->|"hotkey / 侧栏操作"| CQ
+    InfoPanel -->|"编辑"| CQ
+    Palette -->|"放置 / 铺地基"| CQ
+    Modal -->|"批量替换"| CQ
+    Editor -->|"点击 / 右键 / 放置"| CQ
+
+    CQ -->|"push(new Cmd)"| Cmd
+    Cmd -->|"do() 修改数据"| BP
+
+    Edit -->|"setBeltParams / setStationPort"| CQ
+    Parser <-->|"fromStr / toStr"| Planet
+    Img2BP -->|"buildBlueprintFromPixels"| Reform
+
+    style UI fill:#e1f5fe,stroke:#0288d1
+    style Command fill:#fff3e0,stroke:#ef6c00
+    style BP fill:#e8f5e9,stroke:#388e3c
+```
+#### 图 2：蓝图逻辑 ↔ 数据资源层
+
+```mermaid
+flowchart TB
+    subgraph BP["蓝图逻辑层"]
+        direction TB
+        Parser["parser.ts<br/>字符串 ↔ BlueprintData"]
+        Planet["planet.ts<br/>区域定位 / 建筑变换"]
+        Edit["建筑编辑<br/>replace / upgrade<br/>setBeltParams / setStationPort"]
+        Create["新建命令<br/>create.ts<br/>defaultParamsFor"]
+        StatsCalc["生产统计<br/>stats.ts<br/>calculateProductionStats"]
+    end
+
     subgraph Data["数据资源层"]
+        direction TB
         Items["items / recipes<br/>分类判定"]
         Building["building / slots<br/>元数据 / slot 坐标"]
         Stack["stacking / beltPorts<br/>堆叠规则 / 传送带口"]
         Power["buildingPowerData<br/>acceleratorData"]
     end
 
+    Parser -->|"parameterParsers"| Items
+    Create -->|"allAssemblers"| Items
+    Planet -->|"buildingSlots"| Building
+    Edit -->|"buildingMeta / beltPorts"| Building
+    Edit -->|"beltPorts"| Stack
+    StatsCalc -->|"buildingPowerMap / acceleratorBonuses"| Power
+
+    style BP fill:#e8f5e9,stroke:#388e3c
+    style Data fill:#fce4ec,stroke:#c2185b
+```
+
+#### 图 3：命令 → 更新器 → 3D 渲染层
+
+```mermaid
+flowchart TB
+    subgraph Command["命令系统"]
+        direction TB
+        CQ["CommandQueue<br/>silent / non-silent 分流"]
+        Updater["Updater<br/>5 个 EventDispatcher"]
+    end
+
+    subgraph Editor["BlueprintEditor.vue"]
+        direction TB
+        EditorRoot["3D 渲染主体"]
+    end
+
     subgraph Render["3D 渲染层"]
+        direction TB
         IconTex["iconTexture.ts<br/>24×24 图标图集"]
         Instanced["icons.ts · cargos.ts<br/>InstancedMesh + Shader"]
         BVH["bvh/bvh.ts<br/>射线拾取加速"]
@@ -136,67 +203,46 @@ flowchart TB
         Controls["PlanetMapControls<br/>Orbit + Dolly"]
     end
 
-    %% UI → Command
-    App -->|"hotkey / 侧栏操作"| CQ
-    InfoPanel -->|"编辑"| CQ
-    Palette -->|"放置/铺地基"| CQ
-    Modal -->|"批量替换"| CQ
-    Editor -->|"点击/右键/放置"| CQ
+    subgraph Data["数据资源层"]
+        Items["items / recipes"]
+        Building["building / slots"]
+    end
 
-    %% Command → BP
-    CQ -->|"push(new Cmd)"| Cmd
-    Cmd -->|"do() 修改数据"| BP
+    CQ -->|"Updater.dispatch<br/>silent：增量刷新"| Updater
+    CQ -->|"execVersion++<br/>non-silent：重建"| EditorRoot
 
-    %% BP 内部依赖
-    Parser <-->|"fromStr / toStr"| Planet
-    Edit -->|"setBeltParams/setStationPort"| CQ
-    Create -->|"defaultParamsFor"| Data
-    Img2BP -->|"buildBlueprintFromPixels"| Reform
+    Updater -->|"增量刷新"| Instanced
+    Updater -->|"增量刷新"| Reform3D
 
-    %% BP → Data
-    Parser -->|"parameterParsers"| Items
-    Create -->|"allAssemblers"| Items
-    Planet -->|"buildingSlots"| Data
-    Edit -->|"buildingMeta / beltPorts"| Data
-    StatsCalc -->|"buildingPowerMap / acceleratorBonuses"| Power
+    EditorRoot -->|"buildPlanetGrid"| Render
+    EditorRoot -->|"registerUpdater"| Updater
 
-    %% CQ → Updater → Render
-    CQ -->|"Updater.dispatch"| Updater
-    Updater -->|"增量刷新"| Render
-
-    %% CQ.execVersion → Editor 重建
-    CQ -->|"execVersion++"| Editor
-
-    %% Data → Render
     IconTex -->|"requestIcon"| Items
-    Render -->|"InstancedMesh / BVH"| Building
-    Planet -->|"calcBuildingTrans"| Render
+    Instanced -->|"InstancedMesh / BVH"| Building
+    Instanced --> BVH
+    Planet2["planet.ts<br/>calcBuildingTrans"] --> Instanced
 
-    %% Editor 内部 → Render
-    Editor -->|"buildPlanetGrid"| Render
-    Editor -->|"registerUpdater"| Updater
-
-    %% toStr
-    BP -->|"toStr()"| Parser
-
-    style UI fill:#e1f5fe,stroke:#0288d1
     style Command fill:#fff3e0,stroke:#ef6c00
-    style BP fill:#e8f5e9,stroke:#388e3c
-    style Data fill:#fce4ec,stroke:#c2185b
+    style Editor fill:#e1f5fe,stroke:#0288d1
     style Render fill:#f3e5f5,stroke:#7b1fa2
+    style Data fill:#fce4ec,stroke:#c2185b
 ```
+
+
 
 ### 2.1 渲染重建 vs 增量刷新
 
 ```mermaid
 flowchart LR
     subgraph CommandExecute["命令执行"]
-        A[CommandQueue.push] --> B{silent?}
+        A["CommandQueue.push"] --> B{"silent?"}
     end
-    B -->|"yes (改图标/颜色/文字)"| C[stateVersion++]
-    C --> D[Updater.dispatch<br/>增量刷新]
-    B -->|"no (改几何/拓扑)"| E[stateVersion++<br/>execVersion++]
-    E --> F[BlueprintEditor<br/>computed(b) 触发重建]
+
+    B -->|"yes（改图标/颜色/文字）"| C["stateVersion++"]
+    C --> D["Updater.dispatch<br/>增量刷新"]
+
+    B -->|"no（改几何/拓扑）"| E["stateVersion++<br/>execVersion++"]
+    E --> F["BlueprintEditor<br/>computed(b) 触发重建"]
 
     subgraph Affected["受影响层"]
         D --> D1["Icons / 面板数据<br/>局部更新"]

@@ -30,7 +30,7 @@ DSP（戴森球计划）玩家常需要分享和批量编辑复杂蓝图。本�
 | 构建     | Vue CLI (webpack 5) | ~5.0.1   |
 | 测试     | Jest + ts-jest      | ^29      |
 
-详细架构见 [architecture.md](architecture.md)。
+详细架构见 [architecture.md](./docs/wiki/architecture.md)。
 
 ## 模块地图
 
@@ -70,28 +70,28 @@ DSP（戴森球计划）玩家常需要分享和批量编辑复杂蓝图。本�
 
 | 模块         | 文档                                                     | 关键文件                                                     |
 | ------------ | -------------------------------------------------------- | ------------------------------------------------------------ |
-| 蓝图解析核心 | [blueprint-core.md](modules/blueprint-core.md)           | `parser.ts`, `planet.ts`, `area.ts`, `md5.ts`                |
-| 3D 渲染系统  | [3d-rendering.md](modules/3d-rendering.md)               | `BlueprintEditor.vue`, `bvh/`, `iconTexture.ts`, `cargos.ts` |
-| 命令系统     | [command-system.md](modules/command-system.md)           | `command.ts`, `create.ts`, `removeBuilding.ts`, `defaultParams.ts` |
-| 数据资源层   | [data-layer.md](modules/data-layer.md)                   | `data/items.ts`, `data/buildingSlots.ts`, `data/stacking.ts` |
-| 建筑批量操作 | [building-operations.md](modules/building-operations.md) | `replace.ts`, `upgrade.ts`, `sorter.ts`, `beltLine.ts`, `stats.ts` |
-| 地基系统     | [reform-system.md](modules/reform-system.md)             | `reform.ts`, `reformEdit.ts`                                 |
-| 照片转蓝图   | [image-to-blueprint.md](modules/image-to-blueprint.md)   | `reformImage.ts`                                             |
-| UI 组件层    | [ui-components.md](modules/ui-components.md)             | `components/*.vue`                                           |
+| 蓝图解析核心 | [blueprint-core.md](./docs/wiki/modules/blueprint-core.md)           | `parser.ts`, `planet.ts`, `area.ts`, `md5.ts`                |
+| 3D 渲染系统  | [3d-rendering.md](./docs/wiki/modules/3d-rendering.md)               | `BlueprintEditor.vue`, `bvh/`, `iconTexture.ts`, `cargos.ts` |
+| 命令系统     | [command-system.md](./docs/wiki/modules/command-system.md)           | `command.ts`, `create.ts`, `removeBuilding.ts`, `defaultParams.ts` |
+| 数据资源层   | [data-layer.md](./docs/wiki/modules/data-layer.md)                   | `data/items.ts`, `data/buildingSlots.ts`, `data/stacking.ts` |
+| 建筑批量操作 | [building-operations.md](./docs/wiki/modules/building-operations.md) | `replace.ts`, `upgrade.ts`, `sorter.ts`, `beltLine.ts`, `stats.ts` |
+| 地基系统     | [reform-system.md](./docs/wiki/modules/reform-system.md)             | `reform.ts`, `reformEdit.ts`                                 |
+| 照片转蓝图   | [image-to-blueprint.md](./docs/wiki/modules/image-to-blueprint.md)   | `reformImage.ts`                                             |
+| UI 组件层    | [ui-components.md](./docs/wiki/modules/ui-components.md)             | `components/*.vue`                                           |
 
 ## 图表索引
 
 | 图表                     | 文件                                                     |
 | ------------------------ | -------------------------------------------------------- |
-| 总体架构 flowchart       | [architecture.md](architecture.md) §2                    |
-| 蓝图核心数据结构类图     | [class-diagrams.md](diagrams/class-diagrams.md) §1       |
-| 命令系统类图             | [class-diagrams.md](diagrams/class-diagrams.md) §2       |
-| 参数类型层次类图         | [class-diagrams.md](diagrams/class-diagrams.md) §3       |
-| 蓝图解析流程时序图       | [sequence-diagrams.md](diagrams/sequence-diagrams.md) §1 |
-| 撤销重做流程时序图       | [sequence-diagrams.md](diagrams/sequence-diagrams.md) §2 |
-| 照片转蓝图时序图         | [sequence-diagrams.md](diagrams/sequence-diagrams.md) §3 |
-| 新建建筑命令时序图       | [sequence-diagrams.md](diagrams/sequence-diagrams.md) §4 |
-| 分流器设置优先输出时序图 | [sequence-diagrams.md](diagrams/sequence-diagrams.md) §5 |
+| 总体架构 flowchart       | [architecture.md](./docs/wiki/architecture.md) §2                    |
+| 蓝图核心数据结构类图     | [class-diagrams.md](./docs/wiki/diagrams/class-diagrams.md) §1       |
+| 命令系统类图             | [class-diagrams.md](./docs/wiki/diagrams/class-diagrams.md) §2       |
+| 参数类型层次类图         | [class-diagrams.md](./docs/wiki/diagrams/class-diagrams.md) §3       |
+| 蓝图解析流程时序图       | [sequence-diagrams.md](./docs/wiki/diagrams/sequence-diagrams.md) §1 |
+| 撤销重做流程时序图       | [sequence-diagrams.md](./docs/wiki/diagrams/sequence-diagrams.md) §2 |
+| 照片转蓝图时序图         | [sequence-diagrams.md](./docs/wiki/diagrams/sequence-diagrams.md) §3 |
+| 新建建筑命令时序图       | [sequence-diagrams.md](./docs/wiki/diagrams/sequence-diagrams.md) §4 |
+| 分流器设置优先输出时序图 | [sequence-diagrams.md](./docs/wiki/diagrams/sequence-diagrams.md) §5 | 
 
 ## 快速开始
 
@@ -115,7 +115,7 @@ echo 'BLUEPRINT:...' | yarn cli
 yarn format
 ```
 
-详细步骤见 [getting-started.md](getting-started.md)，API 见 [api.md](api.md)。
+详细步骤见 [getting-started.md](./docs/wiki/getting-started.md)，API 见 [api.md](./docs/wiki/api.md)。  
 
 ## 文档目录
 
