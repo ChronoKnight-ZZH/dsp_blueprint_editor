@@ -1,168 +1,194 @@
-import { BlueprintData } from "./parser";
+import {
+    BlueprintArea,
+    BlueprintData,
+    BlueprintReformRect,
+} from "./parser";
+import {
+    absToLocal,
+    AreaGridOrigin,
+    areaGridSize,
+    bandBBox,
+    bandColumnRanges,
+    BandContent,
+    collectCanvasContent,
+    equatorBand,
+    localToAbs,
+    mapBuildingPoints,
+    singleAreaLatitude,
+} from "./globe";
+import {
+    bandOfRow,
+    bandSpan,
+    findPosForAreas,
+    planetBandGridRange,
+    PositionedBlueprint,
+} from "./planet";
 
-// Root area constants: equator band, segment=200
-const ROOT_SEGMENT = 200;
-const GRID_PER_SEGMENT = 5;
-export const ROOT_GRID_SIZE = ROOT_SEGMENT * GRID_PER_SEGMENT; // 1000 grid columns
+export { planetToLocal, localToPlanet, ROOT_GRID_SIZE } from "./globe";
+export type { AreaGridOrigin } from "./globe";
 
-/**
- * 区域在星球上的定位（= `findPosForAreas(...).areas[areaIndex]`）。
- * 光标 ↔ 局部格的换算必须与 `calcBuildingTrans` 用**同一份**定位，否则放置预览会与光标错开。
- * 注意原点纬度不是常数：工具自建空画布（`createEmptyBlueprint`，size.y=161）恰好是 -80，
- * 导入蓝图则由 `findPosForAreas` 按其区域元数据算出（无子区域时为 `-floor(size.y/2)`）。
- */
-export interface AreaGridOrigin {
-    /** 区域原点纬度：绝对纬向格（纬向格全星球统一，1000 格/圈） */
-    latitude: number;
-    /** 区域原点经度：以该区域自己的经向格计 */
-    longitude: number;
-    /** 区域经向段数（`BlueprintArea.areaSegments`）：决定经向格的宽度 */
-    segment: number;
-}
-
-function wrapGrid(x: number, turn: number): number {
+function wrap(x: number, turn: number): number {
     return ((x % turn) + turn) % turn;
 }
 
 /**
- * 星球网格坐标（latGrid / lonGrid，全局 1000 格/圈 = 200 段 × 5 格）→ 区域局部格偏移。
+ * 环形坐标上的最小覆盖弧：所有内容列区间 + 最大间隙的补集（左右各留 1 格）。
  *
- * 两个必须用传入区域信息的理由：
- * - **纬向**：局部 y 相对区域原点 `area.latitude`，不是固定 -80。根区域原点随 `size.y` 变化
- *   （`-floor(size.y/2)`，多区域蓝图还受子区域锚点约束），用常数会让整个放置位置沿纬向平移
- *   约 `80 - floor(size.y/2)` 格——表现为"导入蓝图后绿盒/落位与光标错开几十格"。
- * - **经向**：全局 1000 格/圈与区域自己的经向格之间差一个 `segment / 200` 的尺度
- *   （极区/低段数区域的格更宽），按 1000 取模也会错。
+ * 与旧实现（收集所有格点、找最大间隙）等价，但用区间表示：几千格宽的照片地基
+ * 只按矩形块参与计算，不会被展开成几十万个点。
  */
-export function planetToLocal(
-    latGrid: number,
-    lonGrid: number,
-    area: AreaGridOrigin
-): { x: number; y: number } {
-    const turn = area.segment * GRID_PER_SEGMENT; // 该区域一整圈的经向格数
-    const x = wrapGrid(
-        lonGrid * (area.segment / ROOT_SEGMENT) - area.longitude,
-        turn
-    );
-    return { x, y: latGrid - area.latitude };
-}
-
-/**
- * `planetToLocal` 的逆变换：区域局部格偏移 → 星球网格坐标（全局 1000 格/圈）。
- */
-export function localToPlanet(
-    offset: { x: number; y: number },
-    area: AreaGridOrigin
-): {
-    lat: number;
-    lon: number;
-} {
-    return {
-        lat: offset.y + area.latitude,
-        lon: (area.longitude + offset.x) * (ROOT_SEGMENT / area.segment),
-    };
-}
-
-/**
- * Ensure the root area covers the given offset. Expands size.x if needed.
- * @returns areaIndex (always 0 for root area), or -1 if offset is outside the equator band
- */
-export function ensureAreaFor(
-    bp: BlueprintData,
-    offset: { x: number; y: number }
-): number {
-    if (bp.areas.length === 0) return -1;
-    const root = bp.areas[0];
-    if (offset.y < 0 || offset.y >= root.size.y) return -1; // Outside equator band
-    if (offset.x < 0 || offset.x >= root.size.x)
-        root.size.x = Math.floor(offset.x) + 1;
-    return 0;
-}
-
-/** 与 planet.ts findRootLatitude 一致：无子区域的根区域始终居中于赤道带 */
-function rootAreaLatitude(sizeY: number): number {
-    return -Math.floor(sizeY / 2);
-}
-
-/**
- * 导出时归一化：根区域收缩为覆盖所有建筑的最小区间（由距离最远的两建筑决定），
- * 所有建筑坐标平移到新原点，dragBoxSize 与 cursorOffset 同步为游戏惯例
- * （与游戏生成蓝图一致：anchorLocalOffset={0,0}、size=dragBoxSize=紧贴边界框）。
- * 经向为环形坐标，自动取最小覆盖弧（处理跨越 0 经线的情况）。
- * 仅对编辑器新建蓝图（dragBoxSize 为 0，游戏蓝图的 dragBoxSize 恒非 0）生效，
- * 导入的蓝图保持字节级不变；不修改入参。
- */
-export function normalizeBlueprintAreas(bp: BlueprintData): BlueprintData {
-    if (bp.areas.length !== 1 || bp.buildings.length === 0) return bp;
-    if (bp.dragBoxSize.x !== 0 || bp.dragBoxSize.y !== 0) return bp;
-    if (bp.reformData != null && bp.reformData.rects.length > 0) return bp;
-    const root = bp.areas[0];
-    if (root.parentIndex !== -1 || root.areaSegments !== ROOT_SEGMENT)
-        return bp;
-
-    const liveLat = rootAreaLatitude(root.size.y);
-    const xs: number[] = [];
-    const ys: number[] = [];
-    for (const b of bp.buildings) {
-        for (const p of b.localOffset) {
-            xs.push(((p.x % ROOT_GRID_SIZE) + ROOT_GRID_SIZE) % ROOT_GRID_SIZE);
-            ys.push(p.y + liveLat); // 绝对纬向格
+function minCoverArc(
+    ranges: { lo: number; hi: number }[],
+    turn: number
+): { originX: number; sizeX: number } {
+    if (ranges.length === 0) return { originX: 0, sizeX: 1 };
+    const sorted = [...ranges].sort((a, b) => a.lo - b.lo);
+    const merged: { lo: number; hi: number }[] = [];
+    for (const r of sorted) {
+        const last = merged[merged.length - 1];
+        if (last !== undefined && r.lo <= last.hi + 1) {
+            last.hi = Math.max(last.hi, r.hi);
+        } else {
+            merged.push({ lo: r.lo, hi: r.hi });
         }
     }
-    xs.sort((a, b) => a - b);
-    ys.sort((a, b) => a - b);
-
-    // x：环形最小覆盖弧 = 最大间隙的补集
-    let maxGap = -1,
-        gapStart = 0;
-    for (let i = 0; i < xs.length; i++) {
-        const next = i + 1 < xs.length ? xs[i + 1] : xs[0] + ROOT_GRID_SIZE;
-        if (next - xs[i] > maxGap) {
-            maxGap = next - xs[i];
-            gapStart = xs[i];
+    let maxGap = -1;
+    let arcStart = 0;
+    for (let i = 0; i < merged.length; i++) {
+        const nextLo =
+            i + 1 < merged.length
+                ? merged[i + 1].lo
+                : merged[0].lo + turn;
+        const gap = nextLo - merged[i].hi;
+        if (gap > maxGap) {
+            maxGap = gap;
+            arcStart = nextLo;
         }
     }
-    const arcStart = gapStart + maxGap; // 覆盖弧起点（未取模）
-    // 左右各留一格边距：originX 左移一格，sizeX 在原基础上 +2
     const originX = Math.floor(arcStart) - 1;
     const sizeX = Math.max(
         1,
-        Math.floor(arcStart + (ROOT_GRID_SIZE - maxGap)) - originX + 2
+        Math.floor(arcStart + (turn - maxGap)) - originX + 2
     );
+    return { originX, sizeX };
+}
 
-    // y：赤道居中约束下的最小高度，上下各留一格边距
-    const needLo = Math.max(0, -Math.floor(ys[0]) + 1);
-    const needHi = Math.max(0, Math.floor(ys[ys.length - 1]) + 2);
-    const sizeY = Math.max(1, 2 * needLo, 2 * needHi - 1);
-    // 新原点纬度 rootAreaLatitude(sizeY)，y' = 绝对纬度 - 新原点纬度 = y + liveLat - newLat
-    const dy = liveLat - rootAreaLatitude(sizeY);
+/** 经向区间平移后可能跨 0 经线 → 拆成两段 */
+function shiftCols(
+    colLo: number,
+    w: number,
+    shift: number,
+    turn: number
+): { x: number; w: number }[] {
+    if (w <= 0) return [];
+    const start = wrap(colLo - shift, turn);
+    if (start + w <= turn) return [{ x: start, w }];
+    const first = turn - start;
+    return [
+        { x: start, w: first },
+        { x: 0, w: w - first },
+    ];
+}
 
-    const shiftX = (x: number) =>
-        (((x - originX) % ROOT_GRID_SIZE) + ROOT_GRID_SIZE) % ROOT_GRID_SIZE;
+/**
+ * 导出前归一化：把编辑画布（一条带一个区域、整带高度）收缩成游戏惯例的紧凑区域，
+ * 让蓝图在游戏里既能粘贴又能整带移动。不修改入参。
+ *
+ * - **只用了一条带** → 导出单个区域（紧凑边界框 + 居中约束下的原点纬度），与旧实现一致：
+ *   这种蓝图在游戏里能在该带内自由移动；
+ * - **跨多条带** → 赤道带为根 + 每条带一个区域（链式锚点）。多带蓝图的绝对纬度由区域
+ *   元数据唯一确定（每条带只能占自己的行），所以它在游戏里只能贴在导出时的纬度上 ——
+ *   这正是"全球任意位置放置"的语义。
+ *
+ * 触发条件：工具自建蓝图（`dragBoxSize` 为 0）或进过编辑器（`canvasExpanded`）。
+ * 纯导入未编辑的蓝图原样返回，保持字节级 round-trip；新建画布只铺了地基（没有建筑）时
+ * 也沿用旧行为不收缩 —— 地基矩形本身就是紧凑的，改动它们只会破坏字节级对照。
+ */
+export function normalizeBlueprintAreas(bp: BlueprintData): BlueprintData {
+    const legacy = bp.dragBoxSize.x === 0 && bp.dragBoxSize.y === 0;
+    if (!bp.canvasExpanded) {
+        if (!legacy) return bp;
+        if (bp.buildings.length === 0) return bp;
+    }
+    const rects = bp.reformData?.rects ?? [];
+    if (bp.buildings.length === 0 && rects.length === 0) return bp;
+    let pos: PositionedBlueprint;
+    try {
+        pos = findPosForAreas(bp.areas);
+    } catch {
+        return bp;
+    }
+    const content = collectCanvasContent(bp, pos);
+    if (content === null || content.bands.length === 0) return bp;
+    if (content.bands.length === 1)
+        return compactSingleArea(bp, pos, content.bands[0]);
+    return compactMultiArea(bp, pos, content.bands);
+}
+
+/** 单区域导出：紧凑边界框 + 居中约束下的原点纬度（游戏里可在该带内移动） */
+function compactSingleArea(
+    bp: BlueprintData,
+    pos: PositionedBlueprint,
+    content: BandContent
+): BlueprintData {
+    const band = content.band;
+    const turn = areaGridSize(band.segment);
+    const box = bandBBox(content);
+    const wantLo = Math.floor(box.rowLo) - 1;
+    const wantHi = Math.ceil(box.rowHi) + 1;
+    const maxSizeY = bandSpan(band);
+    const minSizeY = Math.max(1, wantHi - wantLo + 1);
+    let sizeY = -1;
+    let lat = band.rowLo;
+    for (let y = minSizeY; y <= maxSizeY; y++) {
+        const l = singleAreaLatitude(band.segment, y);
+        if (l <= wantLo && l + y - 1 >= wantHi) {
+            sizeY = y;
+            lat = l;
+            break;
+        }
+    }
+    if (sizeY < 0) {
+        sizeY = maxSizeY;
+        lat = singleAreaLatitude(band.segment, sizeY);
+    }
+    const { originX, sizeX } = minCoverArc(bandColumnRanges(content), turn);
+
     const buildings = bp.buildings.map((b) => {
-        const localOffset = b.localOffset.map((p) => ({
-            x: shiftX(p.x),
-            y: p.y + dy,
-            z: p.z,
-        })) as BlueprintData["buildings"][number]["localOffset"];
-        // v2ExtraPose 必须保留：它除尖端坐标外还带分拣器的姿态角（pose[4] = yaw[0]、pose[5] = tilt），
-        // 丢弃后导出会退化成 [0,…,0]，游戏读到的分拣器朝向就是 0°（表现为"分拣器角度偏移"、报错）。
-        // 尖端坐标随 localOffset[1] 一起平移，其余字段原样保留（导出时还会再由 localOffset[1]/yaw[1] 刷新）。
-        const pose = b.v2ExtraPose;
-        const v2ExtraPose =
-            pose === undefined || pose.length !== 7
-                ? pose
-                : [
-                      pose[0],
-                      localOffset[1].x,
-                      localOffset[1].y,
-                      localOffset[1].z,
-                      pose[4],
-                      pose[5],
-                      pose[6],
-                  ];
-        return { ...b, localOffset, v2ExtraPose };
+        const old = pos.areas[b.areaIndex];
+        return mapBuildingPoints(b, 0, (p) => {
+            const abs = localToAbs(old, p);
+            return {
+                x: wrap(abs.lonFrac * turn - originX, turn),
+                y: abs.row - lat,
+                z: p.z,
+            };
+        });
     });
+
+    let reformData = bp.reformData;
+    if (reformData != null) {
+        const rects: BlueprintReformRect[] = [];
+        for (const piece of content.rects) {
+            const cols = shiftCols(
+                piece.colLo,
+                piece.colHi - piece.colLo + 1,
+                originX,
+                turn
+            );
+            for (const c of cols) {
+                rects.push({
+                    ...piece.rect,
+                    x: c.x,
+                    y: piece.rowLo - lat,
+                    w: c.w,
+                    h: piece.rowHi - piece.rowLo + 1,
+                    areaIndex: 0,
+                });
+            }
+        }
+        reformData = { ...reformData, rects };
+    }
 
     return {
         ...bp,
@@ -172,11 +198,191 @@ export function normalizeBlueprintAreas(bp: BlueprintData): BlueprintData {
         primaryAreaIdx: 0,
         areas: [
             {
-                ...root,
+                index: 0,
+                parentIndex: -1,
+                tropicAnchor: 0,
+                areaSegments: band.segment,
                 anchorLocalOffset: { x: 0, y: 0 },
                 size: { x: sizeX, y: sizeY },
             },
         ],
         buildings,
+        reformData,
+    };
+}
+
+/**
+ * 多带导出：**根区域必须是整棵区域树里最靠赤道的那个**（子区域段数必须严格更小）。
+ *
+ * - 内容跨南北半球（或赤道带本身有内容）→ 根 = 赤道带（整带高度，纬度恒 -80），
+ *   即使赤道带没有建筑也补一个空区域，否则南北两侧同段数的两个区域互相无法挂载；
+ * - 内容只在单侧（例如都在北半球）→ 根 = 该侧段数最大的那条带，纬度按"贴边"推法
+ *   （`rawHi - size.y + 1`）确定，尺寸一直延伸到该带边界，子区域锚点随之换算。
+ *
+ * 子区域挂到同半球里段数更大的最近一条带，`anchorLocalOffset.y` = 本带原点行 − 父区域纬度。
+ */
+function compactMultiArea(
+    bp: BlueprintData,
+    pos: PositionedBlueprint,
+    bands: BandContent[]
+): BlueprintData {
+    const equator = bands.find((c) => c.band.hemisphere === 0);
+    const others = bands.filter((c) => c.band.hemisphere !== 0);
+    const sides = new Set(others.map((c) => c.band.hemisphere));
+    let ordered: BandContent[];
+    if (equator !== undefined || sides.size !== 1) {
+        ordered = [
+            equator ?? { band: equatorBand(), points: [], rects: [] },
+            ...others,
+        ];
+    } else {
+        // 单侧内容：最靠赤道的带直接当根（兄弟区域同号，根区域按"贴边"定位）
+        const maxSegment = Math.max(...others.map((c) => c.band.segment));
+        const root = others.find((c) => c.band.segment === maxSegment)!;
+        ordered = [root, ...others.filter((c) => c !== root)];
+    }
+
+    const boxes = ordered.map((c) => bandBBox(c));
+    const latOf: number[] = [];
+    const areas: BlueprintArea[] = [];
+    for (let i = 0; i < ordered.length; i++) {
+        const band = ordered[i].band;
+        const isRoot = i === 0;
+        const box = boxes[i];
+        const sizeX = Number.isFinite(box.colHi)
+            ? Math.max(1, Math.ceil(box.colHi) + 2)
+            : 1;
+        const span = Number.isFinite(box.rowLo)
+            ? Math.ceil(box.rowHi) - Math.floor(box.rowLo) + 1
+            : 1;
+        let sizeY: number;
+        let lat: number;
+        if (isRoot) {
+            const raw = planetBandGridRange(band.segment);
+            if (band.hemisphere === 0) {
+                // 整条赤道带：size.y=161 时无论有没有子区域，findPosForAreas 都解出 -80
+                sizeY = bandSpan(band);
+                lat = band.rowLo;
+            } else if (band.hemisphere === 1) {
+                // 有正锚点子区域 → 根区域上边界钉在带顶：lat = rawHi - size.y + 1
+                const wantedLo = Math.floor(box.rowLo) - 1;
+                sizeY = Math.min(
+                    bandSpan(band),
+                    Math.max(span + 2, raw.hi - wantedLo + 1)
+                );
+                lat = raw.hi - sizeY + 1;
+            } else {
+                // 只有负锚点子区域 → 根区域下边界钉在带底：lat = -rawHi
+                lat = -raw.hi;
+                sizeY = Math.min(
+                    bandSpan(band),
+                    Math.max(span + 2, Math.ceil(box.rowHi) + raw.hi + 2)
+                );
+            }
+        } else {
+            const wantLo = Math.floor(box.rowLo) - 1;
+            sizeY = Math.max(1, Math.min(bandSpan(band), span + 2));
+            lat = Math.max(band.rowLo, Math.min(wantLo, band.rowHi - sizeY + 1));
+        }
+        latOf.push(lat);
+        areas.push({
+            index: i,
+            parentIndex: -1,
+            tropicAnchor: 0,
+            areaSegments: band.segment,
+            anchorLocalOffset: { x: 0, y: 0 },
+            size: { x: sizeX, y: sizeY },
+        });
+    }
+    // 链式锚点：父区域 = 同半球里段数更大（更靠赤道）的最近一条带，否则根区域
+    for (let i = 1; i < ordered.length; i++) {
+        const band = ordered[i].band;
+        let parent = 0;
+        let bestSegment = Infinity;
+        for (let j = 0; j < ordered.length; j++) {
+            const other = ordered[j].band;
+            if (other.segment <= band.segment) continue;
+            if (other.hemisphere !== 0 && other.hemisphere !== band.hemisphere)
+                continue;
+            if (other.segment < bestSegment) {
+                bestSegment = other.segment;
+                parent = j;
+            }
+        }
+        areas[i].parentIndex = parent;
+        areas[i].anchorLocalOffset.y = latOf[i] - latOf[parent];
+    }
+
+    const indexOfBand = new Map<string, number>();
+    ordered.forEach((c, i) =>
+        indexOfBand.set(`${c.band.segment}/${c.band.hemisphere}`, i)
+    );
+    const buildingArea = (row: number): number => {
+        const band = bandOfRow(Math.floor(row));
+        if (band === null) return 0;
+        return indexOfBand.get(`${band.segment}/${band.hemisphere}`) ?? 0;
+    };
+    const buildings = bp.buildings.map((b) => {
+        const firstAbs = localToAbs(pos.areas[b.areaIndex], b.localOffset[0]);
+        const areaIndex = buildingArea(firstAbs.row);
+        const target: AreaGridOrigin = {
+            latitude: latOf[areaIndex],
+            longitude: 0,
+            segment: ordered[areaIndex].band.segment,
+        };
+        return mapBuildingPoints(b, areaIndex, (p) => {
+            const abs = localToAbs(pos.areas[b.areaIndex], p);
+            return { ...absToLocal(target, abs), z: p.z };
+        });
+    });
+
+    let reformData = bp.reformData;
+    if (reformData != null) {
+        const rects: BlueprintReformRect[] = [];
+        for (const c of ordered) {
+            const areaIndex =
+                indexOfBand.get(`${c.band.segment}/${c.band.hemisphere}`) ?? 0;
+            for (const piece of c.rects) {
+                rects.push({
+                    ...piece.rect,
+                    x: piece.colLo,
+                    y: piece.rowLo - latOf[areaIndex],
+                    w: piece.colHi - piece.colLo + 1,
+                    h: piece.rowHi - piece.rowLo + 1,
+                    areaIndex,
+                });
+            }
+        }
+        reformData = { ...reformData, rects };
+    }
+
+    let minRow = Infinity;
+    let maxRow = -Infinity;
+    let maxSizeX = 1;
+    boxes.forEach((box, i) => {
+        if (Number.isFinite(box.rowLo)) minRow = Math.min(minRow, box.rowLo);
+        if (Number.isFinite(box.rowHi)) maxRow = Math.max(maxRow, box.rowHi);
+        maxSizeX = Math.max(maxSizeX, areas[i].size.x);
+    });
+    const centerRow = Number.isFinite(minRow)
+        ? Math.round((minRow + maxRow) / 2)
+        : latOf[0];
+    const cursorY = Math.max(
+        0,
+        Math.min(centerRow - latOf[0], areas[0].size.y - 1)
+    );
+
+    return {
+        ...bp,
+        cursorOffset: { x: Math.floor(areas[0].size.x / 2), y: cursorY },
+        cursorTargetArea: 0,
+        dragBoxSize: {
+            x: maxSizeX,
+            y: Math.max(1, Number.isFinite(maxRow) ? maxRow - minRow + 3 : 1),
+        },
+        primaryAreaIdx: 0,
+        areas,
+        buildings,
+        reformData,
     };
 }

@@ -102,6 +102,12 @@ export interface BlueprintData {
     reformData?: BlueprintReformData | null;
     /** v2 body：地基数据之后的未知尾部字节（如 0.10.33 的 5 字节预留），字节级原样保留 */
     tailExtraBytes?: Uint8Array;
+    /**
+     * 工具内部标记（不参与序列化）：该蓝图已展开成"全球画布"（一条纬度带一个区域）。
+     * 置位后导出时 `normalizeBlueprintAreas` 会把整带区域收缩回游戏惯例的紧凑区域
+     * （见 `@/blueprint/globe`）；导入后未进过编辑器的蓝图保持原样、字节级 round-trip。
+     */
+    canvasExpanded?: boolean;
 }
 
 abstract class BufferIO {

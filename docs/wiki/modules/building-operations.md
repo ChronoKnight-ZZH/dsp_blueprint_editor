@@ -185,6 +185,6 @@ x 方向为环形坐标，`shortArcDelta` 自动取最短弧（跨越 0 经线�
 | `@/data/acceleratorData` | acceleratorBonuses |
 | `@/data/buildingPowerData` | buildingPowerMap |
 | `@/blueprint/create` | createBuilding |
-| `@/blueprint/area` | ensureAreaFor / ROOT_GRID_SIZE |
+| `@/blueprint/globe` | `ensureCanvasArea` / `materializeCanvasTarget` / `ROOT_GRID_SIZE`（放置时按纬度带补区域） |
 | `@/blueprint/splitterPorts` | hasPrioritizedOutput |
 | `@/blueprint/beltLine`（内部循环） | beltOffsetFromMain 被 sorter.ts 调用 |

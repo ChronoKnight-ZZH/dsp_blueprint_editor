@@ -268,6 +268,7 @@ function containsPoint(b: BlueprintBuilding, x: number, y: number): boolean {
  * 放置时求"堆叠底座"：鼠标所指建筑优先（与游戏一致——光标在建筑上就是往上叠），
  * 否则在该格内取能承载 childItemId 的**最高**建筑（已有堆叠列时叠到顶）。
  * @param picked 光标所指建筑（pickBuilding 的结果，可为 null）
+ * @param areaIndex 只在这一个区域里找底座（全球画布下不同纬度带的局部格互不相通）
  * @returns null = 该处不能堆叠（平地放置或不允许的组合）
  */
 export function stackBaseFor(
@@ -275,16 +276,19 @@ export function stackBaseFor(
     picked: BlueprintBuilding | null,
     x: number,
     y: number,
-    childItemId: number
+    childItemId: number,
+    areaIndex?: number
 ): BlueprintBuilding | null {
     if (
         picked &&
+        (areaIndex === undefined || picked.areaIndex === areaIndex) &&
         stackOffsetFor(picked.itemId, childItemId) !== null &&
         containsPoint(picked, x, y)
     )
         return picked;
     let best: BlueprintBuilding | null = null;
     for (const b of buildings) {
+        if (areaIndex !== undefined && b.areaIndex !== areaIndex) continue;
         if (stackOffsetFor(b.itemId, childItemId) === null) continue;
         if (!containsPoint(b, x, y)) continue;
         if (best === null || b.localOffset[0].z > best.localOffset[0].z)

@@ -1,6 +1,5 @@
 import { BlueprintBuilding, BlueprintData } from "./parser";
 import { Command } from "@/command";
-import { ensureAreaFor } from "./area";
 import { defaultParamsFor } from "./defaultParams";
 import { stackPortDefaults } from "@/data/stacking";
 
@@ -8,6 +7,9 @@ import { stackPortDefaults } from "@/data/stacking";
  * Create an empty v2 blueprint with a single root area anchored at the equator (latitude -80).
  * The root area covers the full equator band (size.y=161) with a small initial width (size.x=10).
  * 编辑过程中的区域是临时画布；导出时由 normalizeBlueprintAreas 收缩到实际建筑区间。
+ *
+ * 这张空画布就是"全球画布"的初始状态：根区域是赤道带，往南北任意纬度带放置时
+ * 由 `@/blueprint/globe` 按需补出该带的区域，导出时再收缩。
  */
 export function createEmptyBlueprint(): BlueprintData {
     return {
@@ -94,27 +96,44 @@ export function createBuilding(
 
 /**
  * Command to add a building to the blueprint.
- * Ensures the root area covers the building's offset (expands size.x if needed).
- * Undo pops the building and restores the area's size.x.
+ *
+ * `areaIndex` = 建筑所属区域（编辑器按建筑所在纬度带选出，见 `@/blueprint/globe`）；
+ * 缺省 0 = 根区域（旧调用点与测试）。区域不存在时抛错（调用方应先用
+ * `ensureCanvasArea` 按需补出该带的区域）；超出区域宽度时自动扩宽 `size.x`。
+ * Undo pops the building and restores the area's size.
  */
 export class CreateBuildingCommand implements Command {
     private prevSizeX = 0;
+    private prevSizeY = 0;
 
-    constructor(private readonly building: BlueprintBuilding) {}
+    constructor(
+        private readonly building: BlueprintBuilding,
+        private readonly areaIndex = 0
+    ) {}
 
     do(data: BlueprintData): void {
-        const root = data.areas[0];
-        this.prevSizeX = root.size.x;
-        const areaIndex = ensureAreaFor(data, this.building.localOffset[0]);
-        if (areaIndex < 0) throw new Error("Placement outside equator band");
-        this.building.areaIndex = areaIndex;
+        const area = data.areas[this.areaIndex];
+        if (area === undefined)
+            throw new Error("Placement area not found on canvas");
+        const offset = this.building.localOffset[0];
+        this.prevSizeX = area.size.x;
+        this.prevSizeY = area.size.y;
+        if (offset.y < 0 || offset.y >= area.size.y)
+            throw new Error("Placement outside the latitude band");
+        if (offset.x < 0 || offset.x >= area.size.x)
+            area.size.x = Math.floor(offset.x) + 1;
+        this.building.areaIndex = this.areaIndex;
         this.building.index = data.buildings.length;
         data.buildings.push(this.building);
     }
 
     undo(data: BlueprintData): void {
         data.buildings.pop();
-        data.areas[0].size.x = this.prevSizeX;
+        const area = data.areas[this.areaIndex];
+        if (area !== undefined) {
+            area.size.x = this.prevSizeX;
+            area.size.y = this.prevSizeY;
+        }
     }
 
     merge() {

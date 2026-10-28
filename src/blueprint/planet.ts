@@ -70,6 +70,158 @@ function planetAreaByLongitudeSegment(segment: number, maxSegment = 200) {
     return planetAreaByIndex(idx, maxSegment);
 }
 
+/** 该 segment 是否是本星球上存在的一条纬度带（= 区域 `areaSegments` 的合法取值） */
+export function hasPlanetBand(segment: number) {
+    return segmentMap.get(segment) !== undefined;
+}
+
+/** 纬度带在星球上的绝对纬向格范围（全星球 1000 格/圈口径） */
+export interface PlanetBandGridRange {
+    /** 下界（含） */
+    lo: number;
+    /** 上界（含）：与相邻带共享的边界行也算在本带内（游戏自己的赤道带蓝图 size.y=161 覆盖 [-80, 80]） */
+    hi: number;
+    /** 带中心格（上下界不对称时可能带 .5） */
+    center: number;
+    /** 该带的经向段数（= 落在该带里的区域的 `areaSegments`） */
+    longitudeSeg: number;
+}
+
+/**
+ * `planetAreaByLongitudeSegment` 的"按格"版本：纬度段的 1 段 = 5 格。
+ *
+ * 赤道带（segment=200）→ `[-80, 80]`，共 161 格，与 `createEmptyBlueprint` 的 `size.y=161`
+ * 以及游戏自己保存的整带蓝图一致；160 段带 → `[80, 130]`（中心 105）。
+ */
+export function planetBandGridRange(
+    segment: number,
+    maxSegment = 200
+): PlanetBandGridRange {
+    const info = planetAreaByLongitudeSegment(segment, maxSegment);
+    const lo = info.minLatitudeSeg * GRID_PER_SEGMENT;
+    const hi = (info.minLatitudeSeg + info.latitudeSeg) * GRID_PER_SEGMENT;
+    return {
+        lo,
+        hi,
+        center: (lo + hi) / 2,
+        longitudeSeg: info.longitudeSeg,
+    };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * 全球纬度带表
+ *
+ * 星球按经向网格分辨率分成若干纬度带：同一条带里所有纬度行的经向段数相同，
+ * 区域元数据只用一个 `areaSegments` 描述它属于哪条带 —— 这就是**一个 blueprint area
+ * 不能跨纬度带**的原因（`findPosForAreas` 也要求子区域段数严格小于父区域）。
+ * 要在全球任意位置放建筑，只能一条带一个区域。
+ * ---------------------------------------------------------------------------------------------- */
+
+/** 本星球上存在的全部经向段数（= 区域 `areaSegments` 的合法取值，从赤道向两极排列） */
+export const PLANET_SEGMENTS: readonly number[] = (() => {
+    const segments: number[] = [];
+    for (let i = segmentArr.length - 2; i >= 1; i--) segments.push(segmentArr[i][1]);
+    return segments;
+})();
+
+/** 一条纬度带：经向段数 + 半球 + 规范纬向行（含上下界） */
+export interface PlanetBand {
+    /** 该带的经向段数（= 该带里区域的 `areaSegments`） */
+    segment: number;
+    /** 0 = 赤道带（跨南北半球）；1 = 北半球；-1 = 南半球 */
+    hemisphere: -1 | 0 | 1;
+    /** 该带占用的起始行（含）= 该带区域原点的规范纬度 */
+    rowLo: number;
+    /** 该带占用的结束行（含） */
+    rowHi: number;
+}
+
+const bandCache = new Map<number, PlanetBand[]>();
+
+/**
+ * 全球纬度带表（赤道带 → 中纬 → 极区，南北对称）。
+ *
+ * 行的划分与游戏自带蓝图的取法一致：赤道带 = `planetBandGridRange(200)` 的 `[-80, 80]`
+ * （161 行，正是游戏整赤道带蓝图 `size.y`），其余每条带取 `[lo + 1, hi]`，即去掉与下一条带
+ * 共享的那一行边界（`calcLatitudeSeg` 的 ceil 会让相邻带的原始区间在边界行重叠）。
+ * 于是：
+ * - 任意一行都**唯一**属于一条带（`bandOfRow`），区域之间不会互相压住对方的格子；
+ * - 北半球 81..250、南半球 -250..-81 逐行铺满，极区最后一带 `4 段 → [246, 250]`。
+ *
+ * 已知（见 docs/wiki/modules/blueprint-core.md 的「全球画布与区域模型」）：`segment=1` 的极点带在该模型下
+ * `latitudeSeg` 为 0（高度为零），故全球画布只到 `segment=4` 那条带。
+ */
+export function planetBands(maxSegment = 200): PlanetBand[] {
+    const cached = bandCache.get(maxSegment);
+    if (cached !== undefined) return cached;
+    const bands: PlanetBand[] = [];
+    let northLo = 0;
+    for (const segment of PLANET_SEGMENTS) {
+        if (segment > maxSegment) continue;
+        const range = planetBandGridRange(segment, maxSegment);
+        if (segment === maxSegment) {
+            // 赤道带：本身跨赤道，上下贯通
+            bands.push({
+                segment,
+                hemisphere: 0,
+                rowLo: range.lo,
+                rowHi: range.hi,
+            });
+            northLo = range.hi + 1;
+            continue;
+        }
+        const span = range.hi - range.lo; // 该带原始高度（= 规范高度）
+        bands.push({
+            segment,
+            hemisphere: 1,
+            rowLo: northLo,
+            rowHi: northLo + span - 1,
+        });
+        bands.push({
+            segment,
+            hemisphere: -1,
+            rowLo: -(northLo + span - 1),
+            rowHi: -northLo,
+        });
+        northLo += span;
+    }
+    bandCache.set(maxSegment, bands);
+    return bands;
+}
+
+/** 该纬向行属于哪条带（绝对纬度行，1000 格/圈口径）；越出星球返回 null */
+export function bandOfRow(row: number, maxSegment = 200): PlanetBand | null {
+    const r = Math.round(row);
+    for (const band of planetBands(maxSegment)) {
+        if (r >= band.rowLo && r <= band.rowHi) return band;
+    }
+    return null;
+}
+
+/** 按经向段数 + 半球取带（赤道带的 hemisphere 为 0） */
+export function bandBySegment(
+    segment: number,
+    hemisphere: -1 | 0 | 1,
+    maxSegment = 200
+): PlanetBand | null {
+    for (const band of planetBands(maxSegment)) {
+        if (band.segment === segment && band.hemisphere === hemisphere)
+            return band;
+    }
+    return null;
+}
+
+/** 该带整带高度（行数）；编辑期区域的 `size.y` 用它，于是带内每一行都能放 */
+export function bandSpan(band: PlanetBand): number {
+    return band.rowHi - band.rowLo + 1;
+}
+
+/** 星球纬度行范围（|row| ≤ 该值） */
+export function planetRowLimit(maxSegment = 200): number {
+    const bands = planetBands(maxSegment);
+    return bands.reduce((m, b) => Math.max(m, Math.abs(b.rowLo), Math.abs(b.rowHi)), 0);
+}
+
 function gcd(a: number, b: number) {
     while (b !== 0) {
         const c = a % b;
@@ -221,6 +373,13 @@ export function calcBuildingTrans(
     building: BlueprintBuilding
 ) {
     const area = pos.areas[building.areaIndex];
+    // 区域缺失时不要让它变成 "reading 'segment' of undefined" 这种无信息异常：
+    // 场景重建失败会把整层模型替换掉（见 BlueprintEditor 的原子替换），报错信息要能定位到建筑
+    if (area === undefined)
+        throw new Error(
+            `建筑 ${building.index} 引用了不存在的区域 ${building.areaIndex}` +
+                `（当前区域数 ${pos.areas.length}）`
+        );
     const longitudeGridSize = (2 * Math.PI) / area.segment / GRID_PER_SEGMENT;
     const latitudeGridSize = (2 * Math.PI) / pos.segment / GRID_PER_SEGMENT;
 

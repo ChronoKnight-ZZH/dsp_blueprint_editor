@@ -93,8 +93,9 @@ export interface Command {
 
 **`CreateBuildingCommand implements Command`**（行 100-123）
 
-- `do`：`ensureAreaFor` 保证根区域 size.x 覆盖放置点（越界则扩张），给建筑赋 `areaIndex=0`、`index=data.buildings.length`（push 位置），然后 `push`。
-- `undo`：`buildings.pop()` + 还原 `prevSizeX`。
+- `do`：写入 `areaIndex`（构造参数，编辑器按建筑所在纬度带选出；缺省 0 = 根区域）、`index=data.buildings.length`，把建筑落进该区域并扩宽 `size.x`；区域不存在或纬向越出该区域时抛错。
+- 建区域（按需补出某条纬度带的区域）由编辑器在构造命令**之前**调用 `ensureCanvasArea` 完成（`BlueprintEditor.materializeTarget`），属于画布状态，不随单次放置回滚。
+- `undo`：`buildings.pop()` + 还原该区域的 `size.x / size.y`。
 - `merge`：永远 false（放置不同 itemId / 不同 yaw 的建筑不可合并；连续同 item 拖拽放置是未来可能扩展）。
 - **非 silent**（默认 false）→ 触发 execVersion bump → 场景重建。
 
@@ -173,7 +174,7 @@ export interface Command {
 | --- | --- |
 | `vue` 的 `ref / onMounted / onUnmounted` | CommandQueue 的 `stateVersion / execVersion` 是 Vue 响应式；EventDispatcher 的 `onMounted` 绑定生命周期 |
 | `@/blueprint/parser` 的 `BlueprintBuilding / BlueprintData / LogisticRole / StationParameters / IODir` | 默认参数模板里的枚举、类型 |
-| `@/blueprint/area` 的 `ensureAreaFor` | 放置时扩张根区域（create.ts 行 108） |
+| `@/blueprint/globe` 的 `ensureCanvasArea` | 放置前按需补出目标纬度带的区域（见 blueprint-core.md 的"全球画布"） |
 | `@/blueprint/defaultParams` 的 `stackPortDefaults` | 可堆叠建筑端口默认值（create.ts 行 85） |
 | `@/blueprint/parser` 的 `allAssemblers` | defaultParamsFor 兜底逻辑（行 139） |
 | `@/data/items` 的 `isBelt` | 删除传送带时触发 portDirs 清理（removeBuilding.ts 行 67） |

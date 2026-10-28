@@ -1,6 +1,6 @@
 import { BlueprintBuilding, BlueprintData, IODir } from "./parser";
 import { Command } from "@/command";
-import { ensureAreaFor, ROOT_GRID_SIZE } from "./area";
+import { ROOT_GRID_SIZE } from "./globe";
 import { createBuilding } from "./create";
 
 /** 传送带路径走法模式（R 键循环切换） */
@@ -9,13 +9,12 @@ export type BeltPathMode =
     | "lonFirst" // 先走经度线（y/南北），后走纬度线（x/东西）
     | "straight"; // 两点之间直线（Bresenham 栅格化，每步仅一方向）
 
-/** 经向短弧位移：把 x1-x0 归一化到 (-ROOT_GRID_SIZE/2, ROOT_GRID_SIZE/2] */
-function shortArcDelta(x0: number, x1: number): number {
+/** 经向短弧位移：把 x1-x0 归一化到 (-gridSize/2, gridSize/2]；`gridSize` = 该区域一整圈的经向格数 */
+function shortArcDelta(x0: number, x1: number, gridSize = ROOT_GRID_SIZE): number {
     let dx = x1 - x0;
     dx =
-        ((((dx + ROOT_GRID_SIZE / 2) % ROOT_GRID_SIZE) + ROOT_GRID_SIZE) %
-            ROOT_GRID_SIZE) -
-        ROOT_GRID_SIZE / 2;
+        ((((dx + gridSize / 2) % gridSize) + gridSize) % gridSize) -
+        gridSize / 2;
     return dx;
 }
 
@@ -25,7 +24,8 @@ function lShape(
     y0: number,
     dx: number,
     dy: number,
-    xFirst: boolean
+    xFirst: boolean,
+    gridSize = ROOT_GRID_SIZE
 ): { x: number; y: number }[] {
     const pts: { x: number; y: number }[] = [];
     let x = x0,
@@ -40,7 +40,7 @@ function lShape(
     const first = xFirst
         ? {
               fn: () => {
-                  x = (x + sx + ROOT_GRID_SIZE) % ROOT_GRID_SIZE;
+                  x = (x + sx + gridSize) % gridSize;
               },
               n: stepsX,
           }
@@ -59,7 +59,7 @@ function lShape(
           }
         : {
               fn: () => {
-                  x = (x + sx + ROOT_GRID_SIZE) % ROOT_GRID_SIZE;
+                  x = (x + sx + gridSize) % gridSize;
               },
               n: stepsX,
           };
@@ -80,7 +80,8 @@ function bresenham(
     x0: number,
     y0: number,
     dx: number,
-    dy: number
+    dy: number,
+    gridSize = ROOT_GRID_SIZE
 ): { x: number; y: number }[] {
     const pts: { x: number; y: number }[] = [];
     const adx = Math.abs(dx),
@@ -91,11 +92,11 @@ function bresenham(
     let x = x0,
         y = y0;
     pts.push({ x, y });
-    while (x !== (x0 + dx + ROOT_GRID_SIZE) % ROOT_GRID_SIZE || y !== y0 + dy) {
+    while (x !== (x0 + dx + gridSize) % gridSize || y !== y0 + dy) {
         const e2 = 2 * err;
         if (e2 > -ady) {
             err -= ady;
-            x = (x + sx + ROOT_GRID_SIZE) % ROOT_GRID_SIZE;
+            x = (x + sx + gridSize) % gridSize;
         } else if (e2 < adx) {
             err += adx;
             y += sy;
@@ -116,12 +117,13 @@ export function rasterizeLine(
     y0: number,
     x1: number,
     y1: number,
-    mode: BeltPathMode = "latFirst"
+    mode: BeltPathMode = "latFirst",
+    gridSize = ROOT_GRID_SIZE
 ): { x: number; y: number }[] {
-    const dx = shortArcDelta(x0, x1);
+    const dx = shortArcDelta(x0, x1, gridSize);
     const dy = y1 - y0;
-    if (mode === "straight") return bresenham(x0, y0, dx, dy);
-    return lShape(x0, y0, dx, dy, mode === "latFirst");
+    if (mode === "straight") return bresenham(x0, y0, dx, dy, gridSize);
+    return lShape(x0, y0, dx, dy, mode === "latFirst", gridSize);
 }
 
 /** 下游相对方向 (dx,dy) → 传送带 yaw（由真实蓝图标定） */
@@ -197,23 +199,28 @@ export interface BeltPortEnd {
 }
 
 /** 口所在格的**整数身份**（经向回绕到 0..ROOT_GRID_SIZE） */
-function portCell(point: { x: number; y: number }): { x: number; y: number } {
+function portCell(
+    point: { x: number; y: number },
+    gridSize = ROOT_GRID_SIZE
+): { x: number; y: number } {
     return {
-        x: wrapX(Math.round(point.x)),
+        x: wrapX(Math.round(point.x), gridSize),
         y: Math.round(point.y),
     };
 }
 
-function wrapX(x: number): number {
-    return ((x % ROOT_GRID_SIZE) + ROOT_GRID_SIZE) % ROOT_GRID_SIZE;
+/** 经向回绕到 0..gridSize-1（gridSize = 该区域一整圈的经向格数） */
+function wrapX(x: number, gridSize = ROOT_GRID_SIZE): number {
+    return ((x % gridSize) + gridSize) % gridSize;
 }
 
 /** 口格的**记录位置**写成口的精确坐标（游戏即如此：带端贴在建筑口上，位置是分数） */
 function placeAtPort(
     belt: BlueprintBuilding,
-    point: { x: number; y: number; z: number }
+    point: { x: number; y: number; z: number },
+    gridSize = ROOT_GRID_SIZE
 ): void {
-    const x = wrapX(point.x);
+    const x = wrapX(point.x, gridSize);
     for (const p of belt.localOffset) {
         p.x = x;
         p.y = point.y;
@@ -227,10 +234,11 @@ function zLayer(z: number): number {
 }
 
 /** 普通传送带的"格身份"：格 + 高度层 */
-function cellKey(b: BlueprintBuilding): string {
-    return `${wrapX(Math.round(b.localOffset[0].x))},${Math.round(
-        b.localOffset[0].y
-    )},${zLayer(b.localOffset[0].z)}`;
+function cellKey(b: BlueprintBuilding, gridSize = ROOT_GRID_SIZE): string {
+    return `${b.areaIndex}:${wrapX(
+        Math.round(b.localOffset[0].x),
+        gridSize
+    )},${Math.round(b.localOffset[0].y)},${zLayer(b.localOffset[0].z)}`;
 }
 
 /**
@@ -255,7 +263,7 @@ function portKey(
     const other = byIndex.get(idx);
     if (!other || isBelt(other)) return null;
     const slot = isInput ? b.inputFromSlot : b.outputToSlot;
-    return `${isInput ? "in" : "out"}:${idx}:${slot}:${zLayer(
+    return `${b.areaIndex}:${isInput ? "in" : "out"}:${idx}:${slot}:${zLayer(
         b.localOffset[0].z
     )}`;
 }
@@ -263,9 +271,10 @@ function portKey(
 /** 传送带在占用表里的键：口带按口身份，普通带按格身份 */
 function occupancyKey(
     b: BlueprintBuilding,
-    byIndex: ReadonlyMap<number, BlueprintBuilding>
+    byIndex: ReadonlyMap<number, BlueprintBuilding>,
+    gridSize = ROOT_GRID_SIZE
 ): string {
-    return portKey(b, byIndex) ?? cellKey(b);
+    return portKey(b, byIndex) ?? cellKey(b, gridSize);
 }
 
 /** 判断某格上是否已有传送带（同 itemId 家族：2001/2002/2003） */
@@ -294,18 +303,20 @@ export function buildBeltLine(
     fallbackYaw: number,
     pathMode: BeltPathMode = "latFirst",
     startPort: BeltPortEnd | null = null,
-    endPort: BeltPortEnd | null = null
+    endPort: BeltPortEnd | null = null,
+    /** 该区域的经向格数（一整圈）：赤道带 1000、160 段带 800 ……；缺省按赤道带 */
+    gridSize = ROOT_GRID_SIZE
 ): BlueprintBuilding[] {
     const z = startPort ? startPort.point.z : endPort ? endPort.point.z : 0;
-    const g0 = startPort ? portCell(startPort.point) : { ...p0 };
-    const g1 = endPort ? portCell(endPort.point) : { ...p1 };
+    const g0 = startPort ? portCell(startPort.point, gridSize) : { ...p0 };
+    const g1 = endPort ? portCell(endPort.point, gridSize) : { ...p1 };
     const b0 = startPort
-        ? { x: wrapX(g0.x + startPort.nx), y: g0.y + startPort.ny }
+        ? { x: wrapX(g0.x + startPort.nx, gridSize), y: g0.y + startPort.ny }
         : g0;
     const b1 = endPort
-        ? { x: wrapX(g1.x + endPort.nx), y: g1.y + endPort.ny }
+        ? { x: wrapX(g1.x + endPort.nx, gridSize), y: g1.y + endPort.ny }
         : g1;
-    const pts = rasterizeLine(b0.x, b0.y, b1.x, b1.y, pathMode);
+    const pts = rasterizeLine(b0.x, b0.y, b1.x, b1.y, pathMode, gridSize);
     if (startPort) pts.unshift(g0);
     if (endPort) pts.push(g1);
     const belts = pts.map((p) => createBuilding(itemId, modelIndex, p, 0, z));
@@ -324,7 +335,7 @@ export function buildBeltLine(
     // 口格：记录位置改成口的精确坐标 + 写连接字段
     if (startPort) {
         const first = belts[0];
-        placeAtPort(first, startPort.point);
+        placeAtPort(first, startPort.point, gridSize);
         first.inputObjIdx = startPort.building.index;
         first.inputFromSlot = startPort.slot;
         first.inputToSlot = 1;
@@ -332,7 +343,7 @@ export function buildBeltLine(
     }
     if (endPort) {
         const last = belts[belts.length - 1];
-        placeAtPort(last, endPort.point);
+        placeAtPort(last, endPort.point, gridSize);
         last.outputObjIdx = endPort.building.index;
         last.outputToSlot = endPort.slot;
         last.outputFromSlot = 0;
@@ -355,6 +366,9 @@ export function buildBeltLine(
  *
  * 这样多次拖拽拼接不会出现"同一格两条传送带"（游戏里一格只能有一条）。
  * 撤销时弹出新增格并恢复被复用格的 yaw。
+ *
+ * `areaIndex` = 整条带所属区域（编辑器按起点所在纬度带选好；一条带只能在一个区域里，
+ * 跨带的部分在编辑器侧就已按带边界截断）。`gridSize` = 该区域一整圈的经向格数。
  */
 export class CreateBeltLineCommand implements Command {
     private prevSizeX = 0;
@@ -379,7 +393,11 @@ export class CreateBeltLineCommand implements Command {
         /** 起点绑定的建筑口（取出：建筑→带） */
         private readonly startPort: BeltPortEnd | null = null,
         /** 终点绑定的建筑口（送入：带→建筑） */
-        private readonly endPort: BeltPortEnd | null = null
+        private readonly endPort: BeltPortEnd | null = null,
+        /** 整条带所属区域（缺省 0 = 根区域） */
+        private readonly areaIndex = 0,
+        /** 该区域一整圈的经向格数（缺省按赤道带 1000） */
+        private readonly gridSize = ROOT_GRID_SIZE
     ) {}
 
     do(data: BlueprintData): void {
@@ -390,23 +408,26 @@ export class CreateBeltLineCommand implements Command {
         this.connectedStart = false;
         this.connectedEnd = false;
         if (this.belts.length === 0) return;
-        const root = data.areas[0];
-        this.prevSizeX = root.size.x;
+        const area = data.areas[this.areaIndex];
+        if (area === undefined) throw new Error("Placement area not found on canvas");
+        this.prevSizeX = area.size.x;
 
         const existing = new Map<string, BlueprintBuilding>();
         /** index → 建筑（判断"带接的是建筑还是带"用） */
         const byIndex = new Map<number, BlueprintBuilding>();
         for (const b of data.buildings) byIndex.set(b.index, b);
         for (const b of data.buildings) {
-            if (isBelt(b)) existing.set(occupancyKey(b, byIndex), b);
+            if (isBelt(b)) existing.set(occupancyKey(b, byIndex, this.gridSize), b);
         }
 
         for (let i = 0; i < this.belts.length; i++) {
             const b = this.belts[i];
+            // 占用键里带区域号：先归到本条带的区域，再查占用表（否则跨区域的同格会误判）
+            b.areaIndex = this.areaIndex;
             const portBound =
                 (i === 0 && this.startPort !== null) ||
                 (i === this.belts.length - 1 && this.endPort !== null);
-            const hit = existing.get(occupancyKey(b, byIndex));
+            const hit = existing.get(occupancyKey(b, byIndex, this.gridSize));
             if (hit !== undefined) {
                 // 口已被占用：该口已经有带（游戏里一个口只能接一条），本次拖拽截断
                 if (portBound) break;
@@ -419,16 +440,16 @@ export class CreateBeltLineCommand implements Command {
                 this.path.push(hit);
                 continue;
             }
-            const areaIndex = ensureAreaFor(data, b.localOffset[0]);
-            if (areaIndex < 0)
-                throw new Error("Placement outside equator band");
-            b.areaIndex = areaIndex;
+            if (b.localOffset[0].y < 0 || b.localOffset[0].y >= area.size.y)
+                throw new Error("Placement outside the latitude band");
             b.index = data.buildings.length;
             data.buildings.push(b);
             byIndex.set(b.index, b);
-            existing.set(occupancyKey(b, byIndex), b);
+            existing.set(occupancyKey(b, byIndex, this.gridSize), b);
             this.path.push(b);
             this.added++;
+            if (b.localOffset[0].x < 0 || b.localOffset[0].x >= area.size.x)
+                area.size.x = Math.floor(b.localOffset[0].x) + 1;
         }
         if (this.path.length === 0) return;
 
@@ -542,7 +563,8 @@ export class CreateBeltLineCommand implements Command {
         this.portDirChanges = [];
         for (let i = 0; i < this.added; i++) data.buildings.pop();
         for (const r of this.reused) r.belt.yaw = [r.yaw[0], r.yaw[1]];
-        data.areas[0].size.x = this.prevSizeX;
+        const area = data.areas[this.areaIndex];
+        if (area !== undefined) area.size.x = this.prevSizeX;
     }
 
     merge() {

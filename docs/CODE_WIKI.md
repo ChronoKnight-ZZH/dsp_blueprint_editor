@@ -137,7 +137,7 @@
 **关键架构特点**
 
 1. **解析与渲染解耦**：`parser.ts` 是纯逻辑层，无 Three.js 依赖，便于 Node CLI 与单元测试。
-2. **响应式驱动渲染**：`BlueprintEditor.vue` 用 `computed` 监听 `commandQueue.execVersion`，命令执行后整场景重建。
+2. **响应式驱动渲染**：`BlueprintEditor.vue` 的 `watchEffect` 监听 `commandQueue.execVersion`（并通过 `shallowReactive` 的 `data.areas / buildings / reformData` 感知进入编辑模式时的全球画布展开），命令执行后整场景重建；重建是"先构建、后替换"的原子操作，构建失败时保留旧模型。
 3. **增量更新通道**：`Updater`（基于 `EventDispatcher`）允许命令只触发"建筑图标/分拣器图标/传送带图标/物流塔信息"等局部刷新，避免重建整场景。
 4. **字节级 round-trip**：v2 body 对未知扩展字段（`v2ExtraPose`、`extraBytes`、`tailExtraBytes`、`content`）以"原样保留 + 重新写出"方式实现，确保再导出的二进制与原蓝图逐字节一致。
 5. **PWA + 离线**：`vue.config.js` 配置 service worker，`swStatus.vue` 处理更新提示。
@@ -190,6 +190,7 @@
 │   │   ├── sorter.ts                  # 分拣器连接构造 createSorterBetween
 │   │   ├── create.ts                  # 新建蓝图与 CreateBuildingCommand / CreateBeltLineCommand
 │   │   ├── beltLine.ts                # 传送带铺线 rasterizeLine + buildBeltLine
+│   │   ├── globe.ts                   # 全球画布：纬度带表 / 区域按需生成 / expandToGlobalCanvas
 │   │   ├── area.ts                    # 区域坐标 planetToLocal / localToPlanet + normalizeBlueprintAreas
 │   │   └── upgrade.ts                 # UpgradeCommand（建筑升降级）
 │   ├── bvh/
@@ -226,6 +227,9 @@
 │   │   ├── WorkEnergyParam.vue         # 工作能耗参数
 │   │   ├── ShortcutHint.vue            # 左侧悬浮快捷键提示
 │   │   └── _icon-select.scss           # ItemSelect/RecipeSelect 共享样式
+│   ├── editor/                        # 编辑器运行时（非 UI）
+│   │   ├── placementState.ts          # 放置/删除/地基模式与当前选中建筑（reactive 单例）
+│   │   └── scene.ts                   # 场景重建：buildSceneData（区域定位+矩阵+BVH+地基格）/ rebuildScene 原子替换
 │   ├── data/
 │   │   ├── index.ts                   # 汇总导出
 │   │   ├── types.ts                   # Item/Recipe/Tech/Signal/MIDI
@@ -284,7 +288,8 @@
 | `setBeaconContent.ts` | `SetBeaconContentCommand`：修改全息信标（itemId=2401）`content` 文本字段，`silent=true` 不触发 3D 重建；`merge` 合并对同一建筑的连续编辑。                                                                                                                                                                                                                                                                                                                             |
 | `reform.ts`           | 地基（reformData）3D 渲染层：`Reforms extends Group` + `buildReforms`，把 `BlueprintReformData` 渲染为工字铺（IBEAM）/ 直铺（PLAIN）/ 网格（GRID）+ 自定义颜色（共享 CanvasTexture 与 InstancedMesh）。                                                                                                                                                                                                                                                                    |
 | `removeBuilding.ts`   | `RemoveBuildingsCommand` / `RemoveBuildingCommand` / `RemoveBuildingsByItemCommand`：删除建筑并维护 index 与交叉引用。                                                                                                                                                                                                                                                                                                                              |
-| `area.ts`             | 编辑期区域坐标：`planetToLocal / localToPlanet`（**必须传入区域定位** **`AreaGridOrigin`** **=** **`findPosForAreas(...).areas[areaIndex]`**，见 §6.19）、`ensureAreaFor`（放置时扩张根区域）与 `normalizeBlueprintAreas`（导出时把根区域收缩到实际建筑区间，环形经度取最小覆盖弧）。归一化时**必须保留** **`v2ExtraPose`**（只随 `localOffset[1]` 平移尖端坐标）：它是分拣器的姿态角来源，丢一次就会让导出退化成 `[0,…,0]`，游戏里表现为"分拣器角度偏移"报错。                                                                                                |
+| `globe.ts`            | **全球画布**（`src/blueprint/globe.ts`）：`planetBands / bandOfRow / bandSpan` 纬度带表、`canvasTargetAt`（行星行 + 经度 → 目标带 + 区域 + 局部格）、`ensureCanvasArea`（按需补出某条带的区域）、`moveArea`、`expandToGlobalCanvas`（进编辑器时展开，绝对位置不变）、`collectCanvasContent / splitRectToBands`（内容按带聚合与拆块）。设计见 `docs/wiki/modules/blueprint-core.md` 的"全球画布与区域模型"。 |
+| `area.ts`             | 编辑期区域坐标：`planetToLocal / localToPlanet`（**必须传入区域定位** **`AreaGridOrigin`** **=** **`findPosForAreas(...).areas[areaIndex]`**，见 §6.19）、`normalizeBlueprintAreas`（导出时把画布收缩回游戏惯例的紧凑区域：单带 → 单区域 + 环形最小覆盖弧，跨带 → 赤道带根 + 每带一个区域）。归一化时**必须保留** **`v2ExtraPose`**（只随 `localOffset[1]` 平移尖端坐标）：它是分拣器的姿态角来源，丢一次就会让导出退化成 `[0,…,0]`，游戏里表现为"分拣器角度偏移"报错。                                                                                                |
 | `create.ts`           | 新建蓝图与入库：`createEmptyBlueprint`（根区域 size 10×161 的临时画布）、`createBuilding`（最小合法 v2 记录，可选 `z` = 堆叠高度；可堆叠建筑按游戏写堆叠端口默认值 `out=14/15`、`in=15/14`，见 §6.14）、`CreateBuildingCommand`。                                                                                                                                                                                                                                                             |
 | `beltLine.ts`         | 传送带铺线：`rasterizeLine`（latFirst / lonFirst / straight 三种走法）、`buildBeltLine`（逐格算 yaw，**拐角格 = 进入/离开方向的平分角**，即 45° 斜角，与游戏一致；起/止可绑定建筑口 `BeltPortEnd`，见 §6.20）、`CreateBeltLineCommand`（整条一次撤销；重叠格按"末格复用 / 线路中间截断 / 口格占用截断"处理，避免同格两条带；接到物流站口时同步该口 `dir`）。                                                                                                                                                                                    |
 | `sorter.ts`           | 分拣器连接构造：`createSorterBetween`（建筑↔建筑 / 建筑↔皮带 / 皮带↔皮带 / 分流器），规则见 §6.12；导出 `splitterPortAt` / `findByIndex` 供分流器口功能复用。                                                                                                                                                                                                                                                                                                                   |
@@ -428,7 +433,7 @@
   - `push(c)`：丢弃当前位置之后的命令 → `c.do` → 尝试与上一条 `merge`（命中则直接返回，不再入栈也不再自增版本号）→ 入栈 → `currentPosition++` → 自增 `stateVersion`；若 `!c.silent` 再自增 `execVersion`；
   - `undo/redo`：移动 `currentPosition`，执行对应 `do/undo`，自增 `stateVersion`；若命令非 `silent` 再自增 `execVersion`（保证 silent 命令的撤销也不会错误地触发整场景重建，同时仍能让 `codeExpired` 过期）；
   - `stateVersion`：每次命令（无论 silent 与否）都递增，`App.vue` 用 `watchEffect` 监听它把 `codeExpired` 置 `true`（蓝图字符串需重新生成）。
-  - `execVersion`：仅非 silent 命令递增，`BlueprintEditor` 的 `computed(b)` 依赖它触发整场景重建。
+  - `execVersion`：仅非 silent 命令递增，`BlueprintEditor` 的场景重建 `watchEffect` 依赖它触发整场景重建。
 
 ### 6.3 `blueprint/replace.ts` `ReplaceCommand`
 
@@ -459,12 +464,12 @@
 
 ### 6.7 `components/BlueprintEditor.vue`
 
-- 顶层函数：`buildPlanetGrid / inserterTrans / buildingIconId / buildingIconPos / beltIconPos / sorterIconPos / buildBuildings / buildBVH / registerUpdater`。
+- 顶层函数：`buildPlanetGrid / buildingIconId / buildingIconPos / beltIconPos / sorterIconPos / buildBuildings / registerUpdater / buildingColor`（`inserterTrans` 已迁到 `editor/scene.ts`）。
 - `AllBuildings extends Object3D`：聚合 meshes + iconsMesh + iconTexture + cargos + modelRef。
 - `<script setup>`：
   - 创建 `Scene / Camera / Renderer`，挂载星球球与经纬网格；
-  - `b = computed(...)`：监听 `commandQueue.execVersion`，调用 `findPosForAreas` + `calcBuildingTrans` + `buildBuildings` + `buildBVH` + `registerUpdater`；
-  - `watchEffect` 把 `b.value.buildings` 加入/移出场景并 `dispose`；
+  - `b = shallowRef<SceneModel | null>(null)`：持有当前生效的场景模型 `{ buildings, reforms, bvh, pos }`（下游仍读 `b.value.xxx`）。重建走 `editor/scene.ts` 的 `buildSceneData`（区域定位 + 建筑矩阵 + 选择盒 + BVH + 地基格）→ `buildReforms` → `buildBuildings` → `registerUpdater`；
+  - 重建用 `rebuildScene(build, applySceneModel, onError)`：**先构建、后替换**，构建抛错时旧模型留在场景里（不会出现"模型消失且不恢复"）：替换/移除/`dispose`/`scene.add` 全在 `applySceneModel` 里；
   - 选择盒 `watchEffect`：根据 `props.selectedBuildingIndex` 把 BVH 的对应盒矩阵复制到 `selectBox`；
   - `onMounted`：实例化 `PlanetMapControls`，绑定 click（拾取建筑 emit `selectedBuildingIndex`）、contextmenu（剔除单建筑并 `queue.push(new RemoveBuildingCommand(...))`）、`requestAnimationFrame(animate)` 渲染循环，并把 `controls.updateTimeDelta / cargos.cargoMove` 推进。
   - `defineExpose({ selectBoxes, camera, cameraPosVersion, getModel })` 供父组件访问。
@@ -647,12 +652,21 @@
 
 换算里有两个容易写错的地方（旧实现都写死了）：
 
-1. **原点纬度不是常数**。工具自建画布（`createEmptyBlueprint`，根区域 `size.y=161`）恰好是 `-80`，但导入蓝图的根区域原点由 `findPosForAreas` 决定（无子区域时为 `-floor(size.y/2)`，有子区域还受锚点约束）。写死 `-80` 会让**每一次放置/预览沿纬向平移** **`80 - floor(size.y/2)`** **格**：`size.y=6` 的真实蓝图偏 77 格（≈27.7° 纬度），既有建筑会被放到带到别处、甚至落到区域带外被 `ensureAreaFor` 拒绝。这就是"导入蓝图后进入编辑模式，绿盒与光标错开；不导入蓝图（自建画布）则完全对齐"的根因。
+1. **原点纬度不是常数**。工具自建画布（`createEmptyBlueprint`，根区域 `size.y=161`）恰好是 `-80`，但导入蓝图的根区域原点由 `findPosForAreas` 决定（无子区域时为 `-floor(size.y/2)`，有子区域还受锚点约束）。写死 `-80` 会让**每一次放置/预览沿纬向平移** **`80 - floor(size.y/2)`** **格**：`size.y=6` 的真实蓝图偏 77 格（≈27.7° 纬度），既有建筑会被放到别的纬度带、甚至落到区域带外被拒（旧实现里放置判据只有 `0 <= y < size.y`）。这就是"导入蓝图后进入编辑模式，绿盒与光标错开；不导入蓝图（自建画布）则完全对齐"的根因。
 2. **经向尺度与回绕宽度**。全局光标经向格以 200 段（1000 格/圈）为基准，而区域局部格是"该区域自己的一圈 = `areaSegments×5` 格"；低段数（极区）区域一格更宽，须乘 `segment/200` 并按 `segment×5` 回绕。
 
-回归测试：`tests/unit/blueprint/areaPlacement.spec.ts`（对全部 fixture 把建筑端点的世界格反算回局部格，要求等于该建筑自己的 `localOffset`；另有低段数区域尺度、原点偏移互逆、自建画布仍为 -80 三组用例）；诊断探针 `tests/tools/placementOffsetProbe.ts`（逐 fixture 打印区域定位与最大反算误差）。
+**可编辑画布 = 整颗星球（`globe.ts`）**：区域（`BlueprintArea`）的 `areaSegments` 决定它只能落在一条纬度带里（赤道带 200 段 → `[-80, 80]`、北 160 段 → `[81, 130]`、南 160 段 → `[-130, -81]`，`findPosForAreas` 还要求子区域段数严格更小），所以"全球任意位置放置"不是把某个区域撑大，而是**一条带一个区域**：
 
-> 注意 `beltLine.ts` 等模块仍以 `ROOT_GRID_SIZE = 1000` 作为经向画布宽度，这与"自建画布 = 200 段"一致；向非 200 段的导入区域铺带时的回绕宽度暂未按区域段数换算。
+- `planetBands()` 给出全球纬度带表（行不重叠，铺满 ±250），`bandOfRow(row)` 把任意纬度行映射到唯一一条带；
+- 编辑器坐标空间 = 赤道带为根 + 每条用到的带一个区域（`size.y` = 整带高度，原点经度恒 0、`tropicAnchor`/`anchorLocalOffset.x` 恒 0）；区域没建时由 `ensureCanvasArea` 按需补出（父 = 同半球段数更大的最近带，否则赤道带）；
+- `canvasTargetAt(bp, pos, row, lonGrid)` 一次给出"纬度带 + 区域 + 局部格"，`placeBuilding` / 绿盒预览 / 地基格 / 传送带起止点全部用它，于是任意纬度都对齐；
+- 进编辑器时 `expandToGlobalCanvas(bp)` 把任意导入蓝图展开成全球画布，建筑与地基的**绝对纬度/经线一格不动**（只改写局部坐标与 `areaIndex`，分拣器尖端 `v2ExtraPose` 同步）；
+- 传送带按该区域格数回绕（赤道 1000 / 160 段带 800 …），越出带边界的部分在边界处截断（一个建筑只有一个 `areaIndex`）；分拣器两端必须同区域；
+- 导出时 `normalizeBlueprintAreas` 收缩：只用到一条带 → 单个紧凑区域（游戏里可整带移动）；跨带 → 赤道带为根 + 每条带一个区域（多带蓝图的绝对纬度由元数据唯一确定，游戏里只能贴在导出时的纬度上）。
+
+回归测试：`tests/unit/blueprint/globalCanvas.spec.ts`（纬度带表与行归属、任意纬度放置、导入展开后绝对位置不变、单带/跨带导出、地基与传送带按带落区域）；`tests/unit/blueprint/areaPlacement.spec.ts`（对全部 fixture 把建筑端点的世界格反算回局部格，要求等于该建筑自己的 `localOffset`）；诊断探针 `tests/tools/placementOffsetProbe.ts`。
+
+> 已知限制：多带蓝图的每个区域 `size.x` 从第 0 列起增长（内容贴近 0 经线时导出的区域偏宽）；一条传送带/分拣器不能跨纬度带；带边界行上的内容按高纬那条带归属。
 
 ### 6.20 传送带 ↔ 建筑直连（串联）与建筑骑带（并联）、物流站端口（`data/beltPorts.ts` + `beltLine.ts` + `setStationPort.ts`）
 
@@ -932,7 +946,7 @@ CommandQueue.push(new XxxCommand(...))
    │ 3) 尝试与上一条 merge (合并连续同类命令)
    │ 4) 入栈 + currentPosition++ + execVersion++
    ▼
-BlueprintEditor 的 computed(b) 重建或增量更新 3D 场景
+BlueprintEditor 的场景重建 watchEffect（execVersion / data 变更）重建 3D 场景
 App.vue 的 watchEffect 把 codeExpired 置 true（蓝图字符串需重生成）
 ```
 

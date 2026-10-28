@@ -352,6 +352,7 @@ import {
 import { useI18n } from "vue-i18n";
 import { BlueprintData, fromStr, toStr } from "@/blueprint/parser";
 import { createEmptyBlueprint } from "@/blueprint/create";
+import { expandToGlobalCanvas } from "@/blueprint/globe";
 import {
     version,
     rendererKey,
@@ -937,6 +938,11 @@ const onModeButton = () => {
         // 编辑：data 为空则自动创建空蓝图
         if (!data.value) {
             parseBp(toStr(createEmptyBlueprint())); // 复用 parseBp，保证 bpStr/codeExpired 一致
+        }
+        // 进入编辑前把蓝图展开成"全球画布"（一条纬度带一个区域）：
+        // 之后建筑/地基/传送带都能放在星球任意纬度，导出时再收缩回游戏惯例的紧凑区域
+        if (data.value && expandToGlobalCanvas(data.value)) {
+            selectedBuildingIndex.value = null;
         }
         enterEditMode();
     }

@@ -34,13 +34,18 @@ import {
     SphereLongitudeGridGeometry,
 } from "@/SphereGridGeometry";
 import {
-    findPosForAreas,
     gridAreas,
     calcBuildingTrans,
     PositionedBlueprint,
     HEIGHT_GRID_SIZE,
 } from "@/blueprint/planet";
-import { buildReforms } from "@/blueprint/reform";
+import { buildReforms, Reforms } from "@/blueprint/reform";
+import {
+    buildSceneData,
+    INSERTER_HEIGHT,
+    inserterTrans,
+    rebuildScene,
+} from "@/editor/scene";
 import { buildingMeta, noIconBuildings } from "@/data/building";
 import { itemIconId, recipeIconId } from "@/data/icons";
 import { IconTexture } from "@/iconTexture";
@@ -127,24 +132,6 @@ class AllBuildings extends Object3D {
     }
 }
 
-const pos1 = new Vector3();
-const pos2 = new Vector3();
-const dir = new Vector3();
-const inserterHeight = 0.3;
-function inserterTrans(transforms: Matrix4[], trans: Matrix4) {
-    pos1.setFromMatrixPosition(transforms[0]);
-    dir.copy(pos1).normalize().multiplyScalar(inserterHeight);
-    pos1.add(dir);
-
-    pos2.setFromMatrixPosition(transforms[1]);
-    dir.copy(pos2).normalize().multiplyScalar(inserterHeight);
-    pos2.add(dir);
-
-    trans.setPosition(pos1.x, pos1.y, pos1.z);
-    trans.lookAt(pos1, pos2, pos1);
-    return dir.subVectors(pos1, pos2).length();
-}
-
 function buildingIconId(b: BlueprintBuilding) {
     if (isLab(b.itemId)) {
         const mode = (b.parameters as LabParamerters | null)?.researchMode;
@@ -187,7 +174,7 @@ function beltIconPos(
 }
 
 const sorterIconScale = new Vector2(0.8, 0.8);
-const sorterIconTrans = new Matrix4().makeTranslation(0, 0, inserterHeight);
+const sorterIconTrans = new Matrix4().makeTranslation(0, 0, INSERTER_HEIGHT);
 function sorterIconPos(
     b: BlueprintBuilding,
     buildingTrans: Matrix4,
@@ -232,7 +219,7 @@ function buildBuildings(
                 trans.copy(transforms[b.index][0]);
                 trans.multiply(offset);
                 mesh.setMatrixAt(i, trans);
-                mesh.setColorAt(i, buildingMeta.get(b.modelIndex)!.color);
+                mesh.setColorAt(i, buildingColor(b));
                 modelRef[b.index] = { mesh, instance: i };
             }
             mesh.instanceMatrix.needsUpdate = true;
@@ -265,7 +252,7 @@ function buildBuildings(
                 trans.lookAt(pos1, pos2, pos1);
                 trans.premultiply(temp.makeTranslation(pos1.x, pos1.y, pos1.z));
 
-                const color = buildingMeta.get(b1.modelIndex)!.color;
+                const color = buildingColor(b1);
                 addBeltCargo(trans, color, len);
 
                 trans.multiply(temp.makeScale(1, 1, len));
@@ -294,7 +281,7 @@ function buildBuildings(
             const b = inserters[i];
 
             const len = inserterTrans(transforms[b.index], trans);
-            const color = buildingMeta.get(b.modelIndex)!.color;
+            const color = buildingColor(b);
             addInserterCargo(trans, color, len);
 
             trans.multiply(temp.makeScale(1, 1, len));
@@ -496,23 +483,10 @@ function buildBuildings(
     );
 }
 
-function buildBVH(transforms: Matrix4[][], buildings: BlueprintBuilding[]) {
-    const temp = new Matrix4();
-    const inserterOffset = new Matrix4().makeTranslation(0, 0, -0.5);
-
-    const selectBoxes = buildings.map((b, i) => {
-        const meta = buildingMeta.get(b.modelIndex)!;
-        const box = new Matrix4();
-        if (isInserter(b.itemId)) {
-            const len = inserterTrans(transforms[i], box);
-            box.multiply(temp.makeScale(0.5, 0.5, len));
-            box.multiply(inserterOffset);
-        } else {
-            box.multiplyMatrices(transforms[i][0], meta.selectUnitBoxTrans);
-        }
-        return box;
-    });
-    return new BVH(selectBoxes);
+/** 建筑颜色：未知模型用中性灰兜底（`!` 断言会让一个未知模型毁掉整次场景重建） */
+const UNKNOWN_BUILDING_COLOR = new Color(0x808080);
+function buildingColor(b: BlueprintBuilding): Color {
+    return buildingMeta.get(b.modelIndex)?.color ?? UNKNOWN_BUILDING_COLOR;
 }
 
 function registerUpdater(
@@ -620,10 +594,13 @@ import { PlanetMapControls } from "@/PlanetMapControls";
 import { attachCamera, attachRenderer } from "@/utils";
 import { usePlacement, resetToIdle } from "@/editor/placementState";
 import {
+    areaGridSize,
+    canvasTargetAt,
+    materializeCanvasTarget,
     planetToLocal,
-    ROOT_GRID_SIZE,
     type AreaGridOrigin,
-} from "@/blueprint/area";
+    type CanvasTarget,
+} from "@/blueprint/globe";
 import { createBuilding, CreateBuildingCommand } from "@/blueprint/create";
 import {
     buildBeltLine,
@@ -708,32 +685,72 @@ const commandQueue = inject(commandQueueKey)!;
 
 let controls: PlanetMapControls | null = null;
 
-const b = computed(() => {
+/** 一次重建产出的场景模型（建筑 + 地基 + 拾取结构 + 区域定位） */
+interface SceneModel {
+    buildings: AllBuildings;
+    reforms: Reforms | null;
+    bvh: BVH;
+    pos: PositionedBlueprint;
+}
+
+/**
+ * 当前生效的场景模型。
+ *
+ * 语义与旧实现一致（下游都读 `b.value.xxx`），但**替换是原子的**：新模型构建成功后才
+ * 移除旧模型。旧实现用 `watchEffect` + `onCleanup`，清理函数在每次重算**之前**执行 ——
+ * 一旦新一次计算抛错（区域越界 / 未知模型 / 定位失败），旧模型已从场景移除、新模型没加
+ * 进去，表现就是"模型整体消失且不会自己回来"。
+ */
+const b = shallowRef<SceneModel | null>(null);
+
+/** 上一次真正加进场景的模型（用于原子替换时移除旧内容） */
+let appliedModel: SceneModel | null = null;
+
+function applySceneModel(next: SceneModel | null) {
+    if (next === appliedModel) return;
+    if (appliedModel !== null) {
+        scene.remove(appliedModel.buildings);
+        appliedModel.buildings.dispose();
+        if (appliedModel.reforms !== null) scene.remove(appliedModel.reforms);
+    }
+    appliedModel = next;
+    b.value = next;
+    if (next !== null) {
+        scene.add(next.buildings);
+        if (next.reforms !== null) scene.add(next.reforms);
+    }
+}
+
+watchEffect(() => {
     // 任意命令（剔除建筑 / 撤销 / 重做）后整体重建场景
     commandQueue.value?.execVersion.value;
-    if (!commandQueue.value) return null;
-    const d = commandQueue.value.data;
-    const pos = findPosForAreas(d.areas, SEGMENT);
-    const transforms = d.buildings.map((b) => calcBuildingTrans(R, pos, b));
-    const buildings = buildBuildings(transforms, d.buildings, renderer);
-    const bvh = buildBVH(transforms, d.buildings);
-    const reforms = buildReforms(R, pos, d.reformData);
-    registerUpdater(commandQueue.value.updater, buildings, pos);
-    return { buildings, bvh, reforms, pos };
-});
-
-watchEffect((onCleanUp) => {
-    if (b.value !== null) {
-        const buildings = b.value.buildings;
-        const reforms = b.value.reforms;
-        scene.add(buildings);
-        if (reforms) scene.add(reforms);
-        onCleanUp(() => {
-            scene.remove(buildings);
-            buildings.dispose();
-            if (reforms) scene.remove(reforms);
-        });
+    const queue = commandQueue.value;
+    if (queue === null) {
+        applySceneModel(null);
+        return;
     }
+    rebuildScene(
+        (): SceneModel => {
+            const data = buildSceneData(queue.data, R, SEGMENT);
+            const reforms = buildReforms(
+                R,
+                data.pos,
+                queue.data.reformData,
+                data.reformCells
+            );
+            const buildings = buildBuildings(
+                data.transforms,
+                queue.data.buildings,
+                renderer
+            );
+            // 放在最后：只有模型建成了才换掉 updater 的回调
+            registerUpdater(queue.updater, buildings, data.pos);
+            return { buildings, reforms, bvh: data.bvh, pos: data.pos };
+        },
+        applySceneModel,
+        (error) =>
+            console.error("3D 场景重建失败，保留上一次的模型", error)
+    );
 });
 
 {
@@ -815,6 +832,11 @@ watchEffect(() => {
 let beltStart: { x: number; y: number } | null = null;
 /** A 点落在建筑口上时的口绑定（取出：建筑→带）；null = 普通空格/带格起点 */
 let beltStartPort: BeltPortEnd | null = null;
+/**
+ * 本条拖拽传送带所属的区域（一条带一个区域）：A 点按下时确定，
+ * 之后 B 点/预览都换算到这个区域的局部坐标，越出该带的部分按边界截断。
+ */
+let beltArea: { areaIndex: number; origin: AreaGridOrigin } | null = null;
 const sorterSource = ref<number | null>(null);
 
 // 传送带路径走法（R 键循环切换）：latFirst → lonFirst → straight → latFirst
@@ -994,12 +1016,13 @@ function beltPortAtPointer(
 ): { slot: number; port: BeltPort } | null {
     if (!hasBeltPorts(building.itemId, building.modelIndex)) return null;
     const bp = building.localOffset[0];
-    // 经向环形坐标取短弧
-    let dx = anchor.x - bp.x;
-    if (dx > ROOT_GRID_SIZE / 2) dx -= ROOT_GRID_SIZE;
-    else if (dx < -ROOT_GRID_SIZE / 2) dx += ROOT_GRID_SIZE;
-    const dy = anchor.y - bp.y;
     const area = pos.areas[building.areaIndex];
+    const turn = areaGridSize(area.segment);
+    // 经向环形坐标取短弧（该区域自己的格数，不是固定的 1000）
+    let dx = anchor.x - bp.x;
+    if (dx > turn / 2) dx -= turn;
+    else if (dx < -turn / 2) dx += turn;
+    const dy = anchor.y - bp.y;
     const cosLat = Math.cos(
         (area.latitude + bp.y) * ((2 * Math.PI) / (SEGMENT * 5))
     );
@@ -1079,6 +1102,8 @@ function refreshSorterOverlay() {
                 dst: sorterHoverAnchor.value ?? undefined,
             }
         );
+        // 分拣器属于源建筑那片区域：算出世界矩阵前先对齐 areaIndex（一条带一个区域）
+        if (preview !== null) preview.areaIndex = hoverBuilding.areaIndex;
     }
 
     const slots = getBuildingSlots(hoverBuilding.itemId);
@@ -1206,6 +1231,7 @@ watchEffect(() => {
     if (!isPlacingBelt()) {
         beltStart = null;
         beltStartPort = null;
+        beltArea = null;
         hideBeltPreview();
     }
     if (!isPlacingSorter()) {
@@ -1264,12 +1290,68 @@ onMounted(() => {
         return ray.intersectSphere(planetSphere, v);
     };
     /**
-     * 编辑期根区域（放置目标区域）的星球定位。
-     * 必须与 `b.value.pos` 同源：`calcBuildingTrans` 就是用它把局部格换成世界坐标的，
-     * 光标→局部格若用别的前提（例如"根区域原点恒为 -80"）就会与落位整体错开。
+     * 屏幕位置 → 放置目标：命中的**纬度带** + 该带区域（可能尚未建，`areaIndex=-1`）+ 区域局部格。
+     *
+     * 编辑坐标空间 = 全球画布（见 `@/blueprint/globe`）：每条纬度带一个区域，
+     * 于是光标落在任何纬度都能换算成"某条带的局部格"，不再受赤道带 ±80 行限制。
+     * 与 `calcBuildingTrans` 用同一份区域原点换算，预览/落位/地基/传送带共用。
      */
-    const editAreaOrigin = (): AreaGridOrigin | null =>
-        b.value === null ? null : b.value.pos.areas[0];
+    const placementTargetAt = (
+        e: PointerCoords,
+        snap = !placement.freePlacement
+    ): CanvasTarget | null => {
+        const queue = commandQueue.value;
+        const hit = screenToPlanet(e);
+        if (queue === null || b.value === null || hit === null) return null;
+        const latGrid = Math.asin(hit.y / R) * RAD_TO_GRID;
+        const lonGrid = Math.atan2(hit.x, hit.z) * RAD_TO_GRID;
+        const row = snap ? Math.floor(latGrid) : latGrid;
+        const target = canvasTargetAt(queue.data, b.value.pos, row, lonGrid);
+        if (target === null) return null;
+        if (snap) {
+            target.x = Math.floor(target.x);
+            target.y = Math.floor(target.y);
+        }
+        return target;
+    };
+    /**
+     * 目标区域若还没建出来 → 按需补一条该带的区域（画布扩张，不进撤销栈），
+     * 并把目标局部格换到新原点上（物理位置不变，保证与绿盒一致）。
+     */
+    const materializeTarget = (target: CanvasTarget): number => {
+        const queue = commandQueue.value;
+        if (queue === null) return -1;
+        if (target.areaIndex >= 0) return target.areaIndex;
+        const placed = materializeCanvasTarget(queue.data, target);
+        target.areaIndex = placed.areaIndex;
+        target.origin = placed.origin;
+        target.x = placed.x;
+        target.y = placed.y;
+        return placed.areaIndex;
+    };
+    /** 用某个区域原点构造合成定位：预览对象还没入库时也能算出世界矩阵 */
+    const syntheticPos = (origin: AreaGridOrigin): PositionedBlueprint => ({
+        segment: SEGMENT,
+        areas: [{ ...origin }],
+    });
+    /**
+     * 区域局部格 → 区域（用于把别的纬度带上的点搬到本条带的局部坐标）。
+     * 两个区域段数不同时按**物理经度比例**换算（极区/低段数区域的格更宽）。
+     */
+    const convertLocal = (
+        p: { x: number; y: number },
+        from: AreaGridOrigin,
+        to: AreaGridOrigin
+    ): { x: number; y: number } => {
+        const fromTurn = areaGridSize(from.segment);
+        const toTurn = areaGridSize(to.segment);
+        const col = ((from.longitude + p.x) % fromTurn + fromTurn) % fromTurn;
+        const x = ((col / fromTurn) * toTurn - to.longitude) % toTurn;
+        return {
+            x: (x + toTurn) % toTurn,
+            y: from.latitude + p.y - to.latitude,
+        };
+    };
     /**
      * 屏幕位置 → 命中的建筑与命中点高度格（用于区分分流器的地面层/上层口）。
      * 高度格 = (命中点到星球中心的距离 − R) / (4/3)，与 `calcBuildingTrans` 同一套换算。
@@ -1311,7 +1393,7 @@ onMounted(() => {
         if (hit === null) return null;
         const building = queue.data.buildings[hit.index];
         if (!building) return null;
-        const a = anchorOffset(e);
+        const a = anchorOffset(e, building.areaIndex);
         if (a === null) return null;
         const picked = beltPortAtPointer(building, a, hit.z, b.value.pos);
         if (!picked) return null;
@@ -1330,29 +1412,16 @@ onMounted(() => {
             ny: n.y,
         };
     };
-    /** 屏幕点击 → 吸附后的网格偏移（placeBuilding 与预览共用，保证坐标逻辑一致） */
-    const placementOffset = (e: PointerCoords) => {
-        const hit = screenToPlanet(e);
-        if (hit === null) return null;
-        const area = editAreaOrigin();
-        if (area === null) return null;
-        const latGrid = Math.asin(hit.y / R) * RAD_TO_GRID;
-        const lonGrid = Math.atan2(hit.x, hit.z) * RAD_TO_GRID;
-        const offset = planetToLocal(latGrid, lonGrid, area);
-        if (!placement.freePlacement) {
-            offset.x = Math.floor(offset.x);
-            offset.y = Math.floor(offset.y);
-        }
-        return { x: offset.x, y: offset.y };
-    };
     /**
      * 屏幕位置 → 连续网格坐标（不取整）。用于分拣器的 slot 锚点：
      * 与游戏一致，光标落在哪一列/哪一行就决定挂哪个 slot。
      * 命中建筑时用建筑表面命中点径向投影回球面，否则用星球表面点。
+     * @param areaIndex 用哪个区域的坐标空间换算（分拣器/传送带口必须用建筑自己的区域）
      */
     const anchorPoint = new Vector3();
-    const anchorOffset = (e: PointerCoords) => {
-        if (b.value === null) return null;
+    const anchorOffset = (e: PointerCoords, areaIndex?: number) => {
+        const queue = commandQueue.value;
+        if (b.value === null || queue === null) return null;
         setupRay(e);
         const intersects = b.value.bvh.raycast(ray);
         const hitPlanet = ray.intersectSphere(planetSphere, anchorPoint);
@@ -1373,11 +1442,15 @@ onMounted(() => {
         }
         // 径向投影回球面后再转网格（建筑命中点浮在地表上方）
         anchorPoint.normalize().multiplyScalar(R);
-        const area = editAreaOrigin();
-        if (area === null) return null;
         const latGrid = Math.asin(anchorPoint.y / R) * RAD_TO_GRID;
         const lonGrid = Math.atan2(anchorPoint.x, anchorPoint.z) * RAD_TO_GRID;
-        return planetToLocal(latGrid, lonGrid, area);
+        const origin =
+            areaIndex !== undefined
+                ? b.value.pos.areas[areaIndex]
+                : canvasTargetAt(queue.data, b.value.pos, latGrid, lonGrid)
+                      ?.origin;
+        if (origin === undefined) return null;
+        return planetToLocal(latGrid, lonGrid, origin);
     };
     /**
      * 放置建筑。
@@ -1395,10 +1468,14 @@ onMounted(() => {
             placement.selectedModelIndex === null
         )
             return;
-        const offset = placementOffset(e);
-        if (offset === null) return;
+        const target = placementTargetAt(e);
+        if (target === null) return;
+        // 该纬度带还没有区域 → 按规范布局补一条（画布扩张；建筑绝对位置不受影响）
+        const areaIndex = materializeTarget(target);
+        if (areaIndex < 0) return;
+        const offset = { x: target.x, y: target.y };
         const itemId = placement.selectedItemId;
-        const parent = placeBaseFor(e, offset, itemId);
+        const parent = placeBaseFor(e, offset, itemId, areaIndex);
         if (requiresBase(itemId) && parent === null) return;
         const building = createBuilding(
             itemId,
@@ -1417,27 +1494,31 @@ onMounted(() => {
             inheritLabSettings(building, parent);
         }
         try {
-            queue.push(new CreateBuildingCommand(building));
+            // areaIndex = 建筑所在纬度带的区域（全球画布下每条带一个区域）
+            queue.push(new CreateBuildingCommand(building, areaIndex));
         } catch {
-            // Outside equator band — ignore
+            // 纬度带外 / 区域不存在 — ignore
         }
     };
     /** 放置/预览共用的堆叠底座求解（光标所指建筑优先，其次同格最上层可承载建筑） */
     const placeBaseFor = (
         e: PointerCoords,
         offset: { x: number; y: number },
-        itemId: number
+        itemId: number,
+        areaIndex: number
     ): BlueprintBuilding | null => {
         const queue = commandQueue.value;
-        // 只有"可以叠在别人身上"的建筑才需要做拾取，普通建筑放置不付这份开销
-        if (!queue || !isStackChild(itemId)) return null;
+        // 只有"可以叠在别人身上"的建筑才需要做拾取，普通建筑放置不付这份开销；
+        // 目标纬度带还没有区域（areaIndex<0）时该带里不可能有底座
+        if (!queue || !isStackChild(itemId) || areaIndex < 0) return null;
         const hit = pickBuilding(e);
         return stackBaseFor(
             queue.data.buildings,
             hit === null ? null : queue.data.buildings[hit],
             offset.x,
             offset.y,
-            itemId
+            itemId,
+            areaIndex
         );
     };
     /** 鼠标跟随预览：placing 模式下更新半透明绿盒的位置与朝向（分拣器走两点架接，无绿盒） */
@@ -1458,9 +1539,9 @@ onMounted(() => {
             if (previewVisible.value) previewVisible.value = false;
             return;
         }
-        const offset = placementOffset(e);
+        const target = placementTargetAt(e);
         if (
-            offset === null ||
+            target === null ||
             b.value === null ||
             placement.selectedItemId === null ||
             placement.selectedModelIndex === null
@@ -1473,10 +1554,11 @@ onMounted(() => {
             previewVisible.value = false;
             return;
         }
+        const offset = { x: target.x, y: target.y };
         const itemId = placement.selectedItemId;
         // 预演堆叠：底座高度 + 对齐底座中心 + 底座要求的朝向；
         // 只能放在底座上的建筑（物流配送器）没有箱子时不显示预览（点了也放不下去）
-        const parent = placeBaseFor(e, offset, itemId);
+        const parent = placeBaseFor(e, offset, itemId, target.areaIndex);
         if (requiresBase(itemId) && parent === null) {
             previewVisible.value = false;
             return;
@@ -1493,7 +1575,8 @@ onMounted(() => {
             (parent ? stackYawFor(parent, itemId) : null) ?? placement.yaw,
             stackedZ(parent, itemId)
         );
-        const trans = calcBuildingTrans(R, b.value.pos, fake)[0];
+        // 预览可能落在还没建出区域的纬度带上：用该带规范原点做合成定位，落位后与真实区域一致
+        const trans = calcBuildingTrans(R, syntheticPos(target.origin), fake)[0];
         previewMesh.matrix.multiplyMatrices(trans, meta.unitBoxTrans);
         previewVisible.value = true;
     };
@@ -1503,7 +1586,10 @@ onMounted(() => {
     const _tmpPos = new Vector3();
 
     /** 网格偏移 → 世界坐标（用于直线预览端点） */
-    const gridToWorld = (offset: { x: number; y: number }): Vector3 | null => {
+    const gridToWorld = (
+        offset: { x: number; y: number },
+        origin: AreaGridOrigin
+    ): Vector3 | null => {
         if (
             b.value === null ||
             placement.selectedItemId === null ||
@@ -1516,19 +1602,19 @@ onMounted(() => {
             offset,
             0
         );
-        const t = calcBuildingTrans(R, b.value.pos, fake)[0];
+        const t = calcBuildingTrans(R, syntheticPos(origin), fake)[0];
         return _tmpPos.setFromMatrixPosition(t).clone();
     };
 
     // ---- 地基模式：逐格铺/涂 ----
     /** 网格偏移 → 地基光标世界矩阵（薄板贴于格子中心，朝向球面法线） */
-    const reformCellMatrix = (offset: {
-        x: number;
-        y: number;
-    }): Matrix4 | null => {
+    const reformCellMatrix = (
+        offset: { x: number; y: number },
+        origin: AreaGridOrigin
+    ): Matrix4 | null => {
         if (b.value === null) return null;
         const fake = createBuilding(1131, 0, offset, 0);
-        const t = calcBuildingTrans(R, b.value.pos, fake)[0].clone();
+        const t = calcBuildingTrans(R, syntheticPos(origin), fake)[0].clone();
         t.multiply(new Matrix4().makeScale(1, 1, 0.12));
         return t;
     };
@@ -1544,19 +1630,22 @@ onMounted(() => {
             reformCursorVisible.value = false;
             return;
         }
-        const a = anchorOffset(e);
-        if (a === null) {
+        // 地基格同样按"所在纬度带"选区域：全球任意纬度都能铺（地基格一律吸附整格）
+        const target = placementTargetAt(e, true);
+        if (target === null) {
             reformCursorVisible.value = false;
             return;
         }
-        const x = Math.floor(a.x);
-        const y = Math.floor(a.y);
-        const root = queue.data.areas[0];
-        if (y < 0 || y >= root.size.y || x < 0 || x >= root.size.x) {
+        const x = target.x;
+        const y = target.y;
+        const area = queue.data.areas[target.areaIndex];
+        // 区域还没建出来时按规范整带高度判断（点击时会补建），已建区域按它自己的 size
+        const sizeY = area === undefined ? target.band.rowHi - target.band.rowLo + 1 : area.size.y;
+        if (x < 0 || y < 0 || y >= sizeY) {
             reformCursorVisible.value = false;
             return;
         }
-        const m = reformCellMatrix({ x, y });
+        const m = reformCellMatrix({ x, y }, target.origin);
         if (m === null) {
             reformCursorVisible.value = false;
             return;
@@ -1574,14 +1663,18 @@ onMounted(() => {
     const paintReformCell = (e: PointerCoords) => {
         const queue = commandQueue.value;
         if (!queue) return;
-        const a = anchorOffset(e);
-        if (a === null) return;
-        const x = Math.floor(a.x);
-        const y = Math.floor(a.y);
-        const root = queue.data.areas[0];
-        if (y < 0 || y >= root.size.y || x < 0 || x >= root.size.x) return;
+        const target = placementTargetAt(e, true);
+        if (target === null) return;
+        // 该纬度带还没有区域 → 先补一条（与建筑放置同一套画布扩张），再铺格
+        const areaIndex = materializeTarget(target);
+        if (areaIndex < 0) return;
+        const area = queue.data.areas[areaIndex];
+        const x = target.x;
+        const y = target.y;
+        if (x < 0 || y < 0 || y >= area.size.y) return;
+        if (x >= area.size.x) area.size.x = Math.floor(x) + 1;
         queue.push(
-            new PaintReformCellCommand(0, x, y, placement.reformColorSlot)
+            new PaintReformCellCommand(areaIndex, x, y, placement.reformColorSlot)
         );
     };
 
@@ -1594,10 +1687,17 @@ onMounted(() => {
         )
             return;
         const port = portEndAt(e);
+        const target = placementTargetAt(e, true);
         const offset = port
             ? { x: port.point.x, y: port.point.y }
-            : placementOffset(e);
+            : target === null
+            ? null
+            : { x: target.x, y: target.y };
         if (offset === null) return;
+        const origin =
+            port !== null
+                ? b.value.pos.areas[port.building.areaIndex]
+                : target!.origin;
         const fake = createBuilding(
             placement.selectedItemId,
             placement.selectedModelIndex,
@@ -1605,7 +1705,7 @@ onMounted(() => {
             placement.yaw,
             port ? port.point.z : 0
         );
-        const t = calcBuildingTrans(R, b.value.pos, fake)[0];
+        const t = calcBuildingTrans(R, syntheticPos(origin), fake)[0];
         beltPreviewM.multiplyMatrices(t, beltLift);
         beltPreviewMesh.setMatrixAt(0, beltPreviewM);
         beltPreviewMesh.count = 1;
@@ -1618,16 +1718,25 @@ onMounted(() => {
         if (
             b.value === null ||
             placement.selectedItemId === null ||
-            placement.selectedModelIndex === null
+            placement.selectedModelIndex === null ||
+            beltArea === null
         )
             return;
-        const cur = placementOffset(e);
-        if (cur === null) return;
+        const target = placementTargetAt(e, true);
+        if (target === null) return;
+        // 终点换算到"本条带所在区域"的局部坐标（跨带时按物理经度搬过来，随后按带边界截断）
+        const cur = convertLocal(
+            { x: target.x, y: target.y },
+            target.origin,
+            beltArea.origin
+        );
+        const area = commandQueue.value?.data.areas[beltArea.areaIndex];
+        const gridSize = areaGridSize(beltArea.origin.segment);
         const endPort = portEndAt(e);
         // straight 模式：矢量直线预览（沿球面采样，非阶梯状位图）
         if (beltPathMode === "straight") {
-            const startPos = gridToWorld(p0);
-            const endPos = gridToWorld(cur);
+            const startPos = gridToWorld(p0, beltArea.origin);
+            const endPos = gridToWorld(cur, beltArea.origin);
             if (startPos && endPos) {
                 const dist = startPos.distanceTo(endPos);
                 const segments = Math.min(
@@ -1660,19 +1769,27 @@ onMounted(() => {
 
         // latFirst / lonFirst：阶梯状传送带方块预览（复用与落位同一套路径构造，
         // 起点/终点接建筑口时预览也会贴到口上）
-        const previewBelts = buildBeltLine(
-            placement.selectedItemId,
-            placement.selectedModelIndex,
-            p0,
-            cur,
-            placement.yaw,
-            beltPathMode,
-            beltStartPort,
-            endPort
+        const previewBelts = clipBeltPath(
+            buildBeltLine(
+                placement.selectedItemId,
+                placement.selectedModelIndex,
+                p0,
+                cur,
+                placement.yaw,
+                beltPathMode,
+                beltStartPort,
+                endPort,
+                gridSize
+            ),
+            area
         );
         const n = Math.min(previewBelts.length, BELT_PREVIEW_CAP);
         for (let i = 0; i < n; i++) {
-            const t = calcBuildingTrans(R, b.value.pos, previewBelts[i])[0];
+            const t = calcBuildingTrans(
+                R,
+                syntheticPos(beltArea.origin),
+                previewBelts[i]
+            )[0];
             beltPreviewM.multiplyMatrices(t, beltLift);
             beltPreviewMesh.setMatrixAt(i, beltPreviewM);
         }
@@ -1693,46 +1810,100 @@ onMounted(() => {
     const commitBeltLine = (e: PointerCoords) => {
         const queue = commandQueue.value;
         const start = beltStart;
+        const belt = beltArea;
         if (
             !queue ||
             !start ||
+            belt === null ||
             placement.selectedItemId === null ||
             placement.selectedModelIndex === null
         )
             return;
-        // B 点落在建筑口上 → 该口作为"送入"端点（带终止于建筑）
-        const endPort = portEndAt(e);
+        const area = queue.data.areas[belt.areaIndex];
+        if (area === undefined) return;
+        // 建筑口必须属于本条带所在区域（一条带 = 一个区域，跨区域的口无法用单条带表示）
+        const endPortRaw = portEndAt(e);
+        const endPort =
+            endPortRaw !== null && endPortRaw.building.areaIndex === belt.areaIndex
+                ? endPortRaw
+                : null;
+        const target = placementTargetAt(e, true);
         const end = endPort
             ? { x: Math.round(endPort.point.x), y: Math.round(endPort.point.y) }
-            : placementOffset(e);
+            : target === null
+            ? null
+            : convertLocal(
+                  { x: target.x, y: target.y },
+                  target.origin,
+                  belt.origin
+              );
         if (end === null) return;
-        const startPort = beltStartPort;
-        const belts = buildBeltLine(
-            placement.selectedItemId,
-            placement.selectedModelIndex,
-            start,
-            end,
-            placement.yaw,
-            beltPathMode,
-            startPort,
-            endPort
+        const startPort =
+            beltStartPort !== null &&
+            beltStartPort.building.areaIndex === belt.areaIndex
+                ? beltStartPort
+                : null;
+        const gridSize = areaGridSize(belt.origin.segment);
+        const belts = clipBeltPath(
+            buildBeltLine(
+                placement.selectedItemId,
+                placement.selectedModelIndex,
+                start,
+                end,
+                placement.yaw,
+                beltPathMode,
+                startPort,
+                endPort,
+                gridSize
+            ),
+            area
         );
         if (belts.length === 0) return;
         beltStart = null;
         beltStartPort = null;
+        beltArea = null;
         hideBeltPreview();
         try {
-            queue.push(new CreateBeltLineCommand(belts, startPort, endPort));
+            queue.push(
+                new CreateBeltLineCommand(
+                    belts,
+                    startPort,
+                    endPort,
+                    belt.areaIndex,
+                    gridSize
+                )
+            );
         } catch {
-            // Outside equator band — ignore
+            // 纬度带外 / 区域不存在 — ignore
         }
+    };
+    /**
+     * 传送带只能落在**一条纬度带**里（一个建筑只有一个 `areaIndex`）：
+     * 路径越出该带的行范围就在边界处截断，与"格已被占用"同样处理，老线路不受影响。
+     */
+    const clipBeltPath = (
+        belts: BlueprintBuilding[],
+        area: { size: { x: number; y: number } } | undefined
+    ): BlueprintBuilding[] => {
+        if (area === undefined) return belts;
+        const out: BlueprintBuilding[] = [];
+        for (const b of belts) {
+            const y = b.localOffset[0].y;
+            if (y < 0 || y >= area.size.y) break;
+            out.push(b);
+        }
+        return out;
     };
     /** 分拣器两点架接：支持建筑↔建筑、建筑↔皮带、皮带↔皮带 */
     const pickSorterPoint = (e: PointerCoords) => {
         const queue = commandQueue.value;
         if (!queue) return;
-        const anchor = anchorOffset(e) ?? undefined;
         const index = pickBuilding(e);
+        const anchor =
+            index === null
+                ? undefined
+                : anchorOffset(e, queue.data.buildings[index].areaIndex) ??
+                  undefined;
         if (sorterSource.value === null) {
             if (index !== null) {
                 sorterSource.value = index;
@@ -1751,6 +1922,8 @@ onMounted(() => {
             return;
         const srcBuilding = queue.data.buildings[src];
         const dstBuilding = queue.data.buildings[index];
+        // 分拣器只有一个 areaIndex：两端必须落在同一条带（跨带无法用单条分拣器表示）
+        if (srcBuilding.areaIndex !== dstBuilding.areaIndex) return;
         // 允许任意两端组合：建筑↔建筑、建筑↔皮带、皮带↔皮带
         // 传入 buildings 以检测 slot / offset / 分流器口占用
         // 传入两端点击锚点 以按点击所在的列/行选择 slot（与游戏光标行为一致）
@@ -1763,7 +1936,12 @@ onMounted(() => {
             { src: sorterSourceAnchor ?? undefined, dst: anchor }
         );
         sorterSourceAnchor = null;
-        if (sorter) queue.push(new CreateBuildingCommand(sorter));
+        if (sorter) {
+            sorter.areaIndex = srcBuilding.areaIndex;
+            queue.push(
+                new CreateBuildingCommand(sorter, srcBuilding.areaIndex)
+            );
+        }
     };
     const onMouseUp = (e: PointerCoords) => {
         if (downPos === null) return;
@@ -1773,14 +1951,29 @@ onMounted(() => {
         // 传送带：拖拽（旋转地图）时不处理；非拖拽点击在 A/B 状态间切换
         if (isPlacingBelt() && !isDrag) {
             if (beltStart === null) {
-                // 第一次点击：设为 A 点；落在建筑口上则记下"取出"端点
-                beltStartPort = portEndAt(e);
-                beltStart = beltStartPort
-                    ? {
-                          x: Math.round(beltStartPort.point.x),
-                          y: Math.round(beltStartPort.point.y),
-                      }
-                    : placementOffset(e);
+                // 第一次点击：设为 A 点；落在建筑口上则记下"取出"端点。
+                // A 点同时决定整条带所属的区域：口 → 该建筑的区域；空格 → 所在纬度带的区域
+                const queue = commandQueue.value;
+                const port = portEndAt(e);
+                if (queue === null) return;
+                if (port !== null) {
+                    beltArea = {
+                        areaIndex: port.building.areaIndex,
+                        origin: b.value!.pos.areas[port.building.areaIndex],
+                    };
+                    beltStart = {
+                        x: Math.round(port.point.x),
+                        y: Math.round(port.point.y),
+                    };
+                } else {
+                    const target = placementTargetAt(e, true);
+                    if (target === null) return;
+                    const areaIndex = materializeTarget(target);
+                    if (areaIndex < 0) return;
+                    beltArea = { areaIndex, origin: target.origin };
+                    beltStart = { x: target.x, y: target.y };
+                }
+                beltStartPort = port;
             } else commitBeltLine(e); // 第二次点击：A→B 放置
         }
     };
@@ -1800,8 +1993,16 @@ onMounted(() => {
             const hit = pickBuildingHit(e);
             sorterHover.value = hit === null ? null : hit.index;
             sorterHoverZ.value = hit === null ? 0 : hit.z;
+            const queue = commandQueue.value;
+            const hoverBuilding =
+                hit === null || queue === null
+                    ? undefined
+                    : queue.data.buildings[hit.index];
+            // 锚点必须用**建筑自己所在区域**的坐标空间（不同纬度带的局部格互不相通）
             sorterHoverAnchor.value =
-                sorterHover.value === null ? null : anchorOffset(e) ?? null;
+                hoverBuilding === undefined
+                    ? null
+                    : anchorOffset(e, hoverBuilding.areaIndex) ?? null;
         }
     };
     const onMouseLeave = () => {
@@ -1880,6 +2081,7 @@ onMounted(() => {
             e.preventDefault();
             beltStart = null;
             beltStartPort = null;
+            beltArea = null;
             hideBeltPreview();
             return;
         }

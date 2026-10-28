@@ -51,7 +51,7 @@ const DEFAULT_REFORM_COLORS: readonly number[] = [
     0xffa6a6, // 15 粉
 ];
 
-interface ReformCell {
+export interface ReformCell {
     areaIndex: number;
     gx: number;
     gy: number;
@@ -64,7 +64,7 @@ interface ReformCell {
  * 同一格被多个矩形覆盖时以后出现的矩形为准（与游戏重复改造的效果一致）；
  * type 为 0（无地基）的格子不渲染。
  */
-function expandReformCells(data: BlueprintReformData): ReformCell[] {
+export function expandReformCells(data: BlueprintReformData): ReformCell[] {
     // areaIndex(0..255) 与 int16 格坐标编码进一个 double 安全整数作为去重键
     const cells = new Map<number, ReformCell>();
     for (const rect of data.rects) {
@@ -241,27 +241,25 @@ const scaleMatrix = new Matrix4();
 /**
  * 构建地基图层：每个地基格一个位于星球表面的小方格，
  * 颜色取地基颜色槽位；工字铺/直铺类型额外覆盖带金属光泽的板纹。
+ *
+ * @param cells 已展开好的逐格数据（`buildSceneData` 校验过 areaIndex 时传入，避免重复展开）
  */
 export function buildReforms(
     R: number,
     pos: PositionedBlueprint,
-    reformData: BlueprintReformData | null | undefined
+    reformData: BlueprintReformData | null | undefined,
+    cells?: ReformCell[]
 ): Reforms | null {
-    if (
-        reformData === null ||
-        reformData === undefined ||
-        reformData.rects.length === 0
-    )
-        return null;
-    const cells = expandReformCells(reformData);
-    if (cells.length === 0) return null;
+    if (reformData === null || reformData === undefined) return null;
+    const allCells = cells ?? expandReformCells(reformData);
+    if (allCells.length === 0) return null;
     const colors = resolveReformColors(reformData);
     const { plateGeometry, baseMaterial, ibeamMaterial, gridMaterial } =
         getSharedResources();
 
     let numIBeam = 0;
     let numGrid = 0;
-    for (const cell of cells) {
+    for (const cell of allCells) {
         if (cell.type === REFORM_TYPE_IBEAM) numIBeam++;
         else if (cell.type === REFORM_TYPE_GRID) numGrid++;
     }
@@ -269,7 +267,7 @@ export function buildReforms(
     const baseMesh = new InstancedMesh(
         plateGeometry,
         baseMaterial,
-        cells.length
+        allCells.length
     );
     const ibeamMesh =
         numIBeam > 0
@@ -287,9 +285,12 @@ export function buildReforms(
 
     let ibeamIdx = 0;
     let gridIdx = 0;
-    for (let i = 0; i < cells.length; i++) {
-        const cell = cells[i];
+    for (let i = 0; i < allCells.length; i++) {
+        const cell = allCells[i];
         const area = pos.areas[cell.areaIndex];
+        // 矩形引用了不存在的区域（手改/损坏的蓝图）：跳过这一格，
+        // 不要因为一格算不出矩阵就让整个场景重建失败（那会连建筑一起消失）
+        if (area === undefined) continue;
         const longitudeGridSize = (2 * Math.PI) / area.segment / 5;
         const latitudeGridSize = (2 * Math.PI) / pos.segment / 5;
         const longitude = (area.longitude + cell.gx) * longitudeGridSize;
