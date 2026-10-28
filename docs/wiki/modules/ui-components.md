@@ -79,7 +79,7 @@
 | isInserter → filter-row :24 | 分拣器过滤器 ItemSelect |
 | isBeltBuilding → belt-edit :90 | 传送带 iconId / count 编辑 |
 | LabModeText :45 | 研究站当前研究模式（None/Compose/Research） |
-| accModeText :47 | 增产剂效果简介（加速器模式） |
+| accModeText :47 | 增产剂效果（加速器模式） |
 | 命令导入 :189-194 | SetBuildingRecipeCommand / SetLabResearchModeCommand / SetBeltParamsCommand / SetSorterFilterCommand |
 
 ### StationInfo.vue（物流站 12 口）

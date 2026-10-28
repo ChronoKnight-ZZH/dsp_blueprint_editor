@@ -861,6 +861,10 @@ const beltPreviewMesh = new InstancedMesh(
 beltPreviewMesh.matrixAutoUpdate = false;
 beltPreviewMesh.count = 0;
 beltPreviewMesh.renderOrder = 9;
+// InstancedMesh 的包围球只在首次渲染时计算一次，之后 setMatrixAt 不会让它失效；
+// 相机拉近后视锥变窄，光标移出这个（过期的）包围球就会被整体剔除 → 光标消失。
+// 预览始终贴着光标，直接关闭视锥剔除。
+beltPreviewMesh.frustumCulled = false;
 const beltPreviewVisible = ref(false);
 watchEffect(() => {
     if (isPlacingBelt() && beltPreviewVisible.value) scene.add(beltPreviewMesh);
@@ -926,6 +930,7 @@ const slotMarkers = new InstancedMesh(
 slotMarkers.matrixAutoUpdate = false;
 slotMarkers.count = 0;
 slotMarkers.renderOrder = 10;
+slotMarkers.frustumCulled = false; // 同 beltPreviewMesh：实例包围球不随 setMatrixAt 更新
 const slotMarkersVisible = ref(false);
 const SLOT_COLORS = {
     free: new Color(0x50fa50), // 空闲
@@ -951,6 +956,7 @@ const portMarkers = new InstancedMesh(
 portMarkers.matrixAutoUpdate = false;
 portMarkers.count = 0;
 portMarkers.renderOrder = 10;
+portMarkers.frustumCulled = false; // 同 beltPreviewMesh：实例包围球不随 setMatrixAt 更新
 const portMarkersVisible = ref(false);
 /** 悬停点的相对高度（格）：用于区分分流器的地面层/上层口 */
 const sorterHoverZ = ref(0);
@@ -1943,8 +1949,14 @@ onMounted(() => {
             );
         }
     };
-    const onMouseUp = (e: PointerCoords) => {
+    const onMouseUp = (e: MouseEvent) => {
         if (downPos === null) return;
+        // 右键在 contextmenu 里处理（取消 A 点），不能被当成 B 点确认；
+        // Windows 上 contextmenu 在 mouseup 之后才触发，不在这里拦掉会先落一条带
+        if (e.button !== 0) {
+            downPos = null;
+            return;
+        }
         const dx = e.clientX - downPos.x;
         const dy = e.clientY - downPos.y;
         const isDrag = dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD;
@@ -2083,6 +2095,15 @@ onMounted(() => {
             beltStartPort = null;
             beltArea = null;
             hideBeltPreview();
+            // 回退到"未选 A 点"的光标状态：光标处重新显示单个传送带方块
+            if (lastPointer.value) showSingleBeltPreview(lastPointer.value);
+            return;
+        }
+        // 分拣器已设 A 点（源建筑）：右键取消 A 点选择，不退出放置模式
+        if (isPlacingSorter() && sorterSource.value !== null) {
+            e.preventDefault();
+            sorterSource.value = null;
+            sorterSourceAnchor = null;
             return;
         }
         // 编辑模式：原行为 —— 退出 placing/deleting

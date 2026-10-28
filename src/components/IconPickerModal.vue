@@ -189,6 +189,15 @@ const clear = () => {
 
     .clear-btn {
         background: #c0392b;
+        margin: auto;
+        width: 120px;
+        padding: 4px 0;
+        border: 0;
+        cursor: pointer;
+        user-select: none;
+        text-align: center;
+        color: #fff;
+        font-size: 14px;
     }
 }
 </style>

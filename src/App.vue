@@ -50,13 +50,18 @@
                             @input="e => data!.header.shortDesc = (e.target as HTMLInputElement).value"
                         />
                     </div>
-                    <BlueprintIcon
-                        style="height: 90px; flex: none"
-                        :layout-id="iconLayout"
-                        :icons="data?.header.icons"
-                        editable
-                        @edit="editHeaderIcon"
-                    />
+                    <div class="icon-caption-wrap">
+                        <BlueprintIcon
+                            style="height: 90px; flex: none"
+                            :layout-id="iconLayout"
+                            :icons="data?.header.icons"
+                            editable
+                            @edit="editHeaderIcon"
+                        />
+                        <div class="icon-caption" :title="data?.header.shortDesc">
+                            {{ data?.header.shortDesc }}
+                        </div>
+                    </div>
                     <IconPickerModal
                         ref="iconPickerModal"
                         @select="setHeaderIcon"
@@ -1053,6 +1058,29 @@ body {
 
     section {
         margin: 5px 0;
+    }
+
+    /* 缩略图正下方的缩略图文字：单行居中，超长省略 */
+    .icon-caption-wrap {
+        flex: none;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: 90px;
+    }
+
+    .icon-caption {
+        max-width: 90px;
+        font-size: 0.8rem;
+        line-height: 1.2;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: #d0d0d0;
+        transform: translateY(-20px);
+        text-shadow: 0 0 2px #00000060;
+        font-weight: 900;
     }
 
     footer {

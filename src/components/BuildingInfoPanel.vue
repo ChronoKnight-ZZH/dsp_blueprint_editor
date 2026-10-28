@@ -45,7 +45,7 @@
             <span class="v">{{ LabModeText }}</span>
         </div>
         <div v-if="accModeText !== undefined">
-            <label>{{ t("增产剂效果简介") }}</label>
+            <label>{{ t("增产剂效果") }}</label>
             <span class="v">{{ accModeText }}</span>
         </div>
         <div v-if="isInserter(building.itemId)">
