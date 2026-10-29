@@ -23,6 +23,18 @@ module.exports = defineConfig({
                     generator: {
                         filename: 'models/[name].[contenthash:8][ext]',
                     },
+                }, {
+                    // 建筑通道贴图（法线 / 自发光 / spec-gloss）：独立成文件 + 保留目录结构。
+                    // 这些图多为 1~4 MB，内联成 base64 会把 JS 撑爆；
+                    // 另外不同建筑目录里有同名贴图（如 color-palette-256.png），
+                    // 用 [path] 保留相对路径才不会互相覆盖。
+                    // 正则要同时兼容 `/` 与 `\`：webpack 在 Windows 上给出的是反斜杠路径，
+                    // 只写 `/` 会让规则静默失配、图落到默认的 img/ 目录。
+                    test: /assets[\\/]icons[\\/]models[\\/].+\.png$/i,
+                    type: 'asset/resource',
+                    generator: {
+                        filename: 'textures/[path][name].[contenthash:8][ext]',
+                    },
                 },
             ],
         },

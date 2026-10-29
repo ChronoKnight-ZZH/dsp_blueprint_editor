@@ -1,0 +1,22 @@
+﻿_共享特效
+
+这些贴图不属于单个建筑，而是被 glb 材质引用的引擎通用贴图，
+因此原包不在 entities\models 下，本目录是副本。
+
+water-normal.png
+    用于: chemical-plant, chemical-plant-2
+    原始: Assets\Resources\universe\textures\planet\water\water-normal.png
+
+anim-arrow-2.png
+    用于: piler
+    原始: Assets\Resources\auxes\build\anim-arrow-2.png
+
+vfx-fire-jet-seq.png
+    用于: turret-cannon
+    原始: Assets\Resources\combat\skill\textures\vfx-fire-jet-seq.png
+
+common-flare-0.png
+    用于: turret-plasma, turret-plasma-ground
+    原始: Assets\Resources\combat\skill\textures\common-flare-0.png
+
+
