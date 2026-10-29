@@ -12,6 +12,7 @@
 import { Box3, Group, Object3D, Texture } from 'three';
 import type { Material } from 'three';
 import { modelUrl } from './glbAssets';
+import { applyModelMaterialTextures } from './materialTextures';
 
 /** 已加载完成的 GLB 模型（`scene` 作为实例化渲染的原型，不要直接加进场景） */
 export interface LoadedGlbModel {
@@ -174,6 +175,11 @@ async function runLoad(name: string, timeoutMs: number): Promise<LoadedGlbModel 
             return null;
         }
         loaded.set(name, model);
+        // 通道贴图（法线/自发光/spec-gloss）不在 GLB 里，按清单异步补挂：
+        // 不 await、不许失败——贴图没到之前先显示底色，到了材质原地更新即可
+        void applyModelMaterialTextures(model).catch(e => {
+            console.warn(`[glb] 模型 ${name} 的通道贴图接入失败（保留底色）`, e);
+        });
         for (const cb of listeners) {
             try {
                 cb(model);
@@ -236,10 +242,11 @@ export function resetGlbFailure(name?: string): void {
 // ---------------------------------------------------------------- 释放
 
 function disposeMaterial(material: Material): void {
-    // 材质上的贴图引用（map/normalMap/...）需要一起释放
+    // 材质上的贴图引用（map/normalMap/...）需要一起释放；
+    // 但通道贴图是跨模型共享的缓存资源（见 textureMaps），这里跳过，避免放掉别人还在用的图
     for (const key of Object.keys(material)) {
         const value = (material as unknown as Record<string, unknown>)[key];
-        if (value instanceof Texture)
+        if (value instanceof Texture && value.userData.sharedTexture !== true)
             value.dispose();
     }
     material.dispose();

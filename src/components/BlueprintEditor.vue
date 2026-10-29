@@ -573,6 +573,8 @@ import { ref, onMounted, Ref, onUnmounted, watchEffect, computed, inject } from 
 import { Scene, PerspectiveCamera, SphereGeometry, AmbientLight } from 'three';
 import { PlanetMapControls } from '@/PlanetMapControls';
 import { attachCamera, attachRenderer } from '@/utils';
+import { createNeutralEnvironment, setBuildingEnvironment } from '@/models/envMap';
+import { setTextureMaxAnisotropy } from '@/models/textureMaps';
 
 const props = defineProps<{
   selectedBuildingIndex: number | null,
@@ -597,6 +599,12 @@ scene.add(buildPlanetGrid(R * 1.0001, SEGMENT));
 const root: Ref<HTMLDivElement | null> = ref(null);
 const renderer = new WebGLRenderer({ antialias: true });
 attachRenderer(root, renderer);
+
+// 建筑材质：贴图各向异性过滤 + 程序化中性环境反射。
+// 环境反射只挂到建筑材质（material.envMap），不设 scene.environment，
+// 免得行星本体、网格线跟着泛白。
+setTextureMaxAnisotropy(renderer.capabilities.getMaxAnisotropy());
+setBuildingEnvironment(createNeutralEnvironment(renderer));
 
 const camera = new PerspectiveCamera(50);
 camera.near = 0.5;

@@ -1,0 +1,1295 @@
+{
+  "generatedAt": "2026-10-29T15:30:46.299Z",
+  "entries": [
+    {
+      "glb": "accumulator",
+      "material": "accumulator",
+      "albedo": "accumulator/accumulator-a.png",
+      "stem": "accumulator",
+      "dir": "accumulator",
+      "normal": "accumulator/accumulator-n.png",
+      "emissive": "accumulator/accumulator-e.png",
+      "spec": "accumulator/accumulator-s.png"
+    },
+    {
+      "glb": "accumulator",
+      "material": "accumulator-glass",
+      "albedo": "accumulator/accumulator-effect.png",
+      "stem": null,
+      "dir": "accumulator",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "accumulator",
+      "material": "accumulator-effect-1",
+      "albedo": "accumulator/accumulator-effect-1.png",
+      "stem": null,
+      "dir": "accumulator",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "assembler-1",
+      "material": "assembler-mk-1",
+      "albedo": "assembler/assembler-mk-a.png",
+      "stem": "assembler-mk",
+      "dir": "assembler",
+      "normal": "assembler/assembler-mk-n.png",
+      "emissive": "assembler/assembler-mk-e.png",
+      "spec": "assembler/assembler-mk-s.png"
+    },
+    {
+      "glb": "assembler-2",
+      "material": "assembler-mk-2",
+      "albedo": "assembler/assembler-mk-a.png",
+      "stem": "assembler-mk",
+      "dir": "assembler",
+      "normal": "assembler/assembler-mk-n.png",
+      "emissive": "assembler/assembler-mk-e.png",
+      "spec": "assembler/assembler-mk-s.png"
+    },
+    {
+      "glb": "assembler-3",
+      "material": "assembler-mk-3",
+      "albedo": "assembler/assembler-mk-a.png",
+      "stem": "assembler-mk",
+      "dir": "assembler",
+      "normal": "assembler/assembler-mk-n.png",
+      "emissive": "assembler/assembler-mk-e.png",
+      "spec": "assembler/assembler-mk-s.png"
+    },
+    {
+      "glb": "assembler-4",
+      "material": "assembler-mk-4",
+      "albedo": "assembler/assembler-mk-4-a.png",
+      "stem": "assembler-mk-4",
+      "dir": "assembler",
+      "normal": "assembler/assembler-mk-4-n.png",
+      "emissive": "assembler/assembler-mk-4-e.png",
+      "spec": "assembler/assembler-mk-4-s.png"
+    },
+    {
+      "glb": "assembler-4",
+      "material": "assembler-mk-4-eff",
+      "albedo": "assembler/assembler-mk-4-eff.png",
+      "stem": null,
+      "dir": "assembler",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "assembler",
+      "material": "assembler-mk-1",
+      "albedo": "assembler/assembler-mk-a.png",
+      "stem": "assembler-mk",
+      "dir": "assembler",
+      "normal": "assembler/assembler-mk-n.png",
+      "emissive": "assembler/assembler-mk-e.png",
+      "spec": "assembler/assembler-mk-s.png"
+    },
+    {
+      "glb": "battle-base",
+      "material": "battle-base",
+      "albedo": "battle base/battle-base-a.png",
+      "stem": "battle-base",
+      "dir": "battle base",
+      "normal": "battle base/battle-base-n.png",
+      "emissive": "battle base/battle-base-e.png",
+      "spec": "battle base/battle-base-s.png"
+    },
+    {
+      "glb": "charging-pole",
+      "material": "charging-pole",
+      "albedo": "charging pole/charging-pole-a.png",
+      "stem": "charging-pole",
+      "dir": "charging pole",
+      "normal": "charging pole/charging-pole-n.png",
+      "emissive": "charging pole/charging-pole-e.png",
+      "spec": "charging pole/charging-pole-s.png"
+    },
+    {
+      "glb": "charging-pole",
+      "material": "charging-pole-effect",
+      "albedo": "charging pole/charging-pole-effect.png",
+      "stem": null,
+      "dir": "charging pole",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "chemical-plant-2",
+      "material": "chemical-plant-2",
+      "albedo": "chemical plant 2/chemical-plant-2-a.png",
+      "stem": "chemical-plant-2",
+      "dir": "chemical plant 2",
+      "normal": "chemical plant 2/chemical-plant-2-n.png",
+      "emissive": "chemical plant 2/chemical-plant-2-e.png",
+      "spec": "chemical plant 2/chemical-plant-2-s.png"
+    },
+    {
+      "glb": "chemical-plant-2",
+      "material": "chemical-plant-2-glass",
+      "albedo": "_共享特效/water-normal.png",
+      "stem": null,
+      "dir": "_共享特效",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "chemical-plant",
+      "material": "chemical-plant",
+      "albedo": "chemical plant/chemical-plant-a.png",
+      "stem": "chemical-plant",
+      "dir": "chemical plant",
+      "normal": "chemical plant/chemical-plant-n.png",
+      "emissive": "chemical plant/chemical-plant-e.png",
+      "spec": "chemical plant/chemical-plant-s.png"
+    },
+    {
+      "glb": "chemical-plant",
+      "material": "chemical-plant-glass",
+      "albedo": "_共享特效/water-normal.png",
+      "stem": null,
+      "dir": "_共享特效",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "construction-drone",
+      "material": "player-drone",
+      "albedo": "construction drone/construction-drone-a.png",
+      "stem": "construction-drone",
+      "dir": "construction drone",
+      "normal": "construction drone/construction-drone-n.png",
+      "emissive": "construction drone/construction-drone-e.png",
+      "spec": "construction drone/construction-drone-s.png"
+    },
+    {
+      "glb": "construction-drone",
+      "material": "player-drone-effect",
+      "albedo": "construction drone/construction-drone-fx-engine.png",
+      "stem": null,
+      "dir": "construction drone",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "delivery-drone",
+      "material": "delivery-drone",
+      "albedo": "delivery courier/delivery-drone-lod0-a.png",
+      "stem": "delivery-drone",
+      "dir": "delivery courier",
+      "normal": "delivery courier/delivery-drone-lod0-n.png",
+      "emissive": "delivery courier/delivery-drone-lod0-e.png",
+      "spec": "delivery courier/delivery-drone-lod0-s.png"
+    },
+    {
+      "glb": "delivery-drone",
+      "material": "delivery-drone-eff",
+      "albedo": "delivery courier/delivery-drone-eff.png",
+      "stem": null,
+      "dir": "delivery courier",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "delivery-machine",
+      "material": "delivery-machine",
+      "albedo": "delivery machine/delivery-machine-a.png",
+      "stem": "delivery-machine",
+      "dir": "delivery machine",
+      "normal": "delivery machine/delivery-machine-n.png",
+      "emissive": "delivery machine/delivery-machine-e.png",
+      "spec": "delivery machine/delivery-machine-s.png"
+    },
+    {
+      "glb": "delivery-machine",
+      "material": "delivery-machine-eff",
+      "albedo": "delivery machine/delivery-machine-eff.png",
+      "stem": null,
+      "dir": "delivery machine",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "em-rail-ejector",
+      "material": "em-rail-ejector",
+      "albedo": "em rail ejector/em-rail-ejector-a.png",
+      "stem": "em-rail-ejector",
+      "dir": "em rail ejector",
+      "normal": "em rail ejector/em-rail-ejector-n.png",
+      "emissive": "em rail ejector/em-rail-ejector-e.png",
+      "spec": "em rail ejector/em-rail-ejector-s.png"
+    },
+    {
+      "glb": "em-rail-ejector",
+      "material": "em-rail-ejector-effect",
+      "albedo": "em rail ejector/em-rail-ejector-effect.png",
+      "stem": null,
+      "dir": "em rail ejector",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "energy-exchanger",
+      "material": "energy-exchanger",
+      "albedo": "energy exchanger/energy-exchanger-a.png",
+      "stem": "energy-exchanger",
+      "dir": "energy exchanger",
+      "normal": "energy exchanger/energy-exchanger-n.png",
+      "emissive": "energy exchanger/energy-exchanger-e.png",
+      "spec": "energy exchanger/energy-exchanger-s.png"
+    },
+    {
+      "glb": "energy-exchanger",
+      "material": "energy-exchanger-effect",
+      "albedo": "energy exchanger/energy-exchanger-effect-1.png",
+      "stem": null,
+      "dir": "energy exchanger",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "energy-exchanger",
+      "material": "energy-exchanger-glass",
+      "albedo": "fractionator/fractionator-glass-s.png",
+      "stem": null,
+      "dir": "fractionator",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "fractionator",
+      "material": "fractionator",
+      "albedo": "fractionator/fractionator-a.png",
+      "stem": "fractionator",
+      "dir": "fractionator",
+      "normal": "fractionator/fractionator-n.png",
+      "emissive": "fractionator/fractionator-e.png",
+      "spec": "fractionator/fractionator-s.png"
+    },
+    {
+      "glb": "fractionator",
+      "material": "fractionator-glass",
+      "albedo": "fractionator/fractionator-glass-s.png",
+      "stem": null,
+      "dir": "fractionator",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "fractionator",
+      "material": "fractionator-glass-1",
+      "albedo": "fractionator/fractionator-glass-s.png",
+      "stem": null,
+      "dir": "fractionator",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "fuel-plant",
+      "material": "power-generator-fusion",
+      "albedo": "fusion power station/fusion-power-station-a.png",
+      "stem": "fusion-power-station",
+      "dir": "fusion power station",
+      "normal": "fusion power station/fusion-power-station-n.png",
+      "emissive": "fusion power station/fusion-power-station-e.png",
+      "spec": "fusion power station/fusion-power-station-s.png"
+    },
+    {
+      "glb": "fuel-plant",
+      "material": "power-generator-fusion-effect",
+      "albedo": "fusion power station/fusion-power-station-effect.png",
+      "stem": null,
+      "dir": "fusion power station",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "fusion-power-station",
+      "material": "power-generator-fusion",
+      "albedo": "fusion power station/fusion-power-station-a.png",
+      "stem": "fusion-power-station",
+      "dir": "fusion power station",
+      "normal": "fusion power station/fusion-power-station-n.png",
+      "emissive": "fusion power station/fusion-power-station-e.png",
+      "spec": "fusion power station/fusion-power-station-s.png"
+    },
+    {
+      "glb": "fusion-power-station",
+      "material": "power-generator-fusion-effect",
+      "albedo": "fusion power station/fusion-power-station-effect.png",
+      "stem": null,
+      "dir": "fusion power station",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "fusion-reactor",
+      "material": "fusion-reactor",
+      "albedo": "fusion reactor/fusion-reactor-a.png",
+      "stem": "fusion-reactor",
+      "dir": "fusion reactor",
+      "normal": "fusion reactor/fusion-reactor-n.png",
+      "emissive": "fusion reactor/fusion-reactor-e.png",
+      "spec": "fusion reactor/fusion-reactor-s.png"
+    },
+    {
+      "glb": "geothermal-power-station",
+      "material": "geothermal-power-station",
+      "albedo": "geothermal power station/geothermal-power-station-a.png",
+      "stem": "geothermal-power-station",
+      "dir": "geothermal power station",
+      "normal": "geothermal power station/geothermal-power-station-n.png",
+      "emissive": "geothermal power station/geothermal-power-station-e.png",
+      "spec": "geothermal power station/geothermal-power-station-s.png"
+    },
+    {
+      "glb": "geothermal-power-station",
+      "material": "geothermal-power-station-effect-0",
+      "albedo": "geothermal power station/geothermal-power-station-efffect-0.png",
+      "stem": null,
+      "dir": "geothermal power station",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "hadron-collider",
+      "material": "hadron-collider",
+      "albedo": "hadron collider/hadron-collider-a.png",
+      "stem": "hadron-collider",
+      "dir": "hadron collider",
+      "normal": "hadron collider/hadron-collider-n.png",
+      "emissive": "hadron collider/hadron-collider-e.png",
+      "spec": "hadron collider/hadron-collider-s.png"
+    },
+    {
+      "glb": "inserter-1",
+      "material": "inserter-1",
+      "albedo": "inserter/inserter-a.png",
+      "stem": "inserter",
+      "dir": "inserter",
+      "normal": "inserter/inserter-n.png",
+      "emissive": null,
+      "spec": "inserter/inserter-s.png"
+    },
+    {
+      "glb": "inserter-1",
+      "material": "inserter-1-arrow",
+      "albedo": "inserter/inserter-arrow.png",
+      "stem": null,
+      "dir": "inserter",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "inserter-2",
+      "material": "inserter-2",
+      "albedo": "inserter/inserter-a.png",
+      "stem": "inserter",
+      "dir": "inserter",
+      "normal": "inserter/inserter-n.png",
+      "emissive": null,
+      "spec": "inserter/inserter-s.png"
+    },
+    {
+      "glb": "inserter-2",
+      "material": "inserter-2-arrow",
+      "albedo": "inserter/inserter-arrow.png",
+      "stem": null,
+      "dir": "inserter",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "inserter-3",
+      "material": "inserter-3",
+      "albedo": "inserter/inserter-a.png",
+      "stem": "inserter",
+      "dir": "inserter",
+      "normal": "inserter/inserter-n.png",
+      "emissive": null,
+      "spec": "inserter/inserter-s.png"
+    },
+    {
+      "glb": "inserter-3",
+      "material": "inserter-3-arrow",
+      "albedo": "inserter/inserter-arrow.png",
+      "stem": null,
+      "dir": "inserter",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "inserter-4",
+      "material": "inserter-4",
+      "albedo": "inserter/inserter-a.png",
+      "stem": "inserter",
+      "dir": "inserter",
+      "normal": "inserter/inserter-n.png",
+      "emissive": null,
+      "spec": "inserter/inserter-s.png"
+    },
+    {
+      "glb": "inserter-4",
+      "material": "inserter-4-arrow",
+      "albedo": "inserter/inserter-arrow.png",
+      "stem": null,
+      "dir": "inserter",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "interstellar-logistic-station",
+      "material": "interstellar-logistic-station",
+      "albedo": "logistic station/logistic-station-a.png",
+      "stem": "logistic-station",
+      "dir": "logistic station",
+      "normal": "logistic station/logistic-station-n.png",
+      "emissive": "logistic station/logistic-station-e.png",
+      "spec": "logistic station/logistic-station-s.png"
+    },
+    {
+      "glb": "lab-2",
+      "material": "science-academy-2",
+      "albedo": "science academy/science-academy-2-a.png",
+      "stem": "science-academy-2",
+      "dir": "science academy",
+      "normal": "science academy/science-academy-2-n.png",
+      "emissive": "science academy/science-academy-2-e.png",
+      "spec": "science academy/science-academy-2-s.png"
+    },
+    {
+      "glb": "lab-2",
+      "material": "science-academy-glass",
+      "albedo": "fractionator/fractionator-glass-s.png",
+      "stem": null,
+      "dir": "fractionator",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "lab-2",
+      "material": "science-academy-effect",
+      "albedo": "science academy/science-academy-effect.png",
+      "stem": null,
+      "dir": "science academy",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "lab",
+      "material": "science-academy-1",
+      "albedo": "science academy/science-academy-a-1.png",
+      "stem": "science-academy-1",
+      "dir": "science academy",
+      "normal": "science academy/science-academy-n-1.png",
+      "emissive": "science academy/science-academy-e-1.png",
+      "spec": "science academy/science-academy-s-1.png"
+    },
+    {
+      "glb": "lab",
+      "material": "science-academy-glass",
+      "albedo": "fractionator/fractionator-glass-s.png",
+      "stem": null,
+      "dir": "fractionator",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "lab",
+      "material": "science-academy-effect",
+      "albedo": "science academy/science-academy-effect.png",
+      "stem": null,
+      "dir": "science academy",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "lighthouse",
+      "material": "lighthouse",
+      "albedo": "lighthouse/lighthouse-a.png",
+      "stem": "lighthouse",
+      "dir": "lighthouse",
+      "normal": "lighthouse/lighthouse-n.png",
+      "emissive": "lighthouse/lighthouse-e.png",
+      "spec": "lighthouse/lighthouse-s.png"
+    },
+    {
+      "glb": "lighthouse",
+      "material": "lighthouse-eff-ground",
+      "albedo": "lighthouse/lighthouse-eff-ground-e.png",
+      "stem": null,
+      "dir": "lighthouse",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "logistic-drone",
+      "material": "logistic-drone-body",
+      "albedo": "logistic station/logistic-vessel-a.png",
+      "stem": "logistic-vessel",
+      "dir": "logistic station",
+      "normal": "logistic station/logistic-vessel-n.png",
+      "emissive": "logistic station/logistic-vessel-e.png",
+      "spec": "logistic station/logistic-vessel-s.png"
+    },
+    {
+      "glb": "logistic-drone",
+      "material": "logistic-drone-effect",
+      "albedo": "logistic station/engine-flame-1.png",
+      "stem": null,
+      "dir": "logistic station",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "logistic-station",
+      "material": "interstellar-logistic-station",
+      "albedo": "logistic station/logistic-station-a.png",
+      "stem": "logistic-station",
+      "dir": "logistic station",
+      "normal": "logistic station/logistic-station-n.png",
+      "emissive": "logistic station/logistic-station-e.png",
+      "spec": "logistic station/logistic-station-s.png"
+    },
+    {
+      "glb": "logistic-vessel",
+      "material": "logistic-vessel-body",
+      "albedo": "logistic station/logistic-vessel-a.png",
+      "stem": "logistic-vessel",
+      "dir": "logistic station",
+      "normal": "logistic station/logistic-vessel-n.png",
+      "emissive": "logistic station/logistic-vessel-e.png",
+      "spec": "logistic station/logistic-vessel-s.png"
+    },
+    {
+      "glb": "logistic-vessel",
+      "material": "logistic-vessel-effect",
+      "albedo": "logistic station/engine-flame-2.png",
+      "stem": null,
+      "dir": "logistic station",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "mining-drill-mk2",
+      "material": "mining-drill-mk2",
+      "albedo": "mining drill mk2/mining-drill-mk2-a.png",
+      "stem": "mining-drill-mk2",
+      "dir": "mining drill mk2",
+      "normal": "mining drill mk2/mining-drill-mk2-n.png",
+      "emissive": "mining drill mk2/mining-drill-mk2-e.png",
+      "spec": "mining drill mk2/mining-drill-mk2-s.png"
+    },
+    {
+      "glb": "mining-drill-mk2",
+      "material": "mining-drill-mk2-effect",
+      "albedo": "mining drill mk2/mining-drill-mk2-glass-texture.png",
+      "stem": null,
+      "dir": "mining drill mk2",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "mining-drill-mk2",
+      "material": "mining-drill-mk2-effect-1",
+      "albedo": "mining drill mk2/mining-drill-mk2-effect-1.png",
+      "stem": null,
+      "dir": "mining drill mk2",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "mining-drill",
+      "material": "mining-drill",
+      "albedo": "mining drill/mining-drill-a.png",
+      "stem": "mining-drill",
+      "dir": "mining drill",
+      "normal": "mining drill/mining-drill-n.png",
+      "emissive": "mining drill/mining-drill-e.png",
+      "spec": "mining drill/mining-drill-s.png"
+    },
+    {
+      "glb": "monitor",
+      "material": "monitor",
+      "albedo": "monitor/monitor-a.png",
+      "stem": "monitor",
+      "dir": "monitor",
+      "normal": "monitor/monitor-n.png",
+      "emissive": null,
+      "spec": "monitor/monitor-s.png"
+    },
+    {
+      "glb": "oil-extractor",
+      "material": "oil-extractor",
+      "albedo": "oil extractor/oil-extractor-a.png",
+      "stem": "oil-extractor",
+      "dir": "oil extractor",
+      "normal": "oil extractor/oil-extractor-n.png",
+      "emissive": "oil extractor/oil-extractor-e.png",
+      "spec": "oil extractor/oil-extractor-s.png"
+    },
+    {
+      "glb": "oil-extractor",
+      "material": "oil-extractor-effect-2",
+      "albedo": "oil extractor/oil-extractor-effect-2.png",
+      "stem": null,
+      "dir": "oil extractor",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "oil-extractor",
+      "material": "oil-extractor-effect-1",
+      "albedo": "oil extractor/oil-extractor-effect-1.png",
+      "stem": null,
+      "dir": "oil extractor",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "oil-refinery",
+      "material": "oil-refinery",
+      "albedo": "oil refinery/oil-refinery-a.png",
+      "stem": "oil-refinery",
+      "dir": "oil refinery",
+      "normal": "oil refinery/oil-refinery-n.png",
+      "emissive": "oil refinery/oil-refinery-e.png",
+      "spec": "oil refinery/oil-refinery-s.png"
+    },
+    {
+      "glb": "oil-refinery",
+      "material": "oil-refinery-effect",
+      "albedo": "oil refinery/oil-refinery-effect.png",
+      "stem": null,
+      "dir": "oil refinery",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "orbital-collector",
+      "material": "orbital-collector",
+      "albedo": "orbital collector/orbital-collector-a.png",
+      "stem": "orbital-collector",
+      "dir": "orbital collector",
+      "normal": "orbital collector/orbital-collector-n.png",
+      "emissive": "orbital collector/orbital-collector-e.png",
+      "spec": "orbital collector/orbital-collector-s.png"
+    },
+    {
+      "glb": "orbital-collector",
+      "material": "orbital-collector-effect",
+      "albedo": "orbital collector/orbital-collector-effect.png",
+      "stem": null,
+      "dir": "orbital collector",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "orbital-substation",
+      "material": "orbital-substation",
+      "albedo": "orbital substation/orbital-substation-a.png",
+      "stem": "orbital-substation",
+      "dir": "orbital substation",
+      "normal": "orbital substation/orbital-substation-n.png",
+      "emissive": "orbital substation/orbital-substation-e.png",
+      "spec": "orbital substation/orbital-substation-s.png"
+    },
+    {
+      "glb": "orbital-substation",
+      "material": "orbital-substation-effect",
+      "albedo": "orbital substation/orbital-substation-effect.png",
+      "stem": null,
+      "dir": "orbital substation",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "piler",
+      "material": "piler",
+      "albedo": "piler/piler-a.png",
+      "stem": "piler",
+      "dir": "piler",
+      "normal": "piler/piler-n.png",
+      "emissive": "piler/piler-e.png",
+      "spec": "piler/piler-s.png"
+    },
+    {
+      "glb": "piler",
+      "material": "piler-effect",
+      "albedo": "_共享特效/anim-arrow-2.png",
+      "stem": null,
+      "dir": "_共享特效",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "power-generator",
+      "material": "power-generator-thermal",
+      "albedo": "power generator/power-generator-a.png",
+      "stem": "power-generator",
+      "dir": "power generator",
+      "normal": "power generator/power-generator-n.png",
+      "emissive": "power generator/power-generator-e.png",
+      "spec": "power generator/power-generator-s.png"
+    },
+    {
+      "glb": "power-generator",
+      "material": "power-generator-thermal-glass",
+      "albedo": "fractionator/fractionator-glass-s.png",
+      "stem": null,
+      "dir": "fractionator",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "power-generator",
+      "material": "power-generator-thermal-effect",
+      "albedo": "power generator/power-generator-effect.png",
+      "stem": null,
+      "dir": "power generator",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "ray-receiver",
+      "material": "ray-receiver",
+      "albedo": "ray receiver/ray-receiver-a.png",
+      "stem": "ray-receiver",
+      "dir": "ray receiver",
+      "normal": "ray receiver/ray-receiver-n.png",
+      "emissive": "ray receiver/ray-receiver-e.png",
+      "spec": "ray receiver/ray-receiver-s.png"
+    },
+    {
+      "glb": "ray-receiver",
+      "material": "ray-receiver-effect",
+      "albedo": "ray receiver/ray-receiver-glass-hex.png",
+      "stem": null,
+      "dir": "ray receiver",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "ray-receiver",
+      "material": "ray-receiver-eff",
+      "albedo": "ray receiver/ray-receivey-eff-e.png",
+      "stem": null,
+      "dir": "ray receiver",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "rocket",
+      "material": "rocket",
+      "albedo": "vertical launching silo/vl-silo-a.png",
+      "stem": "vl-silo",
+      "dir": "vertical launching silo",
+      "normal": "vertical launching silo/vl-silo-n.png",
+      "emissive": "vertical launching silo/vl-silo-e.png",
+      "spec": "vertical launching silo/vl-silo-s.png"
+    },
+    {
+      "glb": "rocket",
+      "material": "rocket-effect",
+      "albedo": "vertical launching silo/rocket-engine-flame.png",
+      "stem": null,
+      "dir": "vertical launching silo",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "smelter-2",
+      "material": "smelter-2-lod0",
+      "albedo": "smelter 2/smelter-2-lod0-a.png",
+      "stem": "smelter-2",
+      "dir": "smelter 2",
+      "normal": "smelter 2/smelter-2-lod0-n.png",
+      "emissive": "smelter 2/smelter-2-lod0-e.png",
+      "spec": "smelter 2/smelter-2-lod0-s.png"
+    },
+    {
+      "glb": "smelter-2",
+      "material": "smelter-2-effect-3",
+      "albedo": "smelter 2/smelter-2-effect.png",
+      "stem": null,
+      "dir": "smelter 2",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "smelter-2",
+      "material": "smelter-2-effect",
+      "albedo": "smelter 2/smelter-2-effect.png",
+      "stem": null,
+      "dir": "smelter 2",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "smelter-2",
+      "material": "smelter-2-effect-2",
+      "albedo": "smelter 2/smelter-2-effect-2.png",
+      "stem": null,
+      "dir": "smelter 2",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "smelter-2",
+      "material": "smelter-2-effect-1",
+      "albedo": "smelter 2/smelter-2-effect-1.png",
+      "stem": null,
+      "dir": "smelter 2",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "smelter-2",
+      "material": "smelter-2-glass-1",
+      "albedo": "smelter 2/smelter-2-glass-a.png",
+      "stem": "smelter-2-glass",
+      "dir": "smelter 2",
+      "normal": null,
+      "emissive": "smelter 2/smelter-2-glass-e.png",
+      "spec": "smelter 2/smelter-2-glass-s.png"
+    },
+    {
+      "glb": "smelter-2",
+      "material": "smelter-2-glass-2",
+      "albedo": "smelter 2/smelter-2-glass-a.png",
+      "stem": "smelter-2-glass",
+      "dir": "smelter 2",
+      "normal": null,
+      "emissive": "smelter 2/smelter-2-glass-e.png",
+      "spec": "smelter 2/smelter-2-glass-s.png"
+    },
+    {
+      "glb": "smelter-3",
+      "material": "smelter-3-lod0",
+      "albedo": "smelter 3/smelter-3-lod0-a.png",
+      "stem": "smelter-3",
+      "dir": "smelter 3",
+      "normal": "smelter 3/smelter-3-lod0-n.png",
+      "emissive": "smelter 3/smelter-3-lod0-e.png",
+      "spec": "smelter 3/smelter-3-lod0-s.png"
+    },
+    {
+      "glb": "smelter-3",
+      "material": "smelter-3-eff",
+      "albedo": "smelter 3/smelter-3-eff-e.png",
+      "stem": null,
+      "dir": "smelter 3",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "smelter",
+      "material": "smelter-lod0",
+      "albedo": "smelter/smelter-a-lod0.png",
+      "stem": "smelter",
+      "dir": "smelter",
+      "normal": "smelter/smelter-n-lod0.png",
+      "emissive": "smelter/smelter-e.png",
+      "spec": "smelter/smelter-s-lod0.png"
+    },
+    {
+      "glb": "solar-panel",
+      "material": "solar-panel",
+      "albedo": "solar panel/solar-panel-a.png",
+      "stem": "solar-panel",
+      "dir": "solar panel",
+      "normal": "solar panel/solar-panel-n.png",
+      "emissive": "solar panel/solar-panel-e.png",
+      "spec": "solar panel/solar-panel-s.png"
+    },
+    {
+      "glb": "splitter-a",
+      "material": "splitter",
+      "albedo": "splitter/splitter-a.png",
+      "stem": "splitter",
+      "dir": "splitter",
+      "normal": "splitter/splitter-n.png",
+      "emissive": null,
+      "spec": "splitter/splitter-s.png"
+    },
+    {
+      "glb": "splitter-b",
+      "material": "splitter",
+      "albedo": "splitter/splitter-a.png",
+      "stem": "splitter",
+      "dir": "splitter",
+      "normal": "splitter/splitter-n.png",
+      "emissive": null,
+      "spec": "splitter/splitter-s.png"
+    },
+    {
+      "glb": "splitter-c",
+      "material": "splitter",
+      "albedo": "splitter/splitter-a.png",
+      "stem": "splitter",
+      "dir": "splitter",
+      "normal": "splitter/splitter-n.png",
+      "emissive": null,
+      "spec": "splitter/splitter-s.png"
+    },
+    {
+      "glb": "spray-coater",
+      "material": "spray-coater-lod0",
+      "albedo": "spray coater/spray-coater-a-lod0.png",
+      "stem": "spray-coater",
+      "dir": "spray coater",
+      "normal": "spray coater/spray-coater-n-lod0.png",
+      "emissive": "spray coater/spray-coater-e-lod0.png",
+      "spec": "spray coater/spray-coater-s-lod0.png"
+    },
+    {
+      "glb": "spray-coater",
+      "material": "spray-coater-glass-lod0",
+      "albedo": "spray coater/spray-coater-glass-s.png",
+      "stem": null,
+      "dir": "spray coater",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "spray-coater",
+      "material": "spray-coater-effect",
+      "albedo": "spray coater/spray-coater-effect.png",
+      "stem": null,
+      "dir": "spray coater",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "storage-1",
+      "material": "storage",
+      "albedo": "storage/storage-a.png",
+      "stem": "storage",
+      "dir": "storage",
+      "normal": "storage/storage-n.png",
+      "emissive": "storage/storage-e.png",
+      "spec": "storage/storage-s.png"
+    },
+    {
+      "glb": "storage-2",
+      "material": "storage",
+      "albedo": "storage/storage-a.png",
+      "stem": "storage",
+      "dir": "storage",
+      "normal": "storage/storage-n.png",
+      "emissive": "storage/storage-e.png",
+      "spec": "storage/storage-s.png"
+    },
+    {
+      "glb": "storage-tank",
+      "material": "storage-tank",
+      "albedo": "storage tank/storage-tank-a.png",
+      "stem": "storage-tank",
+      "dir": "storage tank",
+      "normal": "storage tank/storage-tank-n.png",
+      "emissive": "storage tank/storage-tank-e.png",
+      "spec": "storage tank/storage-tank-s.png"
+    },
+    {
+      "glb": "storage-tank",
+      "material": "storage-tank-glass",
+      "albedo": "storage tank/storage-tank-glass-s.png",
+      "stem": null,
+      "dir": "storage tank",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "tesla-coil",
+      "material": "tesla-tower-1",
+      "albedo": "tesla tower/tesla-tower-1a.png",
+      "stem": "tesla-tower-1",
+      "dir": "tesla tower",
+      "normal": "tesla tower/tesla-tower-1n.png",
+      "emissive": "tesla tower/tesla-tower-1e.png",
+      "spec": "tesla tower/tesla-tower-1s.png"
+    },
+    {
+      "glb": "turret-cannon",
+      "material": "turret-cannon",
+      "albedo": "turret cannon/turret-cannon-a.png",
+      "stem": "turret-cannon",
+      "dir": "turret cannon",
+      "normal": "turret cannon/turret-cannon-n.png",
+      "emissive": "turret cannon/turret-cannon-e.png",
+      "spec": "turret cannon/turret-cannon-s.png"
+    },
+    {
+      "glb": "turret-cannon",
+      "material": "turret-cannon-eff",
+      "albedo": "_共享特效/vfx-fire-jet-seq.png",
+      "stem": null,
+      "dir": "_共享特效",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "turret-disturb",
+      "material": "turret-disturb",
+      "albedo": "turret disturb/turret-disturb-a.png",
+      "stem": "turret-disturb",
+      "dir": "turret disturb",
+      "normal": "turret disturb/turret-disturb-n.png",
+      "emissive": "turret disturb/turret-disturb-e.png",
+      "spec": "turret disturb/turret-disturb-s.png"
+    },
+    {
+      "glb": "turret-gauss",
+      "material": "turret-gauss-lod0",
+      "albedo": "turret gauss/turret-gauss-lod0-a.png",
+      "stem": "turret-gauss",
+      "dir": "turret gauss",
+      "normal": "turret gauss/turret-gauss-lod0-n.png",
+      "emissive": "turret gauss/turret-gauss-lod0-e.png",
+      "spec": "turret gauss/turret-gauss-lod0-s.png"
+    },
+    {
+      "glb": "turret-gauss",
+      "material": "turret-gauss-fire-effect",
+      "albedo": "turret gauss/vfx-bolt-muzzle-2.png",
+      "stem": null,
+      "dir": "turret gauss",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "turret-laser",
+      "material": "turret-laser-lod0",
+      "albedo": "turret laser/turret-laser-lod0-a.png",
+      "stem": "turret-laser",
+      "dir": "turret laser",
+      "normal": "turret laser/turret-laser-lod0-n.png",
+      "emissive": "turret laser/turret-laser-lod0-e.png",
+      "spec": "turret laser/turret-laser-lod0-s.png"
+    },
+    {
+      "glb": "turret-laser",
+      "material": "turret-laser-eff",
+      "albedo": "turret laser/turret-laser-eff.png",
+      "stem": null,
+      "dir": "turret laser",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "turret-missile",
+      "material": "turret-missile",
+      "albedo": "turret missile/turret-missile-a.png",
+      "stem": "turret-missile",
+      "dir": "turret missile",
+      "normal": "turret missile/turret-missile-n.png",
+      "emissive": "turret missile/turret-missile-e.png",
+      "spec": "turret missile/turret-missile-s.png"
+    },
+    {
+      "glb": "turret-plasma-ground",
+      "material": "turret-plasma-ground",
+      "albedo": "turret plasma ground/turret-plasma-ground-a.png",
+      "stem": "turret-plasma-ground",
+      "dir": "turret plasma ground",
+      "normal": "turret plasma ground/turret-plasma-ground-n.png",
+      "emissive": "turret plasma ground/turret-plasma-ground-e.png",
+      "spec": "turret plasma ground/turret-plasma-ground-s.png"
+    },
+    {
+      "glb": "turret-plasma-ground",
+      "material": "turret-plasma-ground-eff",
+      "albedo": "_共享特效/common-flare-0.png",
+      "stem": null,
+      "dir": "_共享特效",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "turret-plasma",
+      "material": "turret-plasma-lod0",
+      "albedo": "turret plasma/turret-plasma-lod0-a.png",
+      "stem": "turret-plasma",
+      "dir": "turret plasma",
+      "normal": "turret plasma/turret-plasma-lod0-n.png",
+      "emissive": "turret plasma/turret-plasma-lod0-e.png",
+      "spec": "turret plasma/turret-plasma-lod0-s.png"
+    },
+    {
+      "glb": "turret-plasma",
+      "material": "turret-plasma-eff",
+      "albedo": "_共享特效/common-flare-0.png",
+      "stem": null,
+      "dir": "_共享特效",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "turret-shield",
+      "material": "turret-shield",
+      "albedo": "turret shield/turret-shield-a.png",
+      "stem": "turret-shield",
+      "dir": "turret shield",
+      "normal": "turret shield/turret-shield-n.png",
+      "emissive": "turret shield/turret-shield-e.png",
+      "spec": "turret shield/turret-shield-s.png"
+    },
+    {
+      "glb": "turret-shield",
+      "material": "turret-sheild-eff",
+      "albedo": "turret shield/turret-sheild-eff-e.png",
+      "stem": null,
+      "dir": "turret shield",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "turret-signal",
+      "material": "turret-signal-lod0",
+      "albedo": "turret signal/turret-signal-lod0-a.png",
+      "stem": "turret-signal",
+      "dir": "turret signal",
+      "normal": "turret signal/turret-signal-lod0-n.png",
+      "emissive": "turret signal/turret-signal-lod0-e.png",
+      "spec": "turret signal/turret-signal-lod0-s.png"
+    },
+    {
+      "glb": "turret-signal",
+      "material": "turret-signal-lod0-glass",
+      "albedo": "fractionator/fractionator-glass-s.png",
+      "stem": null,
+      "dir": "fractionator",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "turret-signal",
+      "material": "turret-signal-eff1",
+      "albedo": "turret signal/turret-signal-eff1-e.png",
+      "stem": null,
+      "dir": "turret signal",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "turret-signal",
+      "material": "turret-signal-eff2",
+      "albedo": "turret signal/turret-signal-eff2-eff.png",
+      "stem": null,
+      "dir": "turret signal",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "vertical-launching-silo",
+      "material": "vl-silo",
+      "albedo": "vertical launching silo/vl-silo-a.png",
+      "stem": "vl-silo",
+      "dir": "vertical launching silo",
+      "normal": "vertical launching silo/vl-silo-n.png",
+      "emissive": "vertical launching silo/vl-silo-e.png",
+      "spec": "vertical launching silo/vl-silo-s.png"
+    },
+    {
+      "glb": "vertical-launching-silo",
+      "material": "vl-silo-grab",
+      "albedo": "vertical launching silo/vl-grab-mask.png",
+      "stem": null,
+      "dir": "vertical launching silo",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "vertical-launching-silo",
+      "material": "vl-silo-effect",
+      "albedo": "vertical launching silo/vl-silo-effect.png",
+      "stem": null,
+      "dir": "vertical launching silo",
+      "normal": null,
+      "emissive": null,
+      "spec": null
+    },
+    {
+      "glb": "water-pump",
+      "material": "water-pump",
+      "albedo": "water pump/water-pump-a.png",
+      "stem": "water-pump",
+      "dir": "water pump",
+      "normal": "water pump/water-pump-n.png",
+      "emissive": "water pump/water-pump-e.png",
+      "spec": "water pump/water-pump-s.png"
+    },
+    {
+      "glb": "wind-turbine",
+      "material": "wind-turbine-mat",
+      "albedo": "wind turbine/wind-turbine-a.png",
+      "stem": "wind-turbine",
+      "dir": "wind turbine",
+      "normal": "wind turbine/wind-turbine-n.png",
+      "emissive": "wind turbine/wind-turbine-e.png",
+      "spec": "wind turbine/wind-turbine-s.png"
+    }
+  ]
+}

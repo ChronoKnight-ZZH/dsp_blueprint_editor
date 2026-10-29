@@ -236,6 +236,11 @@
 | `models/glbLoader.ts` | GLB 加载器：懒加载、缓存、并发去重、8s 超时、错误吞掉、失败负缓存、资源释放（契约：永不 reject）。 |
 | `models/buildingModel.ts` | Model resolver：GLB 优先 + 元数据表回退、GLB 放置矩阵（y-up→z-up、按元数据高度等比、居中）、按需加载、`getModelMappingReport()`。 |
 | `models/glbInstances.ts` | 把已加载 GLB 按建筑实例化渲染（每个子网格一个 `InstancedMesh`，几何/材质复用一份）。 |
+| `models/textureManifest.ts` | **自动生成**的材质贴图清单：`模型名::材质名 → {normal, emissive, spec}` 三张通道贴图的 URL。 |
+| `models/textureMaps.ts` | 通道贴图加载器：懒加载 + 去重 + 失败负缓存；把 Unity spec-gloss 现场打包成 ORM 图（G=粗糙度、B=金属度）。 |
+| `models/materialTextures.ts` | 把通道贴图挂到材质上（`normalMap` / `emissiveMap` / `metalnessMap`+`roughnessMap`），并套用逐模型参数。 |
+| `models/modelMaterialTuning.ts` | **手调入口**：78 个模型的 `emissiveIntensity` / `envMapIntensity` / `metalness`。 |
+| `models/envMap.ts` | 程序化中性环境反射（PMREM），只挂建筑材质，避免金属面在无反射时发黑。 |
 
 ### 5.4 UI 组件层 `src/components/`
 
@@ -607,6 +612,16 @@ python3 i18n.py ... -o ../locales     # 生成 zh/en locale
 - 回退：文件缺失 / fetch 失败 / 解析失败 / 8s 超时 → 静默回退 `data/building.ts` 元数据盒；`GLB_MODELS_ENABLED=false` 可整体关闭。未知建筑仍用退化矩阵占位（不抛错、不白屏）。
 - 放置：默认 glTF y-up → `Rx(90°)` 转 z-up，再按元数据高度等比缩放并居中到 `boxCenter`；逐模型的偏移/旋转统一在 [`src/data/modelTransform.ts`](src/data/modelTransform.ts)（`x/y/z` 偏移按格、`pitch/yaw/roll` 按度、默认全 0，另有可选 `upAxis/align/scale`）。
 - 完整映射表、未匹配清单、可调参数与验收清单见 [docs/GLB_MODEL_INTEGRATION.md](docs/GLB_MODEL_INTEGRATION.md)；运行时权威版本见 `getModelMappingReport()`。
+
+### 10.6 建筑模型贴图通道（`src/models/`）
+
+- 现状：`.glb` 内只内嵌**底色图**（`map`），法线 `-n`、自发光 `-e`、高光 `-s` 三张通道图在 `assets/icons/models/<建筑>/` 下，由 `textureManifest.ts`（自动生成）登记，运行时懒加载后挂到材质上。
+- 映射规则：GLB 内嵌底色图与磁盘 PNG 做 **MD5 全等**比对锚定材质 → 再由文件名词干找同组三张通道图（兼容 `assembler-mk-n.png` 与 `tesla-tower-1n.png` 两种命名家族）。生成器：`scripts/gen-texture-manifest.mjs`。
+- 通道语义：`-s` 是 Unity spec-gloss（RGB=高光色、A=光滑度），在 `textureMaps.ts` 里现场重打包成 ORM 图（G=1−A 粗糙度、B=RGB 亮度 金属度）供 three 的 `roughnessMap`/`metalnessMap` 共用；`texture.flipY=false` 以匹配 glTF 的 UV 约定。
+- 参数：`modelMaterialTuning.ts` 里 78 个模型各一条 `emissiveIntensity` / `envMapIntensity` / `metalness`（有 `-s` 图时 metalness 是乘数，没有时按 `METALNESS_WITHOUT_SPEC_MAP` 缩放）。
+- 环境反射：`envMap.ts` 用 `PMREMGenerator` 从程序化天空/地面渐变生成，只挂建筑材质的 `envMap`，不动 `scene.environment`（行星与网格线不受影响）。
+- 资源清理：只保留被清单引用的 161 张贴图（210 MB），其余 373 张已移到仓库外备份（含还原脚本与明细）。清理脚本：`scripts/prune-model-textures.mjs`。
+- 详细报告见 [docs/MODEL_TEXTURES.md](docs/MODEL_TEXTURES.md)。
 
 ---
 
