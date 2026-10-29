@@ -107,8 +107,9 @@
                     <BuildingOverview v-else-if="data" @remove-by-item="removeBuildingsByItem" />
                 </section>
             </div>
-            <ul class="operations" v-else-if="activeTab === 'operations'">
-                <template v-if="data && commandQueue">
+            <div class="operations-panel" v-else-if="activeTab === 'operations'">
+                <ul class="operations">
+                    <template v-if="data && commandQueue">
                     <li>
                         <button @click="replaceModal!.open()">
                             <img src="@/assets/icons/find_replace.svg">
@@ -129,6 +130,60 @@
                         </button>
                     </li>
                 </template>
+                <li class="render-settings-li">
+                    <section class="render-settings">
+                        <button type="button" class="advanced-toggle" :class="{ open: advancedOpen }"
+                            @click="advancedOpen = !advancedOpen">
+                            <span>{{ t('高级') }}</span>
+                            <span class="switch-track decorative" :class="{ on: advancedOpen }"></span>
+                        </button>
+                        <div v-show="advancedOpen" class="advanced-body">
+                            <div class="option-row">
+                                <span>{{ t('展示真实模型') }}</span>
+                                <label class="switch">
+                                    <input type="checkbox" v-model="renderSettings.showRealModels" />
+                                    <span class="switch-track"></span>
+                                </label>
+                            </div>
+                            <div class="option-row">
+                                <span>{{ t('开启贴图') }}</span>
+                                <label class="switch">
+                                    <input type="checkbox" v-model="renderSettings.texturesEnabled" />
+                                    <span class="switch-track"></span>
+                                </label>
+                            </div>
+                            <div class="channel-list" :class="{ disabled: !renderSettings.texturesEnabled }">
+                                <div v-for="channel in textureChannels" :key="channel.key" class="channel-row"
+                                    :title="channel.unavailable ? t('当前素材包未提供该通道贴图') : undefined">
+                                    <span class="channel-name">
+                                        {{ t(channel.label) }}<code>{{ channel.suffix }}</code>
+                                    </span>
+                                    <label class="switch">
+                                        <input type="checkbox" v-model="renderSettings.textures[channel.key]"
+                                            :disabled="!renderSettings.texturesEnabled" />
+                                        <span class="switch-track"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="field-row">
+                                <label for="max-model-instances">{{ t('渲染最大模型') }}</label>
+                                <input id="max-model-instances" type="text" :value="maxModelText"
+                                    @change="commitMaxModel" />
+                            </div>
+                            <div class="slider-row">
+                                <input type="range" min="1" :max="limitSliderMax" step="1" :value="limitSliderValue"
+                                    @input="onLimitSliderInput" />
+                                <div class="slider-ticks">
+                                    <span>1</span>
+                                    <span>{{ t('无限') }}</span>
+                                </div>
+                            </div>
+                            <div class="settings-hint" :class="{ dirty: settingsDirty }">
+                                {{ settingsDirty ? t('设置已修改，重新导入蓝图后生效') : t('修改后需重新导入蓝图才能生效') }}
+                            </div>
+                        </div>
+                    </section>
+                </li>
                 <li style="margin-top: auto;">
                     <div class="select-li">
                         <label for="select-language">
@@ -142,7 +197,8 @@
                         </select>
                     </div>
                 </li>
-            </ul>
+                </ul>
+            </div>
             <div v-else-if="activeTab === 'stats'">
                 <ProductionStats v-if="data" />
                 <div v-else class="empty-hint">{{ t('请先打开蓝图') }}</div>
@@ -177,6 +233,8 @@ import ProductionStats from './components/ProductionStats.vue';
 import { CommandQueue } from './command';
 import BuildingOverview from './components/BuildingOverview.vue';
 import { useLang } from './i18n';
+import { renderSettings, persistRenderSettings } from '@/renderSettings';
+import type { TextureChannel } from '@/renderSettings';
 // 仅用于类型标注，编译时擦除，不影响 defineAsyncComponent 的异步分包
 import type BlueprintEditorImpl from './components/BlueprintEditor.vue';
 const BlueprintEditor = defineAsyncComponent(() => import(/* webpackChunkName: "renderer" */'./components/BlueprintEditor.vue'));
@@ -212,6 +270,69 @@ const togglePin = () => {
     }
 }
 const activeTab = ref<'info' | 'operations' | 'stats'>('info')
+
+// ---------- 渲染高级设置 ----------
+const advancedOpen = ref(false);
+const settingsDirty = ref(false);
+
+const textureChannels: { key: TextureChannel; suffix: string; label: string; unavailable?: boolean }[] = [
+    { key: 'albedo', suffix: '-a', label: '反照率' },
+    { key: 'normal', suffix: '-n', label: '法线' },
+    { key: 'spec', suffix: '-s', label: '高光/粗糙' },
+    { key: 'emissive', suffix: '-e', label: '自发光' },
+    { key: 'effect', suffix: '-eff', label: '特效', unavailable: true },
+    { key: 'dirt', suffix: '-dirt', label: '污渍', unavailable: true },
+    { key: 'glass', suffix: '-glass', label: '玻璃', unavailable: true },
+];
+
+/** 滑动条数值上限；再往右那一档代表「无限」 */
+const limitSliderMax = 1000;
+
+const limitSliderValue = computed(() => {
+    const limit = renderSettings.maxInstancesPerModel;
+    if (!Number.isFinite(limit))
+        return limitSliderMax + 1;
+    return Math.min(limitSliderMax, Math.max(1, Math.round(limit)));
+});
+
+const maxModelText = computed(() =>
+    Number.isFinite(renderSettings.maxInstancesPerModel)
+        ? String(renderSettings.maxInstancesPerModel)
+        : t('无限'),
+);
+
+const parseLimitText = (text: string): number => {
+    const normalized = text.trim().toLowerCase();
+    if (normalized === '无限' || normalized === '∞' || normalized === 'inf'
+        || normalized === 'infinite' || normalized === 'infinity')
+        return Infinity;
+    const value = Number(normalized);
+    // 非法输入：保持原值
+    if (normalized === '' || !Number.isFinite(value))
+        return renderSettings.maxInstancesPerModel;
+    return Math.max(1, Math.floor(value));
+};
+
+const onLimitSliderInput = (e: Event) => {
+    const value = Number((e.target as HTMLInputElement).value);
+    renderSettings.maxInstancesPerModel = value > limitSliderMax ? Infinity : value;
+};
+
+const commitMaxModel = (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    renderSettings.maxInstancesPerModel = parseLimitText(input.value);
+    // 输入不合法时回显当前值（无限显示为「无限」）
+    input.value = Number.isFinite(renderSettings.maxInstancesPerModel)
+        ? String(renderSettings.maxInstancesPerModel)
+        : t('无限');
+};
+
+// 设置变化后立即写入 sessionStorage，并提示「需重新导入蓝图」
+watch(renderSettings, () => {
+    persistRenderSettings();
+    settingsDirty.value = true;
+}, { deep: true });
+
 const working = ref(false);
 const codeExpired = ref(false);
 const parseErrorMessage = ref('');
@@ -410,6 +531,8 @@ const parseBp = (s: string) => {
     selectedBuildingIndex.value = null;
     bpStr.value = s;
     codeExpired.value = false;
+    // 重新导入后场景已按最新设置重建，清掉「待生效」提示
+    settingsDirty.value = false;
 }
 
 // 拖拽状态
@@ -902,6 +1025,169 @@ ul.operations {
         flex: 1 100px;
     }
 }
+
+/* ---------- 渲染高级设置 ---------- */
+.operations-panel {
+    display: flex;
+    flex-direction: column;
+    flex: auto;
+    min-height: 0;
+}
+
+ul.operations > li.render-settings-li {
+    border-bottom: 0;
+    padding: 2px 0;
+}
+
+.render-settings {
+    flex: none;
+    margin: 6px 0;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+}
+
+/* 用两级类名压过 .sidebar button 的通用按钮样式 */
+.render-settings .advanced-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 7px 10px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.08);
+    }
+}
+
+.render-settings .switch-track {
+    position: relative;
+    flex: none;
+    width: 38px;
+    height: 20px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.24);
+    transition: background 0.15s;
+
+    &::after {
+        content: '';
+        position: absolute;
+        left: 2px;
+        top: 2px;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #fff;
+        transition: transform 0.15s;
+    }
+
+    &.on {
+        background: #64a0dc;
+
+        &::after {
+            transform: translateX(18px);
+        }
+    }
+}
+
+.render-settings .switch {
+    flex: none;
+    display: inline-flex;
+    cursor: pointer;
+
+    input {
+        display: none;
+    }
+
+    input:checked + .switch-track {
+        background: #64a0dc;
+
+        &::after {
+            transform: translateX(18px);
+        }
+    }
+
+    input:disabled + .switch-track {
+        opacity: 0.4;
+    }
+}
+
+.advanced-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 10px 10px;
+    font-size: 0.9rem;
+}
+
+.option-row,
+.channel-row,
+.field-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.channel-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-left: 10px;
+    border-left: 2px solid rgba(100, 160, 220, 0.5);
+
+    &.disabled {
+        opacity: 0.5;
+    }
+}
+
+.channel-name code {
+    margin-left: 4px;
+    font-family: 'Menlo', 'Consolas', monospace;
+    font-size: 0.78rem;
+    color: #9ec4e8;
+}
+
+.render-settings .field-row input[type="text"] {
+    flex: none;
+    width: 90px;
+    text-align: right;
+}
+
+.slider-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+
+    input[type="range"] {
+        width: 100%;
+        margin: 0;
+        accent-color: #64a0dc;
+    }
+}
+
+.slider-ticks {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    color: #aaa;
+}
+
+.settings-hint {
+    font-size: 0.8rem;
+    color: #bbb;
+
+    &.dirty {
+        color: #ffcf6b;
+    }
+}
 </style>
 
 <i18n>
@@ -926,7 +1212,22 @@ ul.operations {
         "右键点击剔除": "右键点击建筑可剔除",
         "仅支持 .txt 文件": "仅支持 .txt 文件",
         "拖拽文件到此处打开": "拖拽文件到此处打开",
-        "请先打开蓝图": "请先打开蓝图"
+        "请先打开蓝图": "请先打开蓝图",
+        "高级": "高级",
+        "展示真实模型": "展示真实模型",
+        "开启贴图": "开启贴图",
+        "反照率": "反照率",
+        "法线": "法线",
+        "高光/粗糙": "高光/粗糙",
+        "自发光": "自发光",
+        "特效": "特效",
+        "污渍": "污渍",
+        "玻璃": "玻璃",
+        "渲染最大模型": "渲染最大模型",
+        "无限": "无限",
+        "修改后需重新导入蓝图才能生效": "修改后需重新导入蓝图才能生效",
+        "设置已修改，重新导入蓝图后生效": "设置已修改，重新导入蓝图后生效",
+        "当前素材包未提供该通道贴图": "当前素材包未提供该通道贴图"
     },
     en: {
         "复制": "Copy",
@@ -948,7 +1249,22 @@ ul.operations {
         "右键点击剔除": "Right-click a building to remove it",
         "仅支持 .txt 文件": "Only .txt files are supported",
         "拖拽文件到此处打开": "Drop file here to open",
-        "请先打开蓝图": "Please open a blueprint first"
+        "请先打开蓝图": "Please open a blueprint first",
+        "高级": "Advanced",
+        "展示真实模型": "Render real models",
+        "开启贴图": "Enable textures",
+        "反照率": "Albedo",
+        "法线": "Normal",
+        "高光/粗糙": "Specular/Roughness",
+        "自发光": "Emissive",
+        "特效": "Effect",
+        "污渍": "Dirt",
+        "玻璃": "Glass",
+        "渲染最大模型": "Max model instances",
+        "无限": "Unlimited",
+        "修改后需重新导入蓝图才能生效": "Re-import the blueprint for changes to take effect",
+        "设置已修改，重新导入蓝图后生效": "Settings changed — re-import the blueprint to apply",
+        "当前素材包未提供该通道贴图": "This texture channel is not available in the asset pack"
     },
 }
 </i18n>
