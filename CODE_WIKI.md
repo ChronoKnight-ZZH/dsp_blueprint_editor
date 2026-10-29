@@ -601,11 +601,11 @@ python3 i18n.py ... -o ../locales     # 生成 zh/en locale
 
 ### 10.5 外部 GLB 建筑模型（`src/models/`）
 
-- 资源：`assets/icons/models/*.glb`（60 个）。**文件名 = `itemsData.ts` 的 `icon` 字段**，不是中文名。
+- 资源：`assets/icons/建筑模型/*.glb`（60 个）。**文件名 = `itemsData.ts` 的 `icon` 字段**，不是中文名。
 - 解析链：`modelIndex → Item.models 下标 → Item.icon → 别名/变形表 → 磁盘文件`。用 `require.context` 做编译期索引（只内联 URL 字符串），`.glb` 是独立资源，只在建筑真的需要时才 `fetch`（不预加载、不进首屏）。
-- 别名/变形：`splitter-4dir → splitter-1/2/3`（按 `models` 下标，对应四向分流器三种变形）、`assembler-1 → assembler-1`（回退 `assembler`）、`accumulator-full → accumulator`。
+- 别名/变形：`splitter-4dir → splitter-1/2/3`（按 `models` 下标，对应四向分流器三种变形）、`assembler-1 → assembler-mk-1-lod1_0`（回退 `assembler-mk-1-lod2_0`）、`accumulator-full → accumulator`。
 - 回退：文件缺失 / fetch 失败 / 解析失败 / 8s 超时 → 静默回退 `data/building.ts` 元数据盒；`GLB_MODELS_ENABLED=false` 可整体关闭。未知建筑仍用退化矩阵占位（不抛错、不白屏）。
-- 放置：默认 glTF y-up → `Rx(90°)` 转 z-up，再按元数据高度等比缩放并居中到 `boxCenter`；逐模型可用 `modelPlacementOverrides` 覆盖 `upAxis/align/yaw/scale`。
+- 放置：默认 glTF y-up → `Rx(90°)` 转 z-up，再按元数据高度等比缩放并居中到 `boxCenter`；逐模型的偏移/旋转统一在 [`src/data/modelTransform.ts`](src/data/modelTransform.ts)（`x/y/z` 偏移按格、`pitch/yaw/roll` 按度、默认全 0，另有可选 `upAxis/align/scale`）。
 - 完整映射表、未匹配清单、可调参数与验收清单见 [docs/GLB_MODEL_INTEGRATION.md](docs/GLB_MODEL_INTEGRATION.md)；运行时权威版本见 `getModelMappingReport()`。
 
 ---

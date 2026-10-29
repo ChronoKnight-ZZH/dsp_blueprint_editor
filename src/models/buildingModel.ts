@@ -15,6 +15,8 @@ import { Matrix4, Vector3 } from 'three';
 import { buildingMeta } from '@/data/building';
 import type { BuildingMeta } from '@/data/building';
 import { itemsMap } from '@/data/items';
+import { modelTransformOf } from '@/data/modelTransform';
+import type { ModelAlign, ModelTransform, ModelUpAxis } from '@/data/modelTransform';
 import { availableModelNames, modelNameCandidates, resolveModelName } from './glbAssets';
 import { getLoadedGlbModel, loadGlbModel, onGlbModelLoaded, glbFailedModels } from './glbLoader';
 import type { LoadedGlbModel } from './glbLoader';
@@ -74,30 +76,12 @@ export function buildingModelName(modelIndex: number): string | null {
 
 // ---------------------------------------------------------------- 放置参数
 
-export type ModelUpAxis = 'y' | 'z';
-export type ModelAlign = 'height' | 'none';
+/** 一个水平格对应的世界单位：2π / SEGMENT / GRID_PER_SEGMENT × R（见 planet.ts、BlueprintEditor 的 R/SEGMENT） */
+const GRID_HORIZONTAL = 2 * Math.PI / 200 / 5 * 200.2;
+/** 一个垂直格对应的世界单位：planet.ts 的 HEIGHT_GRID_SIZE */
+const GRID_VERTICAL = 4 / 3;
 
-export interface ModelPlacementOverride {
-    /** GLB 的“上”方向轴。glTF 标准是 y-up，默认 'y' */
-    upAxis?: ModelUpAxis;
-    /** 'height' 按元数据盒高度等比缩放后居中（默认）；'none' 保持原始比例，仅平移到元数据中心 */
-    align?: ModelAlign;
-    /** 额外绕 z 轴（建筑局部空间的“上”）旋转，弧度，用于修正模型朝向 */
-    yaw?: number;
-    /** 在按高度对齐之后的额外缩放系数 */
-    scale?: number;
-}
-
-/**
- * 逐模型的放置参数覆盖表。
- *
- * 默认约定：GLB 按 glTF 标准 **y-up**、1 单位 ≈ 1 格导出；渲染时绕 X 轴 +90° 转成编辑器使用的
- * z-up 局部坐标系，再按元数据盒的高度等比缩放、对齐到元数据盒中心。
- * 如果某个模型视觉上方向/比例不对，**只需在这里加一条覆盖**，不用改渲染代码。
- */
-export const modelPlacementOverrides: Readonly<Record<string, ModelPlacementOverride>> = {
-    // 例：'smelter': { yaw: Math.PI / 2, align: 'none' },
-};
+const DEG_TO_RAD = Math.PI / 180;
 
 const DEFAULT_UP_AXIS: ModelUpAxis = 'y';
 const DEFAULT_ALIGN: ModelAlign = 'height';
@@ -107,8 +91,8 @@ const DEFAULT_ALIGN: ModelAlign = 'height';
  * `buildingMeta` 里的 box 高度是**近似值**（部分条目只是占位盒），而个别 GLB 的实测高度
  * 与它差了数倍。若不加限制，等比缩放到元数据盒高度会把这些模型压成一个点。
  * 实测多数模型与元数据盒高度在 1:1 附近（制造台 4.65/4.6、熔炉 3.98/3.8、
- * 射线接收站 10.4/10.0），因此 1/3 ~ 3 倍足以覆盖正常偏差，超出的交给
- * `modelPlacementOverrides` 逐条修正。
+ * 射线接收站 10.4/10.0），因此 1/3 ~ 3 倍足以覆盖正常偏差，超出的用
+ * `src/data/modelTransform.ts` 里的 `scale` 逐条修正。
  */
 const AUTO_SCALE_MIN = 1 / 3;
 const AUTO_SCALE_MAX = 3;
@@ -126,25 +110,32 @@ function clamp(value: number, min: number, max: number): number {
  * 建筑局部空间约定（与 `buildingMeta.unitBoxTrans` 完全一致）：
  *   x / y 是水平方向，+z 指向星球法线（向上）。
  *   `meta.boxSize = [x 宽, y 深, 高度]`，`meta.boxCenter = [x, y, z]`。
+ *
+ * 变换顺序：等比缩放 → 旋转（Roll 绕 Y → Pitch 绕 X → Yaw 绕 Z）→ 平移到盒心 → 叠加偏移。
+ * 偏移乘在最后一步的平移量上，因此**不受旋转影响**（永远沿建筑格子的 x/y/z 走）。
  */
-function buildPlacement(glb: LoadedGlbModel, meta: BuildingMeta | undefined): Matrix4 {
-    const override = modelPlacementOverrides[glb.name] ?? {};
-    const upAxis = override.upAxis ?? DEFAULT_UP_AXIS;
-    const align = override.align ?? DEFAULT_ALIGN;
+export function buildModelPlacement(
+    glb: LoadedGlbModel,
+    meta: BuildingMeta | undefined,
+    modelIndex: number,
+    /** 仅用于单测注入固定变换，避免测试依赖表里可随时调整的调参值 */
+    transformOverride?: Readonly<ModelTransform>,
+): Matrix4 {
+    const t = transformOverride ?? modelTransformOf(modelIndex);
+    const upAxis = t.upAxis ?? DEFAULT_UP_AXIS;
+    const align = t.align ?? DEFAULT_ALIGN;
 
-    // 朝向：glTF y-up → 编辑器 z-up（Rx(+90°) 把 +y 映射到 +z）
+    // 1) glTF 空间 → 建筑局部空间：glTF 是 y-up，绕 X 轴 +90° 把 +y 映射到 +z
     const orient = new Matrix4();
     if (upAxis === 'y')
         orient.makeRotationX(Math.PI / 2);
-    if (override.yaw)
-        orient.premultiply(new Matrix4().makeRotationZ(override.yaw));
 
     glb.bbox.getSize(_size);
     glb.bbox.getCenter(_center);
-    // 旋转后模型在“上”方向上的原始尺寸
+    // 旋转前，模型在“上”方向上的原始尺寸
     const modelHeight = upAxis === 'y' ? _size.y : _size.z;
 
-    let scale = override.scale ?? 1;
+    let scale = t.scale ?? 1;
     let targetX = 0;
     let targetY = 0;
     let targetZ: number;
@@ -162,14 +153,29 @@ function buildPlacement(glb: LoadedGlbModel, meta: BuildingMeta | undefined): Ma
         targetZ = modelHeight * scale / 2;
     }
 
-    const offsetCenter = _center.clone().applyMatrix4(orient).multiplyScalar(scale);
+    // 2) 朝向修正：Roll(绕 Y) → Pitch(绕 X) → Yaw(绕 Z)
+    const rotation = new Matrix4();
+    if (t.roll)
+        rotation.multiply(new Matrix4().makeRotationY(t.roll * DEG_TO_RAD));
+    if (t.pitch)
+        rotation.premultiply(new Matrix4().makeRotationX(t.pitch * DEG_TO_RAD));
+    if (t.yaw)
+        rotation.premultiply(new Matrix4().makeRotationZ(t.yaw * DEG_TO_RAD));
+
+    // 3) 模型自身的变换：旋转 · 缩放 · 轴向转换（缩放是等比的，与旋转可交换）
+    const entity = new Matrix4()
+        .multiply(rotation)
+        .multiply(new Matrix4().makeScale(scale, scale, scale))
+        .multiply(orient);
+
+    // 4) 平移：把变换后的盒心对到「元数据盒心 + 格单位偏移」
+    const offsetCenter = _center.clone().applyMatrix4(entity);
     const placement = new Matrix4().makeTranslation(
-        targetX - offsetCenter.x,
-        targetY - offsetCenter.y,
-        targetZ - offsetCenter.z,
+        targetX + t.x * GRID_HORIZONTAL - offsetCenter.x,
+        targetY + t.y * GRID_HORIZONTAL - offsetCenter.y,
+        targetZ + t.z * GRID_VERTICAL - offsetCenter.z,
     );
-    placement.multiply(new Matrix4().makeScale(scale, scale, scale));
-    placement.multiply(orient);
+    placement.multiply(entity);
     return placement;
 }
 
@@ -195,7 +201,7 @@ export function resolveBuildingModel(modelIndex: number): ResolvedBuildingModel 
         if (glbName !== null) {
             glb = getLoadedGlbModel(glbName);
             if (glb !== null)
-                placement = buildPlacement(glb, meta);
+                placement = buildModelPlacement(glb, meta, modelIndex);
         }
     } catch (e) {
         // 解析/放置任何异常 → 保持 meta 回退

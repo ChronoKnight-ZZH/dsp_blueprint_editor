@@ -10,8 +10,8 @@
 | 项 | 结果 |
 | --- | --- |
 | 元数据表 | **完全保留**，只**新增**两个派生只读字段 `boxSize` / `boxCenter`（供 GLB 对齐），表内 62 行数值一字未改 |
-| 外部模型 | 60 个 `.glb`，其中 **57 个**通过「modelIndex → Item.models → Item.icon → 文件名」链路匹配到建筑；3 个文件不参与渲染（见 §10） |
-| 未匹配建筑 | **5 个** modelIndex 无 GLB（制造台 Mk.II/III/IV、电力感应塔、火力发电厂）→ 静默回退元数据表 |
+| 外部模型 | 目录 `src/assets/icons/models/` 下 78 个 `.glb`；**62 个建筑全部**通过「modelIndex → Item.models → Item.icon → 文件名」链路匹配到模型 |
+| 未匹配建筑 | **0 个**。早期版本还缺 5 个（制造台 Mk.II/III/IV、电力感应塔、火力发电厂），对应的 `assembler-2/3/4`、`tesla-coil`、`fuel-plant` 已补进目录并自动生效 |
 | 加载方式 | 同步 `require.context` 索引（只内联 URL 字符串）+ 命令式 `fetch` + 缓存 + 并发去重 + 8s 超时 + 错误吞掉 + 失败负缓存；**不做任何预加载** |
 | 渲染接入 | 已加载 GLB 的建筑走实例化渲染，其余建筑走原元数据盒；GLB 到达后**节流重建一次**场景 |
 | 新增文件 | 4 个（`src/models/*`） |
@@ -88,13 +88,41 @@ calcBuildingTrans(...)    = R(经纬/yaw) · T(0, 0, R + localOffset.z·4/3)
    boxSize:   [box[0], box[2], box[1]]        // [x 宽, y 深, 高度]，z 向上
    boxCenter: [offset[0], offset[2], offset[1]] // 同上
    ```
-2. GLB 放置矩阵（`buildPlacement`）：
+2. GLB 放置矩阵（`buildModelPlacement`）：
    - 朝向：默认 glTF 标准 **y-up** → `Rx(+90°)`（`+y → +z`）；
-   - 缩放：按元数据高度等比缩放 `s = 高度 / 模型原始高度`（默认 `align: 'height'`，clamp 到 `[0.01, 100]`）；
-   - 平移：把模型包围盒中心送到 `boxCenter`，即 `M = T(target − s·R·center) · S(s) · R`；
-   - 逐模型可覆盖（`modelPlacementOverrides`，见 §11），换模型/改朝向不用动渲染代码。
+   - 缩放：按元数据高度等比缩放 `s = 高度 / 模型原始高度`（默认 `align: 'height'`，clamp 到 `[1/3, 3]`）；
+   - 旋转：`Roll(绕 Y) → Pitch(绕 X) → Yaw(绕 Z)`，角度来自变换表；
+   - 平移：把模型包围盒中心送到 `boxCenter + 格单位偏移`，即 `M = T(target + offset − c) · R · S(s) · O`；
+   - 逐模型配置统一在 [`src/data/modelTransform.ts`](../src/data/modelTransform.ts)（见 §2.1）。
 
-> 这些默认值假设 GLB 是「1 单位 ≈ 1 格、y-up」的常规导出；若某个模型方向不对，加一条 override 即可（例如 `{ yaw: Math.PI / 2 }`）。**因为本次没有运行环境做视觉校验，这是必须人工确认的一项（§13）。**
+> 这些默认值假设 GLB 是「1 单位 ≈ 1 格、y-up」的常规导出；若某个模型方向不对，改变换表里对应那一行即可，**不用动渲染代码**。**因为本次没有运行环境做视觉校验，朝向仍需人工确认（§13）。**
+
+### 2.1 逐模型变换表：`src/data/modelTransform.ts`
+
+**这张表只作用于「真实加载成功的 GLB 模型」**：`buildModelPlacement` 仅在 `glb !== null` 时调用，所以表里的数值不会、也无法改动 `building.ts` 的元数据，以及它渲染出的彩色方块。GLB 缺失/加载失败时，回退渲染与未接入本表时完全一致（`tests/unit/models/placement.spec.ts` 里有断言守着这一点）。
+
+与 `buildingMeta` 同键（modelIndex）的 62 行表，每行 6 个数值 + 3 个可选高级字段：
+
+| 字段 | 含义 | 单位 |
+| --- | --- | --- |
+| `x` / `y` / `z` | 左右 / 前后 / 上下偏移 | **格** |
+| `pitch` | 俯仰，绕 X 轴 | 度 |
+| `yaw` | 水平旋转，绕 Z 轴（竖直轴） | 度 |
+| `roll` | 侧倾，绕 Y 轴 | 度 |
+| `upAxis` / `align` / `scale` | 可选高级项，默认 `'y'` / `'height'` / 不填 | — |
+
+- **格换算**：`x、y × 1.2579`（水平格 = `2π/200/5 × R(200.2)`），`z × 4/3`（`HEIGHT_GRID_SIZE`）。
+- **应用顺序**：缩放 → 旋转 → 平移；偏移乘在最后一步的平移量上，**不受旋转影响**（`z: -10` 永远往下 10 格）。
+- 未登记或全 0 的行不产生任何效果，行为与未接入本表时一致。
+
+当前非 0 的只有 4 行：
+
+| modelIndex | 建筑 | 取值 |
+| --- | --- | --- |
+| 69 | 微型粒子对撞机 | `yaw: 180` |
+| 63 | 原油精炼厂 | `yaw: 90` |
+| 453 | 战场分析基站 | `yaw: 90` |
+| 68 | 卫星配电站 | `z: -10`（≈ 下沉 13.33 世界单位） |
 
 ---
 
@@ -179,7 +207,7 @@ export function modelUrl(name): Promise<string | null>;               // 解析 
 | `resolveBuildingModel(modelIndex)` | 返回 `{ glbName, glb, meta, placement, source }`，按 modelIndex 缓存 |
 | `requestBuildingModel(modelIndex)` | 幂等的按需加载（有外部模型且未加载时才请求） |
 | `onBuildingModelsChanged(cb)` | 模型到达 → 清缓存 + 通知渲染层重建 |
-| `modelPlacementOverrides` | 逐模型放置覆盖表（upAxis / align / yaw / scale） |
+| `buildModelPlacement(glb, meta, modelIndex)` | 计算「模型空间 → 建筑局部空间」的放置矩阵（缩放 → 旋转 → 平移 + 偏移） |
 | `getModelMappingReport()` | 运行时权威映射报告（本报告 §8–§10 就是它的静态快照） |
 | `glbFailedModels()` | 加载失败的模型名（来自加载器） |
 
@@ -307,7 +335,7 @@ export function modelUrl(name): Promise<string | null>;               // 解析 
 | 482 | 3010 | 地面电浆炮 | turret-plasma-ground | `turret-plasma-ground.glb` ✔ |
 | 664 | 2401 | 全息信标 | lighthouse | `lighthouse.glb` ✔ |
 
-**统计**：62 个 modelIndex，命中 57、未匹配 5；使用 57 个不同文件。
+**统计**：62 个 modelIndex，命中 62、未匹配 0（早期版本为 57/5）。
 
 ---
 
@@ -327,7 +355,11 @@ export function modelUrl(name): Promise<string | null>;               // 解析 
 
 ## 10. 未匹配清单
 
-### 10.1 有元数据、但没有 GLB → 回退元数据表（5 个）
+### 10.1 有元数据、但没有 GLB → 回退元数据表（当前为 0 个）
+
+> ✅ 已全部补齐：`assembler-2/3/4`、`tesla-coil`、`fuel-plant` 都已放进 `src/assets/icons/models/`，62 个建筑全部命中。
+
+下表是补齐前的记录，保留作对照：
 
 | modelIndex | 名称 | 期望文件名（icon） |
 | --- | --- | --- |
@@ -337,7 +369,7 @@ export function modelUrl(name): Promise<string | null>;               // 解析 
 | 44 | 电力感应塔 | `tesla-coil.glb` |
 | 54 | 火力发电厂 | `fuel-plant.glb` |
 
-只要把这几个模型按上述文件名放进 `src/assets/icons/models/`，**无需改代码**即可自动生效（`ctx.keys()` 会看到它们）。
+模型按上述文件名放进 `src/assets/icons/models/` 后，**无需改代码**即可自动生效（`ctx.keys()` 会看到它们）。
 
 ### 10.2 有 GLB、但元数据表里没有 → 目前不渲染（1 个）
 
@@ -363,9 +395,10 @@ export function modelUrl(name): Promise<string | null>;               // 解析 
 | --- | --- | --- | --- |
 | `BlueprintEditor.vue` | `GLB_MODELS_ENABLED` | `true` | 总开关；`false` 时完全回到元数据表（回归/排查用） |
 | `BlueprintEditor.vue` | `MAX_GLB_INSTANCES_PER_MODEL` | `1024` | 单模型实例上限，超出整组回退元数据盒 |
-| `glbLoader.ts` | `DEFAULT_TIMEOUT_MS` | `8000` | 单模型加载超时（含 chunk + fetch + parse） |
+| `glbLoader.ts` | `DEFAULT_TIMEOUT_MS` | `8000` | 单模型加载超时（资源解析 + fetch + parse） |
 | `glbLoader.ts` | `MAX_CONCURRENT_LOADS` | `3` | 同时在途的模型数 |
-| `buildingModel.ts` | `modelPlacementOverrides` | `{}` | 逐模型 `upAxis` / `align` / `yaw` / `scale` 覆盖（视觉标定入口） |
+| `src/data/modelTransform.ts` | `modelTransform` | 62 行全 0 | 逐模型偏移/旋转（视觉标定入口，见 §2.1） |
+| `buildingModel.ts` | `GRID_HORIZONTAL` / `GRID_VERTICAL` | `1.2579` / `4/3` | 变换表里「格」→ 世界单位的换算系数 |
 | `vue.config.js` | `.glb` 规则 | `asset/resource` → `models/[name].[contenthash:8][ext]` | 输出独立文件，URL 由 webpack 生成，`publicPath` 自动生效 |
 
 ---
@@ -420,14 +453,14 @@ const url = typeof mod.default === 'string' ? mod.default : null;   // 恒为 nu
 
 #### 另外两处修正
 
-- **缩放兜底**：`buildingMeta` 的 `box` 高度是近似值（部分只是占位盒）。实测多数模型与元数据盒高度接近 1:1（制造台 4.65/4.6、熔炉 3.98/3.8、射线接收站 10.4/10.0），但个别条目偏差很大（地热发电站模型 61.6 vs 元数据 10、信标 12.9 vs 3），按高度等比缩放会把它们压成一个点。因此自动缩放系数加了 `[1/3, 3]` 的收紧区间，超出部分交给 `modelPlacementOverrides` 逐条修正。
+- **缩放兜底**：`buildingMeta` 的 `box` 高度是近似值（部分只是占位盒）。实测多数模型与元数据盒高度接近 1:1（制造台 4.65/4.6、熔炉 3.98/3.8、射线接收站 10.4/10.0），但个别条目偏差很大（地热发电站模型 61.6 vs 元数据 10、信标 12.9 vs 3），按高度等比缩放会把它们压成一个点。因此自动缩放系数加了 `[1/3, 3]` 的收紧区间，超出部分在 `src/data/modelTransform.ts` 里用 `scale` 逐条修正。
 - 文档中「异步 context，每模型独立 chunk」的说法是错的：默认（同步）context 会把 **URL 字符串**内联进产物（60 个约 2 KB），`.glb` 文件本身仍是独立资源、按需 `fetch`。不预加载的结论不变。
 
 ### 12.3 已执行的验证与结果
 
 ```bash
 npx vue-cli-service build          # ✅ 0 error（17 条 no-console warning，全部来自本次新增的降级日志）
-npx jest tests/unit/models         # ✅ 7/7 通过
+npx jest tests/unit/models         # ✅ 19/19 通过
 ```
 
 | 检查项 | 结果 |
@@ -437,9 +470,9 @@ npx jest tests/unit/models         # ✅ 7/7 通过
 | `gltf-loader` 独立 chunk | ✅ 存在（`js/gltf-loader.*.js`，80 KB） |
 | 首屏是否含 GLB 模型数据 | ✅ 不含，只含 URL 字符串 |
 | `require.context` 编译产物 | ✅ `const t = n(30153); return "function" === typeof t ? t : null` |
-| 映射核对（脚本跑真实数据） | ✅ 62 条元数据中 **57 匹配 / 5 回退**；四向分流器 38/39/40 → `splitter-1/2/3` |
+| 映射核对（脚本跑真实数据） | ✅ 62 条元数据 **全部命中真实模型**（未匹配 0）；四向分流器 38/39/40 → `splitter-1/2/3` |
 | GLB 合法性 | ✅ 60 个全部是自包含的标准 glTF 2.0：无 `extensionsRequired`、无 Draco、无外部贴图/buffer 引用 |
-| 单测 | ✅ 7/7（别名、LOD、变形、无 `require.context` 时静默回退） |
+| 单测 | ✅ 19 个（别名、LOD、变形、无 `require.context` 时静默回退、变换表 62 行、放置矩阵与格换算） |
 
 映射与 GLB 结构可以用仓库里的两个脚本随时复核（不进产物、纯只读）：
 
@@ -451,7 +484,9 @@ npx ts-node -O '{"module":"commonjs","types":["node"]}' scripts/inspect-glb.ts  
 
 ### 12.4 仍然只能人眼确认的部分
 
-无头环境跑不出真实渲染，因此**朝向、贴地高度、相互比例**这三项仍需在浏览器里过一遍 §13 的清单。好消息是这三项都只需在 `modelPlacementOverrides` 里加一条 `{ yaw }` / `{ scale }` / `{ align }`，不用动渲染代码。
+无头环境跑不出真实渲染，因此**朝向、贴地高度、相互比例**这三项仍需在浏览器里过一遍 §13 的清单。这三项都只需改 `src/data/modelTransform.ts` 里对应那一行（`yaw` / `z` / `scale` / `align`），不用动渲染代码。
+
+`tests/unit/models/placement.spec.ts` 已经用矩阵断言锁住了这几件事，改表后跑一次即可：Yaw=90 把模型 +X 转到 +Y、Yaw=180 翻到 -X、`z: -10` 正好下移 `10 × 4/3` 世界单位、以及 62 个建筑的放置矩阵全部有限。
 
 ### 12.4 调试/复核用的运行时接口
 
@@ -465,13 +500,16 @@ console.log(getModelMappingReport());
 
 ## 13. 人工视觉验收清单（必须做）
 
-因为无法在此环境跑真实渲染，以下各项请在浏览器里逐条确认（有问题基本只需加 `modelPlacementOverrides` 一条）：
+因为无法在此环境跑真实渲染，以下各项请在浏览器里逐条确认（有问题基本只需改 `src/data/modelTransform.ts` 对应那一行）：
 
-- [ ] 制造台（65）、熔炉（62）、物流塔（49/50）、研究站（70）是否**立在球面上**而不是陷进地面/悬空？（若陷入→ `align`/高度基准问题）
-- [ ] 模型朝向是否与配方/传送带口方向一致？（不对 → 给该模型加 `yaw: ±Math.PI / 2`）
-- [ ] 模型大小是否与相邻建筑比例协调？（异常 → 该模型加 `scale` 或 `align: 'none'`）
+- [ ] 制造台（65）、熔炉（62）、物流塔（49/50）、研究站（70）是否**立在球面上**而不是陷进地面/悬空？（若陷入→ 调该行 `z`，单位是格）
+- [ ] 模型朝向是否与配方/传送带口方向一致？（不对 → 调 `yaw: ±90` 或 `±180`）
+- [ ] 模型大小是否与相邻建筑比例协调？（异常 → 该行加 `scale` 或 `align: 'none'`）
+- [ ] 原油精炼厂（63）、战场分析基站（453）转 `yaw: 90` 后朝向是否正确？
+- [ ] 微型粒子对撞机（69）`yaw: 180` 后是否与原模型左右对调？
+- [ ] 卫星配电站（68）`z: -10` 后是否如预期沉入地面以下（该值会整栋埋掉，属确认项）？
 - [ ] 四向分流器三种变形（38/39/40）是否分别是 1/2/3 条分流的形状？
-- [ ] 未匹配的 5 个模型（制造台 Mk.II–IV、电力感应塔、火力发电厂）是否仍显示为原彩色方块？
+- [ ] 传送带/分拣器/防御塔等其余建筑是否都换成了真实模型（不应再有彩色方块回退）？
 - [ ] 大量建筑（>1024 同类）时是否自动回退方块且不掉帧？
 - [ ] 断网（DevTools → Network offline）后打开蓝图：不应报错、不应白屏，全部显示方块。
 - [ ] 选中/右键剔除是否仍准确（拾取盒未改动，应完全一致）。
