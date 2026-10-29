@@ -16,6 +16,7 @@
  */
 
 import type { Object3D, Texture } from 'three';
+import { renderSettings } from '@/renderSettings';
 import { getBuildingEnvironment } from './envMap';
 import type { LoadedGlbModel } from './glbLoader';
 import { METALNESS_WITHOUT_SPEC_MAP, resolveModelMaterialTuning } from './modelMaterialTuning';
@@ -36,11 +37,12 @@ interface StandardMaterialLike {
     isMeshStandardMaterial?: boolean;
     name: string;
     uuid: string;
+    map: Texture | null;
     metalness: number;
     roughness: number;
     normalMap: Texture | null;
     normalScale: { set(x: number, y: number): void };
-    emissive: { setRGB(r: number, g: number, b: number): void };
+    emissive: { r: number; g: number; b: number; setRGB(r: number, g: number, b: number): void };
     emissiveMap: Texture | null;
     emissiveIntensity: number;
     envMap: Texture | null;
@@ -48,6 +50,40 @@ interface StandardMaterialLike {
     metalnessMap: Texture | null;
     roughnessMap: Texture | null;
     needsUpdate: boolean;
+}
+
+/** 材质被改之前的原始状态：关闭某个通道时从这里恢复，避免残留贴图 / 发光 */
+interface MaterialSnapshot {
+    map: Texture | null;
+    metalness: number;
+    roughness: number;
+    normalMap: Texture | null;
+    emissiveMap: Texture | null;
+    emissive: [number, number, number];
+    emissiveIntensity: number;
+    metalnessMap: Texture | null;
+    roughnessMap: Texture | null;
+}
+
+const originalStates = new WeakMap<StandardMaterialLike, MaterialSnapshot>();
+
+function snapshotOf(material: StandardMaterialLike): MaterialSnapshot {
+    let snapshot = originalStates.get(material);
+    if (snapshot === undefined) {
+        snapshot = {
+            map: material.map,
+            metalness: material.metalness,
+            roughness: material.roughness,
+            normalMap: material.normalMap,
+            emissiveMap: material.emissiveMap,
+            emissive: [material.emissive.r, material.emissive.g, material.emissive.b],
+            emissiveIntensity: material.emissiveIntensity,
+            metalnessMap: material.metalnessMap,
+            roughnessMap: material.roughnessMap,
+        };
+        originalStates.set(material, snapshot);
+    }
+    return snapshot;
 }
 
 const clamp01 = (value: number): number => (value < 0 ? 0 : value > 1 ? 1 : value);
@@ -78,12 +114,18 @@ function applyToMaterial(
     tuning: { emissiveIntensity: number; envMapIntensity: number; metalness: number },
     textures: MaterialTextureSet | null,
 ): void {
+    const base = snapshotOf(material);
+    const useTextures = renderSettings.texturesEnabled;
+
+    // 0) -a 反照率：关闭后只保留材质基础色（GLB 内嵌的底色图）
+    material.map = useTextures && renderSettings.textures.albedo ? base.map : null;
+
     // 1) 环境反射强度：给所有标准材质都设，金属/玻璃都有反射可吃，避免发黑
     material.envMap = getBuildingEnvironment();
     material.envMapIntensity = tuning.envMapIntensity;
 
-    // 2) 金属度 / 粗糙度
-    if (textures !== null && textures.orm !== null) {
+    // 2) -s 高光/粗糙：金属度 / 粗糙度
+    if (useTextures && renderSettings.textures.spec && textures !== null && textures.orm !== null) {
         // 有 -s 图：完全交给贴图（G=粗糙度、B=金属度），tuning.metalness 作为乘数
         material.metalness = clamp01(tuning.metalness);
         material.metalnessMap = textures.orm;
@@ -91,21 +133,32 @@ function applyToMaterial(
         material.roughnessMap = textures.orm;
     }
     else {
-        // 没有 -s 图：按基准值给个偏绝缘体的金属度，避免纯金属无反射直接变黑
+        // 关闭或没有 -s 图：恢复 GLB 原始值，并按基准给个偏绝缘体的金属度
         material.metalness = clamp01(tuning.metalness * METALNESS_WITHOUT_SPEC_MAP);
+        material.roughness = base.roughness;
+        material.metalnessMap = base.metalnessMap;
+        material.roughnessMap = base.roughnessMap;
     }
 
-    // 3) 自发光：emissive 必须是白色，emissiveMap 才会按图发光
-    if (textures !== null && textures.emissive !== null) {
+    // 3) -e 自发光：emissive 必须是白色，emissiveMap 才会按图发光
+    if (useTextures && renderSettings.textures.emissive && textures !== null && textures.emissive !== null) {
         material.emissive.setRGB(1, 1, 1);
         material.emissiveMap = textures.emissive;
         material.emissiveIntensity = tuning.emissiveIntensity;
     }
+    else {
+        material.emissiveMap = base.emissiveMap;
+        material.emissive.setRGB(base.emissive[0], base.emissive[1], base.emissive[2]);
+        material.emissiveIntensity = base.emissiveIntensity;
+    }
 
-    // 4) 法线
-    if (textures !== null && textures.normal !== null) {
+    // 4) -n 法线
+    if (useTextures && renderSettings.textures.normal && textures !== null && textures.normal !== null) {
         material.normalMap = textures.normal;
         material.normalScale.set(NORMAL_SCALE_X, NORMAL_SCALE_Y);
+    }
+    else {
+        material.normalMap = base.normalMap;
     }
 
     material.needsUpdate = true;

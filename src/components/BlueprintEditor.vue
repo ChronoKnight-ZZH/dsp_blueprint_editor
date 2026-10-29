@@ -26,12 +26,9 @@ import { commandQueueKey } from '@/define';
 import { onBuildingModelsChanged, requestBuildingModel, resolveBuildingModel } from '@/models/buildingModel';
 import type { ResolvedBuildingModel } from '@/models/buildingModel';
 import { GlbModelInstances } from '@/models/glbInstances';
+import { reapplyLoadedModelMaterials } from '@/models/glbLoader';
 import type { LoadedGlbModel } from '@/models/glbLoader';
-
-/** 外部 GLB 模型开关：false 时完全走元数据表（保留给排查/回归用） */
-const GLB_MODELS_ENABLED = true;
-/** 单个模型的实例数上限：超过就整组回退元数据盒，避免高模 + 大量实例拖垮帧率（临时设为无上限做验证） */
-const MAX_GLB_INSTANCES_PER_MODEL = Number.POSITIVE_INFINITY;
+import { renderSettings } from '@/renderSettings';
 
 function buildPlanetGrid(radius = 1, segment = 200) {
 	const allGrids = new Group();
@@ -160,6 +157,9 @@ function sorterIconPos(b: BlueprintBuilding, buildingTrans: Matrix4, pos: Vector
 }
 
 function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[], renderer: WebGLRenderer) {
+	// 设置变更后重新导入蓝图 → 按最新设置重挂通道贴图（材质是共享对象，原地生效）
+	reapplyLoadedModelMaterials();
+
 	const buildBelts = (belts: BlueprintBuilding[]) => {
 		const thickness = 0.1;
 		const material = new MeshLambertMaterial();
@@ -261,7 +261,7 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
 
 		// 同一模型的实例数过多时整组回退（高模 × 上千实例会明显掉帧）
 		const glbInstanceCounts = new Map<number, number>();
-		if (GLB_MODELS_ENABLED) {
+		if (renderSettings.showRealModels) {
 			for (const r of resolved) {
 				if (r !== null && r.glb !== null && r.meta !== undefined)
 					glbInstanceCounts.set(r.modelIndex, (glbInstanceCounts.get(r.modelIndex) ?? 0) + 1);
@@ -274,8 +274,8 @@ function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[],
 		for (let i = 0; i < boxes.length; i++) {
 			const b = boxes[i];
 			const r = resolved[i];
-			if (GLB_MODELS_ENABLED && r !== null && r.glb !== null && r.meta !== undefined
-				&& (glbInstanceCounts.get(r.modelIndex) ?? 0) <= MAX_GLB_INSTANCES_PER_MODEL) {
+			if (renderSettings.showRealModels && r !== null && r.glb !== null && r.meta !== undefined
+				&& (glbInstanceCounts.get(r.modelIndex) ?? 0) <= renderSettings.maxInstancesPerModel) {
 				let group = glbGroups.get(r.modelIndex);
 				if (group === undefined) {
 					group = { model: r.glb, placement: r.placement, buildings: [] };

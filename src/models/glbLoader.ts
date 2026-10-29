@@ -239,6 +239,18 @@ export function resetGlbFailure(name?: string): void {
         failed.delete(name);
 }
 
+/**
+ * 按当前渲染设置重新挂载所有已加载模型的通道贴图。
+ * 设置变更后重建场景（重新导入蓝图）时调用；材质是共享对象，原地更新即可。
+ */
+export function reapplyLoadedModelMaterials(): void {
+    for (const model of loaded.values()) {
+        void applyModelMaterialTextures(model).catch(e => {
+            console.warn(`[glb] 重新挂载模型 ${model.name} 的通道贴图失败（保留底色）`, e);
+        });
+    }
+}
+
 // ---------------------------------------------------------------- 释放
 
 function disposeMaterial(material: Material): void {
