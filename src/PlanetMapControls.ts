@@ -104,13 +104,45 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
         return this.object.position.distanceTo(this.target);
     }
 
-    /** 重置视角：目标回到原点，相机回到正上方默认距离 */
+    /**
+     * 重置视角：目标回到原点，相机回到默认距离正上方。
+     *
+     * ⚠️ 不能只设 `spherical`：`update()` 开头会用当前相机位置
+     * `spherical.setFromVector3(offset)` 反算，把这里设的值覆盖掉，
+     * 结果是「重置了 target 但方位角/极角/距离都不变」（旧实现的缺陷）。
+     * 必须直接摆放相机位置，再由 `update()` 反推出正确的球坐标。
+     */
     reset(distance: number) {
         this.target.set(0, 0, 0);
-        this.spherical.set(distance, Math.PI / 2, 0);
         this.sphericalDelta.set(0, 0, 0);
         this.panOffset.set(0, 0, 0);
         this.scale = 1.0;
+        // 相机置于 (0,0,distance)：update() 反算得 phi=PI/2、theta=0、radius=distance
+        this.object.position.set(0, 0, distance);
+        this.object.lookAt(this.target);
+        this.update();
+    }
+
+    /**
+     * 把镜头推到指定世界坐标（看向 `center`）。
+     *
+     * 用于「按 id 选中建筑并设置镜头」（Viewer.focusBuilding）。
+     * `viewDir` 决定从哪个方向看：省略时取 `center` 相对星球球心的方向，
+     * 即从建筑正上方的太空俯瞰，与 `reset` 的直觉一致。
+     */
+    focusOn(center: Vector3, distance: number, viewDir?: Vector3) {
+        this.target.copy(center);
+        this.sphericalDelta.set(0, 0, 0);
+        this.panOffset.set(0, 0, 0);
+        this.scale = 1.0;
+        const dir = viewDir !== undefined && viewDir.lengthSq() > 0
+            ? viewDir.clone().normalize()
+            : center.clone().normalize();
+        // 退化情形（center 在球心）：回落到 +Z，避免零向量
+        if (dir.lengthSq() === 0)
+            dir.set(0, 0, 1);
+        this.object.position.copy(center).addScaledVector(dir, distance);
+        this.object.lookAt(this.target);
         this.update();
     }
 

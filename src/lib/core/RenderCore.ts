@@ -1,5 +1,6 @@
 import {
     Scene, PerspectiveCamera, WebGLRenderer, Matrix4, Vector3, Ray, Sphere,
+    BoxGeometry, Mesh, MeshStandardMaterial,
 } from 'three';
 import { PlanetMapControls } from '@/PlanetMapControls';
 import { findPosForAreas, calcBuildingTrans } from '@/blueprint/planet';
@@ -131,6 +132,10 @@ export class RenderCore {
     private readonly ownsIconTexture: boolean;
     /** 是否由本实例注册了全局 settingsProvider（dispose 时需要撤销） */
     private readonly ownsSettingsProvider: boolean;
+    /** 选中高亮盒；`null` 表示当前无选中 */
+    private readonly selectBox: Mesh;
+    /** 选中下标（-1 = 无选中），与 `selectBox` 是否在场景中保持同步 */
+    private selectBoxIndex = -1;
 
     constructor(options: RenderCoreOptions) {
         this.container = options.container;
@@ -197,11 +202,23 @@ export class RenderCore {
             this.resizeObserver.observe(this.container);
         }
 
+        // 选中高亮盒：与编辑器同款外观（半透明蓝、关深度写入，避免遮挡建筑本体）
+        this.selectBox = new Mesh(
+            new BoxGeometry(1, 1, 1),
+            new MeshStandardMaterial({
+                color: 0x0074E8, opacity: 0.5, transparent: true, depthWrite: false,
+            }),
+        );
+        this.selectBox.matrixAutoUpdate = false;
+        this.selectBox.visible = false;
+
         // 交互
         this.onClick = (e: MouseEvent) => {
             if (!this.interactions.select)
                 return;
             const index = this.pick(e);
+            // 点击即选中：内部先更新高亮，再通知宿主（宿主的日志与视觉同时变化）
+            this.setSelectedIndex(index);
             this.callbacks.onBuildingSelect?.(index);
         };
         this.onMouseDown = (e: MouseEvent) => {
@@ -301,6 +318,77 @@ export class RenderCore {
         this.controls.reset(2 * PLANET_RADIUS);
     }
 
+    /**
+     * 设置选中高亮（`null` 清除）。
+     *
+     * 只影响视觉，不触发 `onBuildingSelect`（避免「程序化选中」与「用户点击」
+     * 在宿主侧形成回调环路）。越界或未加载时静默清零。
+     */
+    setSelectedIndex(index: number | null): void {
+        if (this.disposed)
+            return;
+        const boxes = this.bundle?.bvh.boxes;
+        const valid = index !== null && boxes !== undefined && boxes[index] !== undefined;
+        if (!valid) {
+            if (this.selectBoxIndex !== -1) {
+                this.selectBoxIndex = -1;
+                this.selectBox.visible = false;
+                this.scene.remove(this.selectBox);
+            }
+            return;
+        }
+        const i = index as number;
+        this.selectBox.matrix.copy(boxes[i]);
+        this.selectBox.visible = true;
+        if (this.selectBoxIndex === -1 || this.selectBox.parent === null)
+            this.scene.add(this.selectBox);
+        this.selectBoxIndex = i;
+    }
+
+    get selectedIndex(): number | null {
+        return this.selectBoxIndex === -1 ? null : this.selectBoxIndex;
+    }
+
+    /**
+     * 按蓝图里的建筑 `index` 字段（不是数组下标）查找并选中。
+     *
+     * 返回数组下标；找不到返回 null。`BlueprintBuilding.index` 与数组下标
+     * 通常一致，但蓝图按区域分组存储，不保证顺序，所以必须真查一次。
+     */
+    selectByBuildingId(id: number): number | null {
+        const data = this.data;
+        if (data === null)
+            return null;
+        const i = data.buildings.findIndex(b => b.index === id);
+        if (i === -1)
+            return null;
+        this.setSelectedIndex(i);
+        return i;
+    }
+
+    /**
+     * 把镜头推到指定数组下标的建筑。
+     *
+     * `distance` 省略时取 `PLANET_RADIUS * 0.35`（近景但不穿模）。
+     * 返回是否成功；相机由 `controls.focusOn` 摆位，不需要额外取景。
+     */
+    focusBuilding(index: number, distance?: number): boolean {
+        if (this.disposed)
+            return false;
+        const boxes = this.bundle?.bvh.boxes;
+        const box = boxes?.[index];
+        if (box === undefined)
+            return false;
+        const center = new Vector3().setFromMatrixPosition(box);
+        this.controls.focusOn(center, distance ?? PLANET_RADIUS * 0.35);
+        return true;
+    }
+
+    /** 最近一次成功构建的建筑总数；未加载时为 0 */
+    get buildingCount(): number {
+        return this.bundle?.buildings.modelRef.length ?? 0;
+    }
+
     get camera(): PerspectiveCamera { return this._camera; }
     /** 控件实例（阶段 C 的编辑器交互需要） */
     get controlsRef(): PlanetMapControls { return this.controls; }
@@ -379,6 +467,10 @@ export class RenderCore {
         // 只释放自己创建的图集；宿主注入的由宿主负责（避免误销毁他人资源）
         if (this.ownsIconTexture)
             this.iconTexture.dispose();
+        // 选中高亮盒用的是本实例自建的几何体与材质
+        this.selectBox.removeFromParent();
+        (this.selectBox.geometry as BoxGeometry).dispose();
+        (this.selectBox.material as MeshStandardMaterial).dispose();
         this.planet.dispose();
         this.scene.clear();
 
@@ -483,6 +575,10 @@ export class RenderCore {
             // 图标图集是跨重建复用的，AllBuildings.dispose 不会动它
             previous.buildings.dispose();
         }
+        // 选择盒不在 bundle 内，重建后包围盒来源已换；按当前下标重新套用，
+        // 越界则自动清除（避免高亮贴到错误的建筑上）
+        if (this.selectBoxIndex !== -1)
+            this.setSelectedIndex(this.selectBoxIndex);
     }
 
     private syncSize(): void {
