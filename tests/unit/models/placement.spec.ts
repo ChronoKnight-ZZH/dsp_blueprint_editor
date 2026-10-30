@@ -21,8 +21,22 @@ function fakeModel(): LoadedGlbModel {
     };
 }
 
+import { GRID_HORIZONTAL as CONST_GRID_HORIZONTAL, HEIGHT_GRID_SIZE as CONST_GRID_VERTICAL } from '@/planetConstants';
+
+/**
+ * 下面两个常量**刻意保持硬编码**，不直接引用 `@/planetConstants`：
+ * 它们是「世界坐标换算的当前事实」，一旦有人改动 `planetConstants` 里的半径/段数，
+ * 这条断言会立刻红，从而阻止 GLB 与星球表面错位（见 plan 阶段 A 第 3 行）。
+ */
 const GRID_HORIZONTAL = 2 * Math.PI / 200 / 5 * 200.2;
 const GRID_VERTICAL = 4 / 3;
+
+describe('planetConstants 与既有换算一致', () => {
+    it('水平格 / 垂直格与世界坐标换算必须相等', () => {
+        expect(CONST_GRID_HORIZONTAL).toBeCloseTo(GRID_HORIZONTAL, 10);
+        expect(CONST_GRID_VERTICAL).toBe(GRID_VERTICAL);
+    });
+});
 
 function transform(partial: Partial<ModelTransform>): ModelTransform {
     return { ...ZERO_MODEL_TRANSFORM, ...partial };

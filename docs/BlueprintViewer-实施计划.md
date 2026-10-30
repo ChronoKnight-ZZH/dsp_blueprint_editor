@@ -25,6 +25,8 @@
 
 | # | v1 的问题 | v2 的处理 |
 | --- | --- | --- |
+| 12 | 方案原定 `core/settings.ts` 放设置定义 | 实施中改为 `src/renderSettingsTypes.ts`：`materialTextures` / `glbLoader` 也要用这些类型，放进 `lib/core` 会造成 `models → lib` 的反向依赖 |
+| --- | --- | --- |
 | 1 | 「纯 TS 不依赖 Vue」与 `renderSettings.ts` 的 `reactive` 单例冲突 | D1：core 收 `ViewerRenderSettings` 参数，不再模块内读全局；Vue 侧保留单例作为 port 实现 |
 | 2 | `RenderSettings` 与 `src/renderSettings.ts` 同名不同形（缺 `textures` 7 通道） | 改用显式的 `ViewerRenderSettings`（三字段），并在 `renderSettings.ts` 加双向可赋值断言；禁止另起同名类型 |
 | 3 | 把「`texturesEnabled` 是否重建」列为未决风险 | 已定论：**只走 reapply，不重建**（§4.1） |
@@ -93,7 +95,7 @@ src/
     ├── types.ts                  # 全部公开类型
     └── core/
         ├── types.ts              # core 内部类型（BuildingModelRef / BuildStats / SceneModel）
-        ├── settings.ts           # 纯设置：默认值、merge、clamp
+        ├── geometryHelpers.ts    # inserterTrans / INSERTER_HEIGHT（渲染与选择盒共用）
         ├── RenderCore.ts         # 场景/相机/renderer/controls/rAF/重建/dispose
         ├── AllBuildings.ts       # 从 .vue 抽出
         ├── planetScene.ts        # 星球 + 经纬网格 + 灯光
@@ -466,7 +468,7 @@ jsdom 无 WebGL，且 `IconTexture` 构造需要真实 renderer。方案要求�
 
 ## 8. 已知限制（写入 lib-README）
 
-1. **单实例**：同页多个 Viewer 未验证；模块级 GLB 缓存、`resolvedCache`、150ms 节流为进程共享。
+1. **单实例**：同页多个 Viewer 未验证；模块级 GLB 缓存、`resolvedCache`、150ms 节流为进程共享。**实施补充**：`RenderCore` 在宿主未提供 `textureSettings` 时会把自身的贴图设置注册为 `glbLoader` 的全局 provider（否则 Viewer 的 `texturesEnabled=false` 对后加载的模型无效），该注册在 `dispose` 时撤销——因此同页两个 Viewer 会互相覆盖，且后销毁的会清掉 provider。
 2. **设置全局**：`texturesEnabled` 作用于共享材质，两个实例无法各用各的值。
 3. **资产依赖构建环境**：`require.context`（`glbAssets.ts:36`）与 `textureManifest.ts` 的静态 `require` 资源清单只在 webpack 下成立；`vue.config.js:6` 的 `publicPath: '/dsp_blueprint_editor/'` 决定 GLB/贴图 URL，宿主站点不在该子路径时会 404 且仅有一条 `console.warn`。`assetBaseUrl` 字段已预留，本轮不实现。
 4. **星球尺寸固定**：`PLANET_RADIUS / PLANET_SEGMENT` 与 `buildingModel.ts:80`、`planet.ts:187` 的换算耦合，不支持运行时改半径。
