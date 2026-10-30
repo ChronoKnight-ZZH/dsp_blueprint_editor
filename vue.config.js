@@ -5,6 +5,19 @@ const { execSync } = require('child_process')
 module.exports = defineConfig({
     publicPath: '/dsp_blueprint_editor/',
     transpileDependencies: false,
+    // BlueprintViewer demo 页（开发验证用）：http://localhost:8080/dsp_blueprint_editor/demo.html
+    pages: {
+        index: {
+            entry: 'src/main.ts',
+            template: 'public/index.html',
+            filename: 'index.html',
+        },
+        demo: {
+            entry: 'demo/main.ts',
+            template: 'demo/index.html',
+            filename: 'demo.html',
+        },
+    },
     configureWebpack: {
         module: {
             rules: [

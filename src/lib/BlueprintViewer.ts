@@ -3,9 +3,10 @@ import { fromStr } from '@/blueprint/parser';
 import type { ViewerRenderSettings } from '@/renderSettingsTypes';
 import { RenderCore, RenderPhaseError } from './core/RenderCore';
 import type { RebuildReason } from './core/RenderCore';
+import { JSONImportError, parseBlueprintJSON, stringifyBlueprintJSON } from './blueprintJSON';
 import type {
-    BlueprintLoadOutcome, BlueprintLoadResult, SettingsPort, ViewerCallbacks, ViewerError,
-    ViewerErrorCode, ViewerErrorPhase, ViewerOptions,
+    BlueprintLoadOutcome, BlueprintLoadResult, SettingsPort,
+    ViewerCallbacks, ViewerError, ViewerErrorCode, ViewerErrorPhase, ViewerOptions,
 } from './types';
 
 /** 默认设置：与 `@/renderSettings` 的默认值保持一致 */
@@ -37,6 +38,10 @@ function classifyError(e: unknown, phase: ViewerErrorPhase): ViewerError {
     // 重建错误自带阶段标记（position / build），优先采信
     if (e instanceof RenderPhaseError)
         return classifyError(e.original, e.phase);
+
+    // JSON 导入错误自带 code（json-syntax / json-shape）
+    if (e instanceof JSONImportError)
+        return { code: e.code, phase: 'parse', message: e.message, cause: e };
 
     const message = e instanceof Error ? e.message : String(e);
     const cause = e;
@@ -183,6 +188,38 @@ export class BlueprintViewer {
         if (guard !== null)
             return guard;
         return this.applyData(data);
+    }
+
+    /**
+     * 从 **JSON 文本**导入蓝图（网页端只能拿到文本，故单独开一个入口）。
+     *
+     * 与 `loadBlueprintData` 的差别只有一步：先 `JSON.parse` 并按
+     * `blueprintJSON.ts` 的规则还原 `Date` / `Uint8Array`，再走同一条应用链路。
+     * 语法错误 → `json-syntax`；结构问题（缺 header/areas/buildings）→ `json-shape`。
+     */
+    loadBlueprintJSON(text: string): BlueprintLoadOutcome {
+        const guard = this.guard();
+        if (guard !== null)
+            return guard;
+
+        let data: BlueprintData;
+        try {
+            data = parseBlueprintJSON(text);
+        }
+        catch (e) {
+            return this.fail(classifyError(e, 'parse'));
+        }
+        return this.applyData(data);
+    }
+
+    /**
+     * 把当前数据导出成可读 JSON 文本（2 空格缩进）。
+     *
+     * `Date` / `Uint8Array` 会被序列化成 ISO 字符串与 `{"0":…}` 对象，
+     * 两者都能被 `loadBlueprintJSON` 无损还原。
+     */
+    exportBlueprintJSON(): string | null {
+        return this.data === null ? null : stringifyBlueprintJSON(this.data);
     }
 
     /** 最近一次**成功**加载的数据；失败不影响它 */

@@ -92,6 +92,9 @@ export type ViewerErrorCode =
     | 'checksum-mismatch'
     | 'buffer-overflow'
     | 'parse-failed'
+    // JSON 导入（loadBlueprintJSON / parseBlueprintJSON）
+    | 'json-syntax'
+    | 'json-shape'
     // 定位阶段
     | 'no-root-area'
     | 'no-longitude'
@@ -101,7 +104,19 @@ export type ViewerErrorCode =
     // 生命周期
     | 'no-container'
     | 'no-webgl'
-    | 'already-disposed';
+    | 'already-disposed'
+    // 查询（selectBuilding / focusBuilding）
+    | 'not-loaded'
+    | 'building-not-found';
+
+/** 按建筑 id 定位的结果 */
+export interface BuildingLocateResult {
+    ok: boolean;
+    /** 命中的数组下标（成功时） */
+    index?: number;
+    /** 失败原因 */
+    error?: ViewerError;
+}
 
 export interface ViewerError {
     code: ViewerErrorCode;
