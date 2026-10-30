@@ -6,6 +6,7 @@ import type { TextureSink } from '@/iconTexture';
 import { IconTexture } from '@/iconTexture';
 import { IconGeometry, Icons } from '@/icons';
 import { IconSubscript } from '@/iconSubscript';
+import type { TextStyle } from '@/iconSubscript';
 import { Cargos } from '@/cargos';
 import { buildingMeta, noIconBuildings } from '@/data/building';
 import { isBelt, isInserter } from '@/data/items';
@@ -46,6 +47,8 @@ export interface BuildBuildingsOptions {
     reapplyMaterials?: boolean;
     /** 完整贴图设置（含 7 通道开关）；省略时由 glbLoader 的 provider 决定 */
     textureSettings?: TextureSettings;
+    /** 角标文字配色（来自主题）；省略时用旧版硬编码的白色 + 深灰描边 */
+    textStyle?: TextStyle;
 }
 
 export interface BuildBuildingsResult {
@@ -326,7 +329,7 @@ export function buildBuildings(
             for (const s of subscripts.values()) {
                 numChars += s.length;
             }
-            subscriptsMesh = new IconSubscript(numChars);
+            subscriptsMesh = new IconSubscript(numChars, options.textStyle);
         }
         const pos = new Vector3();
 

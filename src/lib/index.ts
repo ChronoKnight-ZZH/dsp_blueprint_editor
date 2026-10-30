@@ -22,7 +22,19 @@ export type {
     ViewerErrorCode,
     ViewerErrorPhase,
     SettingsPort,
+    // 选中 / 定位 / 查询
+    BuildingPickPayload,
+    BuildingInfoPayload,
+    BuildingLocateResult,
+    ViewerQueryResult,
+    FocusOptions,
+    // 主题
+    ThemeName,
+    ThemeColors,
 } from './types';
+
+// 宿主做「按 id 取建筑 / 自己渲染建筑名」时常需要这两个类型
+export type { BlueprintBuilding, BlueprintData } from '@/blueprint/parser';
 
 // ---- 诊断（与宿主共用判定口径） ----
 export { describeBuild } from './core/describeBuild';

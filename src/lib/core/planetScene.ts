@@ -7,9 +7,10 @@ import { gridAreas } from '@/blueprint/planet';
 import { PLANET_RADIUS, PLANET_SEGMENT } from '@/planetConstants';
 
 /** 经纬网格（一个 Group，含纬线 + 各区域的经线） */
-export function buildPlanetGrid(radius = 1, segment = PLANET_SEGMENT) {
+export function buildPlanetGrid(radius = 1, segment = PLANET_SEGMENT, sharedMaterial?: LineBasicMaterial) {
     const allGrids = new Group();
-    const material = new LineBasicMaterial({ color: 0xf0f0f0, depthWrite: false });
+    // 网格线共用一个材质：主题换色只改这一处（外部可通过 createPlanetScene 的返回值拿到它）
+    const material = sharedMaterial ?? new LineBasicMaterial({ color: 0xf0f0f0, depthWrite: false });
 
     const latitudeGeometry = new SphereLatitudeGridGeometry({
         radius,
@@ -36,6 +37,10 @@ export interface PlanetSceneParts {
     root: Group;
     /** 主平行光：RenderCore 每帧把它移到相机位置，保证建筑朝向相机的一面永远受光 */
     dirLight: DirectionalLight;
+    /** 球体材质（主题换色用） */
+    sphereMaterial: MeshStandardMaterial;
+    /** 网格线共用材质（主题换色用） */
+    gridMaterial: LineBasicMaterial;
     /** 星球球体与网格的释放函数（geometry + material） */
     dispose(): void;
 }
@@ -64,12 +69,15 @@ export function createPlanetScene(
     const planet = new Mesh(sphereGeometry, sphereMaterial);
     root.add(planet);
 
-    const grid = buildPlanetGrid(radius * 1.0001, segment);
+    const gridMaterial = new LineBasicMaterial({ color: 0xf0f0f0, depthWrite: false });
+    const grid = buildPlanetGrid(radius * 1.0001, segment, gridMaterial);
     root.add(grid);
 
     return {
         root,
         dirLight,
+        sphereMaterial,
+        gridMaterial,
         dispose() {
             sphereGeometry.dispose();
             sphereMaterial.dispose();
@@ -79,10 +87,7 @@ export function createPlanetScene(
                 }
             });
             // 网格线共用同一个 LineBasicMaterial，单独释放一次
-            const firstLine = grid.children.find(o => o instanceof LineSegments) as LineSegments | undefined;
-            const gridMaterial = firstLine?.material;
-            if (gridMaterial !== undefined && !Array.isArray(gridMaterial))
-                gridMaterial.dispose();
+            gridMaterial.dispose();
         },
     };
 }

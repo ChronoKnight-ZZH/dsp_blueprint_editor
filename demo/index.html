@@ -58,6 +58,41 @@
             <input type="number" id="maxInstances" min="1" step="1" placeholder="Infinity"></label>
         </fieldset>
         <fieldset>
+          <legend>选中 / 定位（对齐 v1 + focusBuilding）</legend>
+          <div class="btns">
+            <button id="btnSelect3">selectBuilding(3)</button>
+            <button id="btnSelectNull">select(null)</button>
+            <button id="btnFocus3">聚焦第3栋</button>
+            <button id="btnFocusNull">取消定位</button>
+          </div>
+          <div class="btns">
+            <button id="btnSelectedIndex">getSelectedIndex</button>
+            <button id="btnBuildingInfo">getBuildingInfo(3)</button>
+            <button id="btnCameraVersion">getCameraVersion</button>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>尺寸 / 画布</legend>
+          <div class="btns">
+            <button id="btnSetSize">setSize(400,300)</button>
+            <button id="btnResetSize">resetSize</button>
+            <button id="btnGetCanvas">getCanvas</button>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>主题 / 导出</legend>
+          <div class="btns">
+            <button id="btnThemeDark">dark</button>
+            <button id="btnThemeLight">light</button>
+            <button id="btnThemeAuto">auto</button>
+            <button id="btnGetTheme">getTheme</button>
+          </div>
+          <div class="btns">
+            <button id="btnDataURL">toDataURL</button>
+            <button id="btnToBlob">toBlob</button>
+          </div>
+        </fieldset>
+        <fieldset>
           <legend>生命周期</legend>
           <div class="btns">
             <button id="btnCreate">new Viewer</button>

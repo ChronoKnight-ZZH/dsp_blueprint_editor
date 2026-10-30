@@ -1,6 +1,6 @@
 import {
     Scene, PerspectiveCamera, WebGLRenderer, Matrix4, Vector3, Ray, Sphere,
-    BoxGeometry, Mesh, MeshStandardMaterial,
+    BoxGeometry, Mesh, MeshStandardMaterial, Color,
 } from 'three';
 import { PlanetMapControls } from '@/PlanetMapControls';
 import { findPosForAreas, calcBuildingTrans } from '@/blueprint/planet';
@@ -10,6 +10,8 @@ import { reapplyLoadedModelMaterials, setSettingsProvider } from '@/models/glbLo
 import { IconTexture } from '@/iconTexture';
 import type { TextureSink } from '@/iconTexture';
 import type { TextureSettings, ViewerRenderSettings } from '@/renderSettingsTypes';
+import type { BuildingPickPayload, ThemeColors, ThemeName } from '../types';
+import { THEME_PALETTE, resolveTheme } from './theme';
 import { PLANET_RADIUS, PLANET_SEGMENT } from '@/planetConstants';
 import { createPlanetScene } from './planetScene';
 import type { PlanetSceneParts } from './planetScene';
@@ -48,7 +50,7 @@ export interface RenderCoreOptions {
      */
     textureSettings?: () => TextureSettings;
     callbacks?: {
-        onBuildingSelect?(index: number | null): void;
+        onBuildingSelect?(pick: BuildingPickPayload | null): void;
         onBuildingRemove?(index: number): void;
         onCameraChange?(): void;
         onRebuild?(info: { reason: RebuildReason; buildingCount: number; unknownModelIndexes: number[]; durationMs: number }): void;
@@ -85,6 +87,14 @@ export interface SceneBundle {
 const DEFAULT_PIXEL_RATIO_MAX = 2;
 
 /**
+ * `focusBuilding` 的默认距离系数：相机到建筑中心的距离 = `PLANET_RADIUS * 0.5`。
+ *
+ * 旧实现在「target 挪到建筑上」的模型里实际距离被夹到 `1.04R ≈ 208`，画面太远；
+ * 这里取 `0.5R ≈ 100.1`，即「拉近一倍」（约为旧值的 50%）。
+ */
+const FOCUS_DISTANCE_RATIO = 0.5;
+
+/**
  * 共享渲染内核：场景 / 相机 / renderer / controls / rAF 循环 / 重建 / dispose。
  *
  * **不依赖 Vue**（方案 D1），编辑器与 `BlueprintViewer` 共用。
@@ -104,6 +114,8 @@ export class RenderCore {
     private readonly iconTexture: IconTexture;
     private resizeObserver: ResizeObserver | null = null;
     private readonly pixelRatio: number;
+    /** 显式尺寸覆盖（对齐 v1 的 `setSize`）；非 null 时 ResizeObserver / `resize()` 不再改尺寸 */
+    private explicitSize: { w: number; h: number } | null = null;
 
     private bundle: SceneBundle | null = null;
     private data: BlueprintData | null = null;
@@ -115,6 +127,8 @@ export class RenderCore {
 
     private settings: ViewerRenderSettings;
     private callbacks: NonNullable<RenderCoreOptions['callbacks']>;
+    /** 当前主题色（默认 dark，与 v1 一致） */
+    private theme: ThemeColors = { ...THEME_PALETTE.dark };
     /** 模型到达 → 150ms 合并重建 */
     private modelTimer: number | null = null;
     private offModelsChanged: (() => void) | null = null;
@@ -170,6 +184,8 @@ export class RenderCore {
         this.scene = new Scene();
         this.planet = createPlanetScene(PLANET_RADIUS, PLANET_SEGMENT);
         this.scene.add(this.planet.root);
+        // 默认套用 dark 主题（与 v1 一致：v1 构造时 `currentTheme = resolveTheme(theme || 'dark')`）
+        this.applyTheme();
 
         // 相机
         this._camera = new PerspectiveCamera(50);
@@ -219,7 +235,7 @@ export class RenderCore {
             const index = this.pick(e);
             // 点击即选中：内部先更新高亮，再通知宿主（宿主的日志与视觉同时变化）
             this.setSelectedIndex(index);
-            this.callbacks.onBuildingSelect?.(index);
+            this.callbacks.onBuildingSelect?.(this.pickPayload(index));
         };
         this.onMouseDown = (e: MouseEvent) => {
             if (e.button === 2)
@@ -277,6 +293,8 @@ export class RenderCore {
             this.data = previous;
             throw e;
         }
+        // 对齐 v1：换蓝图后选中态清空（旧下标落到新蓝图上会指向另一栋建筑，宿主无法预期）
+        this.clearSelection();
     }
 
     /** 原地修改 data 后调用（阶段 C 的编辑器依赖它） */
@@ -306,6 +324,84 @@ export class RenderCore {
     /** 窗口/容器尺寸同步 */
     resize(): void {
         this.syncSize();
+    }
+
+    /**
+     * 切换主题（对齐 v1 `setTheme`）。
+     *
+     * 立即改三处：场景背景、星球球体色、经纬网格色。角标文字颜色只在**下次重建**时生效
+     * （文字是烘进一张 canvas 纹理的，宽度与 v1 同一实现——v1 也是如此）。
+     */
+    setTheme(theme: ThemeName): void {
+        if (this.disposed)
+            return;
+        this.theme = resolveTheme(theme);
+        this.applyTheme();
+    }
+
+    /** 在**当前**主题上覆盖若干颜色（对齐 v1 `setCustomTheme`） */
+    setCustomTheme(patch: Partial<ThemeColors>): void {
+        if (this.disposed)
+            return;
+        this.theme = { ...this.theme, ...patch };
+        this.applyTheme();
+    }
+
+    /** 当前生效的主题色（副本） */
+    getTheme(): ThemeColors {
+        return { ...this.theme };
+    }
+
+    private applyTheme(): void {
+        this.scene.background = new Color(this.theme.sceneBackground);
+        this.planet.sphereMaterial.color.setHex(this.theme.planet);
+        this.planet.gridMaterial.color.setHex(this.theme.grid);
+    }
+
+    /**
+     * 导出当前画面为 base64 PNG（对齐 v1 `toDataURL`）。
+     *
+     * ⚠️ 必须先 `render()`：`WebGLRenderer` 默认 `preserveDrawingBuffer: false`，
+     * 在 rAF 之外直接读 canvas 会拿到空白图。v1 就是这么写的。
+     */
+    toDataURL(): string {
+        this.renderer.render(this.scene, this._camera);
+        return this.renderer.domElement.toDataURL();
+    }
+
+    /** 导出当前画面为 Blob（对齐 v1 `toBlob`） */
+    toBlob(): Promise<Blob | null> {
+        this.renderer.render(this.scene, this._camera);
+        return new Promise<Blob | null>(resolve => this.renderer.domElement.toBlob(resolve));
+    }
+
+    /**
+     * 显式设置渲染尺寸（对齐 v1 的 `setSize(w, h)`）。
+     *
+     * 与 v1 的差别（有意改进）：v1 的尺寸会被随后的 `window.resize` 无条件覆盖；
+     * 这里记住 `explicitSize`，之后 `ResizeObserver` 与 `resize()` 都不再改尺寸，
+     * 直到调用 `clearExplicitSize()` 恢复「跟随容器」。
+     */
+    setSize(w: number, h: number): void {
+        if (this.disposed)
+            return;
+        const width = Math.max(1, w);
+        const height = Math.max(1, h);
+        this.explicitSize = { w: width, h: height };
+        this.applySize(width, height);
+    }
+
+    /** 取消显式尺寸，恢复跟随容器 */
+    clearExplicitSize(): void {
+        if (this.disposed || this.explicitSize === null)
+            return;
+        this.explicitSize = null;
+        this.syncSize();
+    }
+
+    /** 当前是否处于显式尺寸模式 */
+    get hasExplicitSize(): boolean {
+        return this.explicitSize !== null;
     }
 
     setCallbacks(cbs: NonNullable<RenderCoreOptions['callbacks']>): void {
@@ -367,21 +463,65 @@ export class RenderCore {
     }
 
     /**
-     * 把镜头推到指定数组下标的建筑。
+     * 把镜头对准指定数组下标的建筑（镜头居中对齐），**不锁定镜头**。
      *
-     * `distance` 省略时取 `PLANET_RADIUS * 0.35`（近景但不穿模）。
-     * 返回是否成功；相机由 `controls.focusOn` 摆位，不需要额外取景。
+     * 相机放在「建筑中心 + 建筑法线 × distance」并看向球心：
+     * 建筑正好位于「球心 → 相机」的视线上，因此精确落在画面中心；同时 `controls.target`
+     * 保持在球心，聚焦之后缩放/旋转/平移完全照常（详见 `PlanetMapControls.focusSpherePoint`）。
+     *
+     * `distance` 是**相机到建筑中心的距离**（≈ 离地高度），省略时取 `PLANET_RADIUS * 0.5 ≈ 100.1`。
+     * 下限受控件约束：`|camera| ≥ minDistance = 1.04R`，即 `distance` 小于 `0.04R ≈ 8` 时会被抬到最近处。
+     *
+     * 返回是否成功；未知 modelIndex 的占位盒落在球心，视为不可定位。
      */
     focusBuilding(index: number, distance?: number): boolean {
         if (this.disposed)
             return false;
-        const boxes = this.bundle?.bvh.boxes;
-        const box = boxes?.[index];
+        const box = this.bundle?.bvh.boxes[index];
         if (box === undefined)
             return false;
+
         const center = new Vector3().setFromMatrixPosition(box);
-        this.controls.focusOn(center, distance ?? PLANET_RADIUS * 0.35);
+        // 未知 modelIndex 的占位盒缩放 1e-6、平移为 0 → 位置在球心；对它聚焦等于钻进星球
+        if (center.lengthSq() < PLANET_RADIUS * PLANET_RADIUS * 1e-3)
+            return false;
+
+        const d = Math.max(distance ?? FOCUS_DISTANCE_RATIO * PLANET_RADIUS, 1);
+        this.controls.focusSpherePoint(center, d);
         return true;
+    }
+
+    /**
+     * 对齐 v1 `getBuildingInfo(index)`：返回该下标的实例世界矩阵。
+     *
+     * 越界或该建筑没有模型引用（未知 modelIndex 的隐藏占位）时返回 null，由门面转成结构化错误。
+     */
+    getBuildingInfo(index: number): { index: number; matrix: Matrix4 } | null {
+        const matrix = this.getBuildingModel(index);
+        return matrix === null ? null : { index, matrix };
+    }
+
+    /** 清除选中（对齐 v1 `clearBuildings()` 里 `selectedIndex = null` 的语义） */
+    clearSelection(): void {
+        this.setSelectedIndex(null);
+    }
+
+    /** 该下标建筑是否是未知 modelIndex（没有 `buildingMeta`，只能放隐藏占位盒） */
+    isUnknownModel(index: number): boolean {
+        if (this.bundle === null)
+            return false;
+        const building = this.data?.buildings[index];
+        if (building === undefined)
+            return false;
+        return this.bundle.unknownModelIndexes.includes(building.modelIndex);
+    }
+
+    /** 把数组下标包成 `{ index, id }`；`id` 取蓝图里的建筑ID，缺失时回退为下标 */
+    private pickPayload(index: number | null): BuildingPickPayload | null {
+        if (index === null)
+            return null;
+        const id = this.data?.buildings[index]?.index;
+        return { index, id: id === undefined ? index : id };
     }
 
     /** 最近一次成功构建的建筑总数；未加载时为 0 */
@@ -537,6 +677,8 @@ export class RenderCore {
                 textureSink: this.renderer,
                 iconTexture: this.iconTexture,
                 textureSettings: this.textureSettingsProvider(),
+                // 角标文字颜色来自主题（文字烘在 canvas 纹理里，只有重建才会重新生成）
+                textStyle: { fill: this.theme.textFill, stroke: this.theme.textStroke },
                 // 重建时不重挂贴图：材质是共享对象，模型加载时已经套过；
                 // 只有 texturesEnabled 变更才需要重挂（见 setRenderSettings），
                 // 否则每次重建都会对全部已加载模型重复执行一遍贴图流程。
@@ -581,14 +723,21 @@ export class RenderCore {
             this.setSelectedIndex(this.selectBoxIndex);
     }
 
-    private syncSize(): void {
-        const rect = this.container.getBoundingClientRect();
-        const width = Math.max(1, rect.width);
-        const height = Math.max(1, rect.height);
+    private applySize(width: number, height: number): void {
         this.renderer.setPixelRatio(this.pixelRatio);
         this.renderer.setSize(width, height);
         this._camera.aspect = width / height;
         this._camera.updateProjectionMatrix();
+    }
+
+    private syncSize(): void {
+        if (this.explicitSize !== null) {
+            // 显式尺寸优先：ResizeObserver / resize() 都不覆盖
+            this.applySize(this.explicitSize.w, this.explicitSize.h);
+            return;
+        }
+        const rect = this.container.getBoundingClientRect();
+        this.applySize(Math.max(1, rect.width), Math.max(1, rect.height));
     }
 
     /** 屏幕坐标拾取：BVH + 星球遮挡判定（沿用编辑器语义） */

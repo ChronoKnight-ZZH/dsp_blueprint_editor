@@ -1,3 +1,4 @@
+import type { PerspectiveCamera } from 'three';
 import type { BlueprintData } from '@/blueprint/parser';
 import { fromStr } from '@/blueprint/parser';
 import type { ViewerRenderSettings } from '@/renderSettingsTypes';
@@ -5,8 +6,9 @@ import { RenderCore, RenderPhaseError } from './core/RenderCore';
 import type { RebuildReason } from './core/RenderCore';
 import { JSONImportError, parseBlueprintJSON, stringifyBlueprintJSON } from './blueprintJSON';
 import type {
-    BlueprintLoadOutcome, BlueprintLoadResult, SettingsPort,
-    ViewerCallbacks, ViewerError, ViewerErrorCode, ViewerErrorPhase, ViewerOptions,
+    BlueprintLoadOutcome, BlueprintLoadResult, BuildingInfoPayload, BuildingLocateResult,
+    FocusOptions, SettingsPort, ThemeColors, ThemeName, ViewerCallbacks, ViewerError,
+    ViewerErrorCode, ViewerErrorPhase, ViewerOptions, ViewerQueryResult,
 } from './types';
 
 /** 默认设置：与 `@/renderSettings` 的默认值保持一致 */
@@ -108,7 +110,8 @@ export class BlueprintViewer {
 
     constructor(options: ViewerOptions, callbacks?: ViewerCallbacks) {
         this.callbacks = callbacks ?? {};
-        this.keepCamera = options.keepCamera === true;
+        // 对齐 v1：加载后默认保留当前相机（宿主自己决定何时 resetCamera）
+        this.keepCamera = options.keepCamera !== false;
 
         // 平铺字段是 initialSettings 的语法糖；用条件展开构造，
         // 避免对 `ViewerRenderSettings` 的 readonly 属性做赋值（TS2540）
@@ -141,7 +144,7 @@ export class BlueprintViewer {
                 autoResize: options.autoResize,
                 pixelRatio: options.pixelRatio,
                 callbacks: {
-                    onBuildingSelect: index => this.callbacks.onBuildingSelect?.(index),
+                    onBuildingSelect: pick => this.callbacks.onBuildingSelect?.(pick),
                     onBuildingRemove: index => this.callbacks.onBuildingRemove?.(index),
                     onCameraChange: () => this.callbacks.onCameraChange?.(),
                     onRebuild: info => this.callbacks.onRebuild?.({
@@ -152,6 +155,13 @@ export class BlueprintViewer {
                     }),
                 },
             });
+            // 对齐 v1 构造参数 width/height：显式尺寸优先于容器尺寸
+            if (options.width !== undefined || options.height !== undefined) {
+                const rect = el.getBoundingClientRect();
+                this.core.setSize(options.width ?? rect.width, options.height ?? rect.height);
+            }
+            // 对齐 v1 构造参数 theme：默认 dark
+            this.core.setTheme(options.theme ?? 'dark');
         }
         catch (e) {
             // 例如 WebGL 不可用
@@ -233,6 +243,186 @@ export class BlueprintViewer {
         this.core.resetCamera();
     }
 
+    // ------------------------------------------------------------ 选中 / 定位 / 查询
+
+    /**
+     * 选中建筑（只点亮高亮盒，**不动相机**；对齐 v1 `selectBuilding`）。
+     *
+     * `index` 是 `BlueprintData.buildings` 的数组下标；传 `null` 取消选中。
+     * 下标越界时按建筑ID兜底再查一次（D1：两者在实践中几乎总相等）。
+     *
+     * 失败：`not-loaded`（未加载）、`building-not-found`（找不到）、`already-disposed`。
+     */
+    selectBuilding(index: number | null): BuildingLocateResult {
+        const guard = this.guard();
+        if (guard !== null)
+            return guard;
+        const core = this.core;
+        if (core === null)
+            return this.failLocate('no-webgl', '渲染内核未初始化');
+
+        if (index === null) {
+            core.clearSelection();
+            return { ok: true, index: -1 };
+        }
+
+        if (this.data === null)
+            return this.failLocate('not-loaded', '尚未加载蓝图');
+
+        const resolved = this.resolveIndex(index);
+        if (resolved === null)
+            return this.failLocate('building-not-found', `找不到建筑：${index}`);
+
+        core.setSelectedIndex(resolved);
+        return { ok: true, index: resolved };
+    }
+
+    /**
+     * 镜头居中对齐到指定建筑（**新增能力**，v1 没有），且**不锁定镜头**。
+     *
+     * 语义：相机搬到「建筑中心 + 建筑法线 × distance」并看向球心，建筑精确落在画面中心；
+     * 控件目标点仍在球心，因此聚焦后滚轮缩放、拖拽旋转、平移都照常工作。
+     * `index === null` 等价 `resetCamera()`（回全局默认视角）。
+     *
+     * 默认会同时选中该建筑（`options.select !== false`），因此一条调用即可完成
+     * 「选中建筑 + 镜头居中」。
+     *
+     * 失败：`not-loaded`、`building-not-found`、`not-renderable`（未知 modelIndex，镜头不动）、`already-disposed`。
+     */
+    focusBuilding(index: number | null, options: FocusOptions = {}): BuildingLocateResult {
+        const guard = this.guard();
+        if (guard !== null)
+            return guard;
+        const core = this.core;
+        if (core === null)
+            return this.failLocate('no-webgl', '渲染内核未初始化');
+
+        if (index === null) {
+            core.resetCamera();
+            return { ok: true, index: -1 };
+        }
+
+        if (this.data === null)
+            return this.failLocate('not-loaded', '尚未加载蓝图');
+
+        const resolved = this.resolveIndex(index);
+        if (resolved === null)
+            return this.failLocate('building-not-found', `找不到建筑：${index}`);
+        if (core.isUnknownModel(resolved))
+            return this.failLocate('not-renderable', `建筑 ${index} 没有 buildingMeta，无法定位`);
+
+        if (options.select !== false)
+            core.setSelectedIndex(resolved);
+
+        const ok = core.focusBuilding(resolved, options.distance);
+        return ok ? { ok: true, index: resolved } : this.failLocate('building-not-found', `定位失败：${index}`);
+    }
+
+    /** 当前选中建筑的数组下标；无选中或未加载返回 `null` */
+    getSelectedIndex(): number | null {
+        return this.core?.selectedIndex ?? null;
+    }
+
+    /**
+     * 获取建筑信息（对齐 v1 `getBuildingInfo(index)`）：返回该下标的实例世界矩阵。
+     *
+     * 失败：`not-loaded`、`not-renderable`（未知 modelIndex 的隐藏占位，没有可用矩阵）。
+     */
+    getBuildingInfo(index: number): ViewerQueryResult<BuildingInfoPayload> {
+        const guard = this.guard();
+        if (guard !== null)
+            return guard;
+        const data = this.data;
+        const core = this.core;
+        if (data === null || core === null)
+            return this.failQuery('not-loaded', '尚未加载蓝图');
+
+        const info = core.getBuildingInfo(index);
+        if (info === null) {
+            const building = data.buildings[index];
+            if (building === undefined)
+                return this.failQuery('building-not-found', `找不到建筑：${index}`);
+            return this.failQuery('not-renderable', `建筑 ${index} 没有可渲染矩阵（未知 modelIndex）`);
+        }
+
+        const building = data.buildings[index];
+        return {
+            ok: true,
+            value: { index, id: building?.index ?? index, matrix: info.matrix },
+        };
+    }
+
+    /** 相机对象（只读用途：宿主取朝向/位置或自己做投影）；初始化失败时返回 `null` */
+    getCamera(): PerspectiveCamera | null {
+        return this.core?.camera ?? null;
+    }
+
+    /** 相机版本号：仅在相机真的变化的帧自增，可用来做「视角是否变过」的判定 */
+    getCameraVersion(): number {
+        return this.core?.cameraVersion ?? 0;
+    }
+
+    /** 渲染用 canvas；未初始化时返回 `null` */
+    getCanvas(): HTMLCanvasElement | null {
+        return this.core?.rendererRef.domElement ?? null;
+    }
+
+    /**
+     * 显式设置渲染尺寸（对齐 v1 `setSize(w, h)`）。
+     *
+     * 设置后容器 resize 不再覆盖尺寸；调用 `resetSize()` 恢复跟随容器。
+     */
+    setSize(w: number, h: number): void {
+        this.core?.setSize(w, h);
+    }
+
+    /** 取消显式尺寸，恢复跟随容器（v2 新增，v1 没有对应方法） */
+    resetSize(): void {
+        this.core?.clearExplicitSize();
+    }
+
+    // ------------------------------------------------------------ 主题 / 导出
+
+    /**
+     * 切换 3D 主题（对齐 v1 `setTheme`）。
+     *
+     * 立即生效：场景背景、星球色、网格色。角标文字颜色要等下次重建（换蓝图）才刷新。
+     * 构造时可通过 `theme` 选项指定初始主题，默认 `'dark'`。
+     */
+    setTheme(theme: ThemeName): void {
+        this.core?.setTheme(theme);
+    }
+
+    /** 在当前主题上覆盖若干颜色（对齐 v1 `setCustomTheme`） */
+    setCustomTheme(patch: Partial<ThemeColors>): void {
+        this.core?.setCustomTheme(patch);
+    }
+
+    /** 当前生效的主题色（对齐 v1 `getTheme`）；未初始化或已销毁时返回 `null` */
+    getTheme(): ThemeColors | null {
+        if (this.disposed || this.core === null)
+            return null;
+        return this.core.getTheme();
+    }
+
+    /**
+     * 导出当前画面为 base64 PNG（对齐 v1 `toDataURL`）。
+     *
+     * 未初始化时返回 `null`。内部会先渲染一帧再取图，可直接在 rAF 之外调用。
+     */
+    toDataURL(): string | null {
+        if (this.disposed || this.core === null)
+            return null;
+        return this.core.toDataURL();
+    }
+
+    /** 导出当前画面为 Blob（对齐 v1 `toBlob`）；未初始化时 resolve `null` */
+    toBlob(): Promise<Blob | null> {
+        if (this.disposed || this.core === null)
+            return Promise.resolve(null);
+        return this.core.toBlob();
+    }
+
     setRenderSettings(partial: Partial<ViewerRenderSettings>): void {
         if (this.disposed || this.core === null)
             return;
@@ -247,8 +437,24 @@ export class BlueprintViewer {
         }
     }
 
-    setCallbacks(cbs: ViewerCallbacks): void {
-        this.callbacks = { ...this.callbacks, ...cbs };
+    /**
+     * 更新事件回调。
+     *
+     * **默认整体替换**（对齐 v1 `setCallbacks`）；传 `{ merge: true }` 则是合并（v2 旧行为）。
+     */
+    setCallbacks(cbs: ViewerCallbacks, opts?: { merge?: boolean }): void {
+        this.callbacks = opts?.merge === true ? { ...this.callbacks, ...cbs } : cbs;
+        this.core?.setCallbacks({
+            onBuildingSelect: pick => this.callbacks.onBuildingSelect?.(pick),
+            onBuildingRemove: index => this.callbacks.onBuildingRemove?.(index),
+            onCameraChange: () => this.callbacks.onCameraChange?.(),
+            onRebuild: info => this.callbacks.onRebuild?.({
+                reason: info.reason as RebuildReason,
+                buildingCount: info.buildingCount,
+                unknownModelIndexes: info.unknownModelIndexes,
+                durationMs: info.durationMs,
+            }),
+        });
     }
 
     dispose(): void {
@@ -280,6 +486,35 @@ export class BlueprintViewer {
         this.reportError(error);
         // 失败保留上一次成功的数据与场景（方案 §6.4）
         return { ok: false, error };
+    }
+
+    /** 查询类失败（`selectBuilding` / `focusBuilding` 共用） */
+    private failLocate(code: ViewerErrorCode, message: string): { ok: false; error: ViewerError } {
+        const error: ViewerError = { code, phase: 'lifecycle', message };
+        this.reportError(error);
+        return { ok: false, error };
+    }
+
+    /** 查询类失败（`getBuildingInfo` 等返回值类查询用） */
+    private failQuery(code: ViewerErrorCode, message: string): { ok: false; error: ViewerError } {
+        return this.failLocate(code, message);
+    }
+
+    /**
+     * 把宿主传入的标识解析成数组下标（D1）。
+     *
+     * 先按数组下标取（对齐 v1 语义）；该位置不存在、或该位置的建筑ID与传入值不一致时，
+     * 再按 `BlueprintBuilding.index` 兜底查一次 —— 蓝图按区域分组存储，二者通常相等但不保证。
+     * 解析失败返回 `null`。
+     */
+    private resolveIndex(index: number): number | null {
+        const buildings = this.data?.buildings;
+        if (buildings === undefined)
+            return null;
+        if (index >= 0 && index < buildings.length)
+            return index;
+        const found = buildings.findIndex(b => b.index === index);
+        return found === -1 ? null : found;
     }
 
     private applyData(data: BlueprintData): BlueprintLoadOutcome {

@@ -3,6 +3,7 @@
  *
  * 目的：证明 `new BlueprintViewer({ container })` + `loadBlueprint(str)` 这条
  * 主链路能在真实浏览器里跑通——单测与 build 都验证不了 WebGL 实际渲染效果。
+ * 并对齐 v1 的 18 条实例方法 + 新增的 `focusBuilding`（镜头居中对齐）。
  *
  * 访问：`yarn serve` 后打开 http://localhost:8080/dsp_blueprint_editor/demo/
  * （publicPath 是 /dsp_blueprint_editor/，见 vue.config.js）
@@ -56,7 +57,10 @@ function createViewer() {
     viewer = new BlueprintViewer(
         { container: '#viewer', ...readSettings() },
         {
-            onBuildingSelect: index => log(`onBuildingSelect: ${index}`),
+            // 对齐后回传 { index, id }：id 是建筑ID（BlueprintBuilding.index），索引是数组下标
+            onBuildingSelect: pick => log(pick === null
+                ? 'onBuildingSelect: 点空'
+                : `onBuildingSelect: buildingId=${pick.id} index=${pick.index}`),
             onCameraChange: () => { /* 高频回调，不打日志 */ },
             onRebuild: info => log(`onRebuild: reason=${info.reason} buildings=${info.buildingCount} ${info.durationMs}ms`),
             onError: (e: ViewerError) => log(`onError: ${e.code} (${e.phase}) ${e.message}`, 'err'),
@@ -132,6 +136,104 @@ for (const el of [showRealModelsEl, texturesEnabledEl, maxInstancesEl]) {
 document.getElementById('btnGetData')!.addEventListener('click', () => {
     const data = viewer === null ? null : viewer.getBlueprintData();
     log(`getBlueprintData(): ${data === null ? 'null' : `buildings=${data.buildings.length}`}`);
+});
+
+// ---------------------------------------------------------------- 选中 / 定位
+
+function reportLocate(label: string, r: { ok: true; index: number } | { ok: false; error: ViewerError }) {
+    log(r.ok
+        ? `${label} → ok, index=${r.index}`
+        : `${label} → ${r.error.code}: ${r.error.message}`, r.ok ? '' : 'err');
+}
+
+document.getElementById('btnSelect3')!.addEventListener('click', () => {
+    if (viewer === null) return log('viewer 不存在', 'err');
+    reportLocate('selectBuilding(3)', viewer.selectBuilding(3));
+});
+
+document.getElementById('btnSelectNull')!.addEventListener('click', () => {
+    if (viewer === null) return log('viewer 不存在', 'err');
+    reportLocate('selectBuilding(null)', viewer.selectBuilding(null));
+});
+
+document.getElementById('btnFocus3')!.addEventListener('click', () => {
+    if (viewer === null) return log('viewer 不存在', 'err');
+    const v0 = viewer.getCameraVersion();
+    reportLocate('focusBuilding(3)', viewer.focusBuilding(3));
+    const cam = viewer.getCamera();
+    log(`cameraVersion: ${v0} → ${viewer.getCameraVersion()}，selectedIndex=${viewer.getSelectedIndex()}`
+        + (cam === null ? '' : `，相机到球心 ${cam.position.length().toFixed(1)}（离地 ≈ ${(cam.position.length() - 200.2).toFixed(1)}）`));
+    log('聚焦不锁镜头：现在可直接滚轮缩放 / 拖拽旋转');
+});
+
+document.getElementById('btnFocusNull')!.addEventListener('click', () => {
+    if (viewer === null) return log('viewer 不存在', 'err');
+    reportLocate('focusBuilding(null) → resetCamera', viewer.focusBuilding(null));
+});
+
+document.getElementById('btnSelectedIndex')!.addEventListener('click', () => {
+    const index = viewer === null ? null : viewer.getSelectedIndex();
+    log(`getSelectedIndex(): ${index === null ? 'null（无选中）' : index}`);
+});
+
+document.getElementById('btnBuildingInfo')!.addEventListener('click', () => {
+    if (viewer === null) return log('viewer 不存在', 'err');
+    const out = viewer.getBuildingInfo(3);
+    if (!out.ok) return log(`getBuildingInfo(3) → ${out.error.code}: ${out.error.message}`, 'err');
+    const { index, id, matrix } = out.value;
+    const pos = matrix.elements.slice(12, 15).map(n => n.toFixed(2)).join(', ');
+    log(`getBuildingInfo(3): index=${index} id=${id} 位置=(${pos})`);
+});
+
+document.getElementById('btnCameraVersion')!.addEventListener('click', () => {
+    log(`getCameraVersion(): ${viewer === null ? 0 : viewer.getCameraVersion()}`);
+});
+
+// ---------------------------------------------------------------- 尺寸 / 画布
+
+document.getElementById('btnSetSize')!.addEventListener('click', () => {
+    viewer?.setSize(400, 300);
+    log('setSize(400, 300)：此后容器 resize 不再覆盖尺寸（用 resetSize 恢复）');
+});
+
+document.getElementById('btnResetSize')!.addEventListener('click', () => {
+    viewer?.resetSize();
+    log('resetSize()：恢复跟随容器尺寸');
+});
+
+document.getElementById('btnGetCanvas')!.addEventListener('click', () => {
+    const canvas = viewer === null ? null : viewer.getCanvas();
+    log(canvas === null
+        ? 'getCanvas(): null'
+        : `getCanvas(): <${canvas.tagName.toLowerCase()}> ${canvas.width}×${canvas.height}（CSS 尺寸 ${canvas.clientWidth}×${canvas.clientHeight}）`);
+});
+
+// ---------------------------------------------------------------- 主题 / 导出
+
+for (const [id, theme] of [['btnThemeDark', 'dark'], ['btnThemeLight', 'light'], ['btnThemeAuto', 'auto']] as const) {
+    document.getElementById(id)!.addEventListener('click', () => {
+        viewer?.setTheme(theme);
+        log(`setTheme('${theme}')`);
+    });
+}
+
+document.getElementById('btnGetTheme')!.addEventListener('click', () => {
+    const t = viewer === null ? null : viewer.getTheme();
+    log(t === null
+        ? 'getTheme(): null'
+        : `getTheme(): bg=#${t.sceneBackground.toString(16)} planet=#${t.planet.toString(16)} grid=#${t.grid.toString(16)} text=${t.textFill}/${t.textStroke}`);
+});
+
+document.getElementById('btnDataURL')!.addEventListener('click', () => {
+    const url = viewer === null ? null : viewer.toDataURL();
+    log(url === null
+        ? 'toDataURL(): null'
+        : `toDataURL(): ${url.slice(0, 40)}…（长度 ${url.length}，${url.length > 64 ? '非空白' : '可能为空白图'}）`);
+});
+
+document.getElementById('btnToBlob')!.addEventListener('click', async () => {
+    const blob = viewer === null ? null : await viewer.toBlob();
+    log(blob === null ? 'toBlob(): null' : `toBlob(): ${blob.type} ${blob.size} bytes`);
 });
 
 // 启动即创建 viewer，加载 fixture（demo 的最短路径）
