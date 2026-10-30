@@ -20,6 +20,7 @@ import type { ModelAlign, ModelTransform, ModelUpAxis } from '@/data/modelTransf
 import { availableModelNames, modelNameCandidates, resolveModelName } from './glbAssets';
 import { getLoadedGlbModel, loadGlbModel, onGlbModelLoaded, glbFailedModels } from './glbLoader';
 import type { LoadedGlbModel } from './glbLoader';
+import { GRID_HORIZONTAL, HEIGHT_GRID_SIZE } from '@/planetConstants';
 
 /** 模型来源：'glb' 外部模型，'meta' 元数据表回退，'unknown' 两边都没有 */
 export type ModelSource = 'glb' | 'meta' | 'unknown';
@@ -75,11 +76,6 @@ export function buildingModelName(modelIndex: number): string | null {
 }
 
 // ---------------------------------------------------------------- 放置参数
-
-/** 一个水平格对应的世界单位：2π / SEGMENT / GRID_PER_SEGMENT × R（见 planet.ts、BlueprintEditor 的 R/SEGMENT） */
-const GRID_HORIZONTAL = 2 * Math.PI / 200 / 5 * 200.2;
-/** 一个垂直格对应的世界单位：planet.ts 的 HEIGHT_GRID_SIZE */
-const GRID_VERTICAL = 4 / 3;
 
 const DEG_TO_RAD = Math.PI / 180;
 
@@ -173,7 +169,7 @@ export function buildModelPlacement(
     const placement = new Matrix4().makeTranslation(
         targetX + t.x * GRID_HORIZONTAL - offsetCenter.x,
         targetY + t.y * GRID_HORIZONTAL - offsetCenter.y,
-        targetZ + t.z * GRID_VERTICAL - offsetCenter.z,
+        targetZ + t.z * HEIGHT_GRID_SIZE - offsetCenter.z,
     );
     placement.multiply(entity);
     return placement;
