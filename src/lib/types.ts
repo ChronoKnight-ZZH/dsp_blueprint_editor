@@ -1,3 +1,4 @@
+import type { Matrix4 } from 'three';
 import type { BlueprintArea, BlueprintData } from '@/blueprint/parser';
 import type { ViewerRenderSettings } from '@/renderSettingsTypes';
 
@@ -27,8 +28,27 @@ export interface ViewerOptions {
     pixelRatio?: number;
     /** 键盘事件目标（相机平移/缩放的快捷键）。default: container */
     keyboardTarget?: HTMLElement | null;
-    /** `loadBlueprint` 成功后是否保留当前相机。default false → 自动回到默认视角 */
+    /**
+     * 加载成功后是否保留当前相机。
+     *
+     * **default true**（对齐 v1：换蓝图不清相机，由宿主自己决定何时 `resetCamera()`）；
+     * 传 `false` 回到「每次加载后自动回默认视角」的旧行为。
+     */
     keepCamera?: boolean;
+    /**
+     * 显式渲染尺寸（对齐 v1 的 `width` / `height` 构造参数）。
+     *
+     * 省略时跟随容器；一旦给出，构造后会调 `setSize(w, h)`，
+     * 之后的容器 resize **不再**覆盖它，直到宿主调用 `resetSize()` 恢复跟随容器。
+     */
+    width?: number;
+    height?: number;
+    /**
+     * 初始 3D 主题（对齐 v1 的 `theme` 构造参数）。
+     *
+     * `'auto'` 跟随系统 `prefers-color-scheme`。default `'dark'`。
+     */
+    theme?: ThemeName;
     /**
      * 设置读写端口。缺省时使用进程内存中的一份投影；
      * 与编辑器共用同一份设置时由宿主传入（见方案 §4.2）。
@@ -50,10 +70,53 @@ export interface SettingsPort {
     write(patch: Partial<ViewerRenderSettings>): void;
 }
 
+/**
+ * 点击拾取命中的建筑。
+ *
+ * 同时给两种标识：`index` 是 `BlueprintData.buildings` 的数组下标（决定选择盒 / BVH / 聚焦），
+ * `id` 是 `BlueprintBuilding.index`（蓝图里写在建筑记录里的稳定标识）。
+ */
+export interface BuildingPickPayload {
+    index: number;
+    id: number;
+}
+
+/** 按建筑下标返回的几何信息（对齐 v1 的 `getBuildingInfo` 返回值） */
+export interface BuildingInfoPayload {
+    /** 数组下标 */
+    index: number;
+    /** 建筑ID（`BlueprintBuilding.index`） */
+    id: number;
+    /** 建筑中心的世界矩阵；GLB 建筑是锚点矩阵，回退盒是实例矩阵 */
+    matrix: Matrix4;
+}
+
+/** 3D 场景主题名（对齐 v1） */
+export type ThemeName = 'dark' | 'light' | 'auto';
+
+/** 3D 场景主题色（对齐 v1 的 `ThemeColors`） */
+export interface ThemeColors {
+    /** 场景背景色（three 的 24 位色值） */
+    sceneBackground: number;
+    /** 星球球体颜色 */
+    planet: number;
+    /** 经纬网格颜色 */
+    grid: number;
+    /** 图标角标文字填充色（CSS 颜色字符串） */
+    textFill: string;
+    /** 图标角标文字描边色 */
+    textStroke: string;
+}
+
 /** 事件回调 */
 export interface ViewerCallbacks {
-    /** 点击拾取：返回建筑在 `BlueprintData.buildings` 中的下标；点空返回 null */
-    onBuildingSelect?(index: number | null): void;
+    /**
+     * 点击拾取：建筑在 `BlueprintData.buildings` 中的下标 + 建筑ID；点空返回 null。
+     *
+     * 打印由宿主自己负责（库内不写日志），例如：
+     * `onBuildingSelect: pick => pick && console.log('buildingId=', pick.id)`
+     */
+    onBuildingSelect?(pick: BuildingPickPayload | null): void;
     /** 右键剔除以外的移除请求（仅 `contextRemove` 开启时；Viewer 默认不开） */
     onBuildingRemove?(index: number): void;
     /** 相机变化。仅在 `controls.update()` 返回 true 的帧触发，同一帧最多一次 */
@@ -105,17 +168,46 @@ export type ViewerErrorCode =
     | 'no-container'
     | 'no-webgl'
     | 'already-disposed'
-    // 查询（selectBuilding / focusBuilding）
+    // 查询（selectBuilding / focusBuilding / getBuildingInfo）
     | 'not-loaded'
-    | 'building-not-found';
+    | 'building-not-found'
+    /** 建筑存在，但没有可渲染矩阵（未知 modelIndex 的占位盒在球心），无法定位 */
+    | 'not-renderable';
 
-/** 按建筑 id 定位的结果 */
-export interface BuildingLocateResult {
-    ok: boolean;
-    /** 命中的数组下标（成功时） */
-    index?: number;
-    /** 失败原因 */
-    error?: ViewerError;
+/**
+ * 按建筑标识定位的结果（`selectBuilding` / `focusBuilding`）。
+ *
+ * 成功时 `index` 是命中的**数组下标**；`selectBuilding(null)` 这类「清除」操作返回 `index: -1`。
+ */
+export type BuildingLocateResult =
+    | { ok: true; index: number }
+    | { ok: false; error: ViewerError };
+
+/** 通用查询结果：与 `BlueprintLoadOutcome` 同构，便于宿主统一按 `ok` 收窄 */
+export type ViewerQueryResult<T> =
+    | { ok: true; value: T }
+    | { ok: false; error: ViewerError };
+
+/**
+ * `focusBuilding` 的选项。
+ *
+ * 语义：把相机搬到「建筑中心 + 建筑法线 × distance」并看向球心，
+ * 建筑因此精确落在画面中心（「镜头居中对齐」）。
+ *
+ * **聚焦不锁镜头**：控件目标点始终是球心，聚焦之后滚轮缩放（= 改变离地高度）、
+ * 拖拽旋转、平移都照常工作。
+ */
+export interface FocusOptions {
+    /**
+     * 相机到**建筑中心**的距离（≈ 离地高度，世界单位）。
+     *
+     * default `PLANET_RADIUS * 0.5 ≈ 100.1`（约为旧版 1.04R ≈ 208 的一半）。
+     * 受控件约束的下限：`|camera| ≥ minDistance = 1.04R`，即传入小于 `0.04R ≈ 8` 时
+     * 会被抬到「贴地最近处」。
+     */
+    distance?: number;
+    /** 是否同时选中该建筑（点亮高亮盒）。default true */
+    select?: boolean;
 }
 
 export interface ViewerError {

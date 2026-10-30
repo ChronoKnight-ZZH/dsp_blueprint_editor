@@ -124,24 +124,32 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
     }
 
     /**
-     * 把镜头推到指定世界坐标（看向 `center`）。
+     * 把镜头对准球面某点，**`target` 始终保持在球心**。
      *
-     * 用于「按 id 选中建筑并设置镜头」（Viewer.focusBuilding）。
-     * `viewDir` 决定从哪个方向看：省略时取 `center` 相对星球球心的方向，
-     * 即从建筑正上方的太空俯瞰，与 `reset` 的直觉一致。
+     * 相机放在「点 + 该点法线 × distance」：因为目标点正好位于「球心 → 相机」这条视线上，
+     * 它会精确落在画面中心。
+     *
+     * ⚠️ 为什么不是把 `target` 挪到目标点再绕着它转：
+     * 本控件的模型是「绕球心轨道 + 半径 = 相机到 target 的距离」，而
+     *   - `update()` 会把半径夹在 `[minDistance, maxDistance]`（`1.04R ~ 4R`）；
+     *   - `rotate()` 的角速度按 `(半径 − targetRadius)` 计算，`targetRadius` 恒为星球半径。
+     * 一旦 target 挪到球面上，半径（≈100）小于 targetRadius（≈200）→ 半径差为负，
+     * 旋转反向且近乎失效；滚轮公式 `radius = targetRadius + (radius − targetRadius) × scale`
+     * 也会反向（想拉远反而变近）。表现就是「镜头被锁死、动不了」。
+     * 保持 target 在球心可完全避开：聚焦之后缩放（= 改变离地高度）、旋转、平移全部照常。
      */
-    focusOn(center: Vector3, distance: number, viewDir?: Vector3) {
-        this.target.copy(center);
+    focusSpherePoint(point: Vector3, distance: number) {
+        this.target.set(0, 0, 0);
         this.sphericalDelta.set(0, 0, 0);
         this.panOffset.set(0, 0, 0);
         this.scale = 1.0;
-        const dir = viewDir !== undefined && viewDir.lengthSq() > 0
-            ? viewDir.clone().normalize()
-            : center.clone().normalize();
-        // 退化情形（center 在球心）：回落到 +Z，避免零向量
+
+        const dir = point.clone().normalize();
+        // 退化情形（目标点在球心）：回落到 +Z，避免零向量
         if (dir.lengthSq() === 0)
             dir.set(0, 0, 1);
-        this.object.position.copy(center).addScaledVector(dir, distance);
+
+        this.object.position.copy(point).addScaledVector(dir, distance);
         this.object.lookAt(this.target);
         this.update();
     }
