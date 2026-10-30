@@ -4,44 +4,44 @@
 > 依据：`src/components/BlueprintEditor.vue`（814 行）、`src/models/*`、`src/blueprint/*`、`src/PlanetMapControls.ts`、`src/iconTexture.ts` 的实际代码，以及 `docs/CODE_WIKI.md` §6.7 / §16.5 / §16.9 / §16.10。
 > 本版替代 v1 草案；v1 与本版的差异见 §0。
 
----
+***
 
 ## 0. 本版改了什么
 
 ### 0.1 八条方向性决策（已确认）
 
-| 编号 | 方向 | 决策 | 直接影响 |
-| --- | --- | --- | --- |
-| D1 | Vue 依赖 | **彻底解耦**：`src/lib/core/` 不出现任何 `from 'vue'` 的 import，渲染设置改为参数注入 | 需改 `materialTextures.ts` 5 处读点、`glbLoader.ts` 2 处调用点 |
-| D2 | 设置归属 | **单一全局 + 持久化**，Viewer 通过 SettingsPort 做投影 | 同页多 Viewer 不能各用各的设置（写入 §8 限制） |
-| D3 | 交付形态 | **仅源码引用**，按可发布设计 API，但不建 lib 构建 | `assetBaseUrl` 等字段只占位不实现 |
-| D4 | 修复边界 | **允许顺带修**已确认缺陷 | A 阶段包含 4 项缺陷修复 + 1 项确定性修正（D7） |
-| D5 | 阶段 C | **本轮不做**，但预留接口 | 保留两份场景生命周期，接口先定 |
-| D6 | 多实例 | **只保证单实例**，多实例文档标记为不支持 | dispose 与缓存共享语义按单实例简化 |
-| D7 | 上限计数口径 | **按「存在 `glbName` 的实例数」判定**，不再依赖加载进度 | 编辑器渲染结果变得确定（同一蓝图同一设置可复现） |
-| D8 | 相机重置 | `loadBlueprint` 成功后**默认 `resetCamera()`**，`keepCamera: true` 关闭 | Viewer 换蓝图不再停在旧视角；编辑器不受影响 |
+| 编号 | 方向     | 决策                                                                  | 直接影响                                                 |
+| -- | ------ | ------------------------------------------------------------------- | ---------------------------------------------------- |
+| D1 | Vue 依赖 | **彻底解耦**：`src/lib/core/` 不出现任何 `from 'vue'` 的 import，渲染设置改为参数注入     | 需改 `materialTextures.ts` 5 处读点、`glbLoader.ts` 2 处调用点 |
+| D2 | 设置归属   | **单一全局 + 持久化**，Viewer 通过 SettingsPort 做投影                           | 同页多 Viewer 不能各用各的设置（写入 §8 限制）                        |
+| D3 | 交付形态   | **仅源码引用**，按可发布设计 API，但不建 lib 构建                                     | `assetBaseUrl` 等字段只占位不实现                             |
+| D4 | 修复边界   | **允许顺带修**已确认缺陷                                                      | A 阶段包含 4 项缺陷修复 + 1 项确定性修正（D7）                        |
+| D5 | 阶段 C   | **本轮不做**，但预留接口                                                      | 保留两份场景生命周期，接口先定                                      |
+| D6 | 多实例    | **只保证单实例**，多实例文档标记为不支持                                              | dispose 与缓存共享语义按单实例简化                                |
+| D7 | 上限计数口径 | **按「存在** **`glbName`** **的实例数」判定**，不再依赖加载进度                         | 编辑器渲染结果变得确定（同一蓝图同一设置可复现）                             |
+| D8 | 相机重置   | `loadBlueprint` 成功后**默认** **`resetCamera()`**，`keepCamera: true` 关闭 | Viewer 换蓝图不再停在旧视角；编辑器不受影响                            |
 
 ### 0.2 相对 v1 的契约修正（重要）
 
-| # | v1 的问题 | v2 的处理 |
-| --- | --- | --- |
-| 12 | 方案原定 `core/settings.ts` 放设置定义 | 实施中改为 `src/renderSettingsTypes.ts`：`materialTextures` / `glbLoader` 也要用这些类型，放进 `lib/core` 会造成 `models → lib` 的反向依赖 |
-| --- | --- | --- |
-| 1 | 「纯 TS 不依赖 Vue」与 `renderSettings.ts` 的 `reactive` 单例冲突 | D1：core 收 `ViewerRenderSettings` 参数，不再模块内读全局；Vue 侧保留单例作为 port 实现 |
-| 2 | `RenderSettings` 与 `src/renderSettings.ts` 同名不同形（缺 `textures` 7 通道） | 改用显式的 `ViewerRenderSettings`（三字段），并在 `renderSettings.ts` 加双向可赋值断言；禁止另起同名类型 |
-| 3 | 把「`texturesEnabled` 是否重建」列为未决风险 | 已定论：**只走 reapply，不重建**（§4.1） |
-| 4 | `setBlueprintData` 注释写「返回 `{buildings, bvh, pos}`」而签名是 `: void` | 定稿为 `void`，诊断数据走 `getSceneModel()`（§3.3） |
-| 5 | `dispose()` 未定义释放边界 | 两张清单：必释放 / 禁止释放（§6.5） |
-| 6 | `buildBVH` 用 `!` 断言，与 `buildBoxes` 的兜底意图相反 | 列为 A 阶段必须修的现存缺陷（§5 第 10 行） |
-| 7 | `{ error: string }` 无法区分可修复/内部缺陷 | `error.code + error.phase` 结构化（§6.4） |
-| 8 | 缺少模型懒加载后的重建、原地改数据入口 | 新增 `notifyDataChanged()`、模型到达自动重建（§6.2） |
-| 9 | `ViewerOptions` 缺尺寸/键盘/相机策略 | 补齐 `autoResize / pixelRatio / keyboardTarget / keepCamera`（§3.1） |
-| 10 | 单测要求「dispose 后无残留 canvas」但 jsdom 无 WebGL | 渲染器与纹理 sink 可注入（§3.3、§7.4） |
-| 11 | 多处引用 `lib-README.md` 的既有约定 | 仓库中无此文件，v2 改为「新建」，其约定由本方案重新定义 |
+| #   | v1 的问题                                                              | v2 的处理                                                                                                             |
+| --- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| 12  | 方案原定 `core/settings.ts` 放设置定义                                       | 实施中改为 `src/renderSettingsTypes.ts`：`materialTextures` / `glbLoader` 也要用这些类型，放进 `lib/core` 会造成 `models → lib` 的反向依赖 |
+| --- | ---                                                                 | ---                                                                                                                |
+| 1   | 「纯 TS 不依赖 Vue」与 `renderSettings.ts` 的 `reactive` 单例冲突               | D1：core 收 `ViewerRenderSettings` 参数，不再模块内读全局；Vue 侧保留单例作为 port 实现                                                   |
+| 2   | `RenderSettings` 与 `src/renderSettings.ts` 同名不同形（缺 `textures` 7 通道） | 改用显式的 `ViewerRenderSettings`（三字段），并在 `renderSettings.ts` 加双向可赋值断言；禁止另起同名类型                                         |
+| 3   | 把「`texturesEnabled` 是否重建」列为未决风险                                     | 已定论：**只走 reapply，不重建**（§4.1）                                                                                       |
+| 4   | `setBlueprintData` 注释写「返回 `{buildings, bvh, pos}`」而签名是 `: void`     | 定稿为 `void`，诊断数据走 `getSceneModel()`（§3.3）                                                                           |
+| 5   | `dispose()` 未定义释放边界                                                 | 两张清单：必释放 / 禁止释放（§6.5）                                                                                              |
+| 6   | `buildBVH` 用 `!` 断言，与 `buildBoxes` 的兜底意图相反                          | 列为 A 阶段必须修的现存缺陷（§5 第 10 行）                                                                                         |
+| 7   | `{ error: string }` 无法区分可修复/内部缺陷                                    | `error.code + error.phase` 结构化（§6.4）                                                                               |
+| 8   | 缺少模型懒加载后的重建、原地改数据入口                                                 | 新增 `notifyDataChanged()`、模型到达自动重建（§6.2）                                                                            |
+| 9   | `ViewerOptions` 缺尺寸/键盘/相机策略                                         | 补齐 `autoResize / pixelRatio / keyboardTarget / keepCamera`（§3.1）                                                   |
+| 10  | 单测要求「dispose 后无残留 canvas」但 jsdom 无 WebGL                            | 渲染器与纹理 sink 可注入（§3.3、§7.4）                                                                                         |
+| 11  | 多处引用 `lib-README.md` 的既有约定                                          | 仓库中无此文件，v2 改为「新建」，其约定由本方案重新定义                                                                                      |
 
 > 一并更正：评审中「`ViewerOptions` 缺 container」一条不成立——v1 已写了 `container`；真正缺的是尺寸、键盘与相机策略，本版在 §3.1 补齐。
 
----
+***
 
 ## 1. 目标与边界
 
@@ -73,7 +73,7 @@
 3. 失败不抛异常：所有公开方法返回结构化结果或经 `onError` 上报；内部 catch 后保持上一份可用场景。
 4. 资源释放只做「自己创建的」，不碰进程级缓存（§6.5）。
 
----
+***
 
 ## 2. 目录结构
 
@@ -107,7 +107,7 @@ src/
 
 `BlueprintEditor.vue` 阶段 A 后只保留：Vue 生命周期、放置/删除/预览/选中/快捷键、侧栏联动、`registerUpdater`（留在 Vue 层，见 §5 第 7 行）。
 
----
+***
 
 ## 3. 类型与 API 定稿
 
@@ -277,7 +277,7 @@ export class RenderCore {
 
 1. `rebuildScene` 原子替换：`buildSceneData → buildBuildings → buildBVH` 全部成功后，才 `scene.remove` 旧模型 + `dispose()`，再 `add` 新模型。任何一步 throw 都保留旧场景（这是对现状的修复：现在 `watchEffect` 的 cleanup 先于 effect 重跑，构建一失败就是空场景）。
 2. `buildSceneData` 固定：`findPosForAreas(data.areas, PLANET_SEGMENT)` + `calcBuildingTrans(PLANET_RADIUS, pos, b)`，不调 `buildReforms`、不调 `expandToGlobalCanvas`。
-3. 尺寸：`ResizeObserver` 观察 container，同时更新 `renderer.setSize / setPixelRatio / camera.aspect`。**不复用 `@/utils` 的 `attachRenderer/attachCamera`**（它们是 `onMounted/onUnmounted` 绑定，且会在卸载时 `renderer.dispose()`）。
+3. 尺寸：`ResizeObserver` 观察 container，同时更新 `renderer.setSize / setPixelRatio / camera.aspect`。**不复用** **`@/utils`** **的** **`attachRenderer/attachCamera`**（它们是 `onMounted/onUnmounted` 绑定，且会在卸载时 `renderer.dispose()`）。
 4. animate 循环固定顺序：`controls.updateTimeDelta(dt)` → `cargos.cargoMove = (t % 1000) / 1000` → `dirLight.position.copy(camera.position)` → `renderer.render` → `controls.update()` 返回 true 时 `cameraVersion++` 并合并调用 `onCameraChange`（每帧最多一次）。
 5. `dispose()` 幂等；再调用任一方法返回 `already-disposed`（Viewer 层判定）。
 
@@ -297,17 +297,17 @@ export class BlueprintViewer {
 }
 ```
 
----
+***
 
 ## 4. 设置契约
 
 ### 4.1 设置 → 生效路径（定稿，不再留为风险）
 
-| 设置 | 生效方式 | 依据 |
-| --- | --- | --- |
-| `showRealModels` | 必须重建（分组决策在构建期） | `BlueprintEditor.vue:264,277` |
-| `maxInstancesPerModel` | 必须重建（同一处计数判定） | `BlueprintEditor.vue:278` |
-| `texturesEnabled` | **只调 `reapplyLoadedModelMaterials(settings)`，不重建** | `CODE_WIKI.md:1379`、`glbLoader.ts:246` |
+| 设置                     | 生效方式                                                   | 依据                                     |
+| ---------------------- | ------------------------------------------------------ | -------------------------------------- |
+| `showRealModels`       | 必须重建（分组决策在构建期）                                         | `BlueprintEditor.vue:264,277`          |
+| `maxInstancesPerModel` | 必须重建（同一处计数判定）                                          | `BlueprintEditor.vue:278`              |
+| `texturesEnabled`      | **只调** **`reapplyLoadedModelMaterials(settings)`，不重建** | `CODE_WIKI.md:1379`、`glbLoader.ts:246` |
 
 因此 `BlueprintViewer.setRenderSettings` 的实现是：
 
@@ -331,11 +331,9 @@ setRenderSettings(patch: Partial<ViewerRenderSettings>) {
 - **core**：只持有构造时传入的只读引用，不做持久化。
 - **Viewer**：默认 `LocalSettingsPort`（内存对象，初值 = 默认值 + `initialSettings`）；宿主可传 `settingsPort` 接管读写。
 - **与编辑器共用时**：宿主传入
-
   ```ts
   { read: () => renderSettings, write: p => Object.assign(renderSettings, p) }
   ```
-
   写入经由 `reactive` 代理，`App.vue` 的 `watch(renderSettings, …, {deep:true})` 会照常触发 `persistRenderSettings()`。本轮不在 Viewer 内直接 import `@/renderSettings`（会破坏 D1）。
 
 ### 4.3 边界语义（必须与编辑器一致）
@@ -344,28 +342,28 @@ setRenderSettings(patch: Partial<ViewerRenderSettings>) {
 - `Infinity` 表示不限制；序列化为 `null` 是 `renderSettings.ts` 的持久化细节，不进 Viewer API。
 - **计数口径（D7，已确认）**：按「该 `modelIndex` 存在 `glbName` 的建筑数」判定，而不是「已加载 GLB 的建筑数」。现状计数随加载进度漂移（`BlueprintEditor.vue:266` 只统计 `r.glb !== null`），同一蓝图同一设置会出现「先白模后 GLB」或「先 GLB 后整组回退」两种结果，对截图/分享场景不可接受。
 
----
+***
 
 ## 5. 对现有代码的改动清单（阶段 A 一次性完成）
 
-| # | 文件 | 改动 | 行为影响 |
-| --- | --- | --- | --- |
-| 1 | `src/planetConstants.ts` | 新增 `PLANET_RADIUS = 200.2`、`PLANET_SEGMENT = 200` | 无（纯常量搬迁） |
-| 2 | `src/components/BlueprintEditor.vue:566-567` | 删除本地 `R/SEGMENT`，改 import | 无 |
-| 3 | `src/models/buildingModel.ts:80`、`src/blueprint/planet.ts:187` | `GRID_HORIZONTAL` 改由 `PLANET_RADIUS / PLANET_SEGMENT` 推导；`HEIGHT_GRID_SIZE = 4/3` 一并移入 `planetConstants`（`buildingModel.ts:81` 注释、`modelTransform.ts:10` 同步引用） | 无（数值等价，需单测断言） |
-| 4 | `src/models/materialTextures.ts:118,121,128,144,156` | 5 处读 `renderSettings` 改为读函数参数 `settings`；`applyModelMaterialTextures(model, settings)` | 无 |
-| 5 | `src/models/glbLoader.ts:180,246` | 调用点补 settings；新增 `setSettingsProvider(read: () => ViewerRenderSettings)`，加载完成时按当前值套用 | 无 |
-| 6 | `src/models/glbLoader.ts` | 不新增任何释放入口；`releaseGlbModel*` 保持现状（§6.5 禁止项） | 无 |
-| 7 | `src/components/BlueprintEditor.vue:490-564` | `registerUpdater` **留在 Vue 层**，移到 `src/components/blueprintUpdater.ts`，只依赖 core 导出的 `AllBuildings` 公开面、`iconHelpers` 与 `calcBuildingTrans` | 无 |
-| 8 | `src/iconTexture.ts:49-51` | `loaded[iconId]` → `loaded[index]`（槽位索引），修掉守卫失效导致的重复 fetch | 修复：重复下载/上传消失 |
-| 9 | `src/iconTexture.ts` | 新增 `dispose()`（`texture.dispose()`）；构造函数参数由 `WebGLRenderer` 改为 `TextureSink` 接口（`initTexture` / `copyTextureToTexture`） | 修复：可释放、可测试 |
-| 10 | `src/components/BlueprintEditor.vue:471-488` | `buildBVH` 未知 `modelIndex` 兜底：`meta === undefined` → 退化零缩放矩阵（不可拾取）；未知索引汇总进 `stats.unknownModelIndexes` | **修复现存白屏** |
-| 11 | `src/components/BlueprintEditor.vue:178,207,237` | 同类 `!` 断言改为「查不到则用默认色」（`0xdddddd`，与 `:334` 一致） | 修复：传送带/分拣器配色不再可能崩 |
-| 12 | `src/lib/core/buildBuildings.ts` | 返回值改为 `{ buildings, stats }`；实例上限计数改用「存在 `glbName` 的实例数」（D7） | 确定性修复：白模/GLB 划分不再随加载时序变化 |
+| #  | 文件                                                             | 改动                                                                                                                                                             | 行为影响                     |
+| -- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| 1  | `src/planetConstants.ts`                                       | 新增 `PLANET_RADIUS = 200.2`、`PLANET_SEGMENT = 200`                                                                                                              | 无（纯常量搬迁）                 |
+| 2  | `src/components/BlueprintEditor.vue:566-567`                   | 删除本地 `R/SEGMENT`，改 import                                                                                                                                      | 无                        |
+| 3  | `src/models/buildingModel.ts:80`、`src/blueprint/planet.ts:187` | `GRID_HORIZONTAL` 改由 `PLANET_RADIUS / PLANET_SEGMENT` 推导；`HEIGHT_GRID_SIZE = 4/3` 一并移入 `planetConstants`（`buildingModel.ts:81` 注释、`modelTransform.ts:10` 同步引用） | 无（数值等价，需单测断言）            |
+| 4  | `src/models/materialTextures.ts:118,121,128,144,156`           | 5 处读 `renderSettings` 改为读函数参数 `settings`；`applyModelMaterialTextures(model, settings)`                                                                         | 无                        |
+| 5  | `src/models/glbLoader.ts:180,246`                              | 调用点补 settings；新增 `setSettingsProvider(read: () => ViewerRenderSettings)`，加载完成时按当前值套用                                                                           | 无                        |
+| 6  | `src/models/glbLoader.ts`                                      | 不新增任何释放入口；`releaseGlbModel*` 保持现状（§6.5 禁止项）                                                                                                                    | 无                        |
+| 7  | `src/components/BlueprintEditor.vue:490-564`                   | `registerUpdater` **留在 Vue 层**，移到 `src/components/blueprintUpdater.ts`，只依赖 core 导出的 `AllBuildings` 公开面、`iconHelpers` 与 `calcBuildingTrans`                     | 无                        |
+| 8  | `src/iconTexture.ts:49-51`                                     | `loaded[iconId]` → `loaded[index]`（槽位索引），修掉守卫失效导致的重复 fetch                                                                                                     | 修复：重复下载/上传消失             |
+| 9  | `src/iconTexture.ts`                                           | 新增 `dispose()`（`texture.dispose()`）；构造函数参数由 `WebGLRenderer` 改为 `TextureSink` 接口（`initTexture` / `copyTextureToTexture`）                                        | 修复：可释放、可测试               |
+| 10 | `src/components/BlueprintEditor.vue:471-488`                   | `buildBVH` 未知 `modelIndex` 兜底：`meta === undefined` → 退化零缩放矩阵（不可拾取）；未知索引汇总进 `stats.unknownModelIndexes`                                                         | **修复现存白屏**               |
+| 11 | `src/components/BlueprintEditor.vue:178,207,237`               | 同类 `!` 断言改为「查不到则用默认色」（`0xdddddd`，与 `:334` 一致）                                                                                                                  | 修复：传送带/分拣器配色不再可能崩        |
+| 12 | `src/lib/core/buildBuildings.ts`                               | 返回值改为 `{ buildings, stats }`；实例上限计数改用「存在 `glbName` 的实例数」（D7）                                                                                                   | 确定性修复：白模/GLB 划分不再随加载时序变化 |
 
 > 第 10、11 行是 v1 未识别的现存缺陷：`buildBoxes` 明确写了「未知建筑放退化矩阵占位，保持不抛错、不白屏的旧行为」（`BlueprintEditor.vue:338-343`），但 `buildBVH:476` 与传送带配色路径用 `!` 直接取元数据，两处态度相反。含 `modelIndex 117`（轨道采集器）之类建筑的蓝图目前会白屏。
 
----
+***
 
 ## 6. 场景生命周期与错误模型
 
@@ -428,7 +426,7 @@ Viewer.loadBlueprint(str)
 4. `maxAnisotropy` / `buildingEnvironment` 单例
 5. `IconTexture` 的图标 `TextureLoader` 结果（已自行 dispose）
 
----
+***
 
 ## 7. 分阶段与验收
 
@@ -439,7 +437,7 @@ Viewer.loadBlueprint(str)
 **出口条件**
 
 1. `grep -R "from 'vue'" src/lib/core` 无命中。
-2. `yarn test:unit` 全绿；新增 `tests/unit/lib/describeBuild.spec.ts`：对 2~3 个现有 fixture 断言 `stats`（分组数、隐藏数、`unknownModelIndexes`、`perModelGlbCounts`）与 `bvh.boxes[i]` 的 `Matrix4.elements` 快照。
+2. `yarn test:unit` 全绿；新增 `tests/unit/lib/describeBuild.spec.ts`：对 2\~3 个现有 fixture 断言 `stats`（分组数、隐藏数、`unknownModelIndexes`、`perModelGlbCounts`）与 `bvh.boxes[i]` 的 `Matrix4.elements` 快照。
 3. 手动回归清单（编辑器）：白模 / GLB / 贴图开关 / 图标 / 下标 / 货物动画 / 拾取 / 右键剔除 / 相机重置 / 设置面板「需重新导入」。
 4. 含 `modelIndex 117` 的蓝图不再白屏，`unknownModelIndexes` 有值。
 5. D7 生效验证：同一 fixture 在「GLB 未加载」与「GLB 已加载」两种状态下，`describeBuild()` 的 `perModelIndex` 划分一致。
@@ -464,7 +462,7 @@ Viewer.loadBlueprint(str)
 
 jsdom 无 WebGL，且 `IconTexture` 构造需要真实 renderer。方案要求两处注入（`RenderCoreOptions.createRenderer / createIconTexture`），测试用 stub 实现 `initTexture / copyTextureToTexture / setSize / setPixelRatio / render / dispose` 的空实现；`document.createElement('canvas')` 在 jsdom 下可用。
 
----
+***
 
 ## 8. 已知限制（写入 lib-README）
 
@@ -474,7 +472,7 @@ jsdom 无 WebGL，且 `IconTexture` 构造需要真实 renderer。方案要求�
 4. **星球尺寸固定**：`PLANET_RADIUS / PLANET_SEGMENT` 与 `buildingModel.ts:80`、`planet.ts:187` 的换算耦合，不支持运行时改半径。
 5. **不含编辑态**：无放置/删除/预览/地基。
 
----
+***
 
 ## 9. 交付物清单
 
@@ -485,7 +483,7 @@ jsdom 无 WebGL，且 `IconTexture` 构造需要真实 renderer。方案要求�
 - 测试：`tests/unit/lib/describeBuild.spec.ts`、`tests/unit/lib/viewer.spec.ts`
 - 文档：`lib-README.md`（新建，v2 API）、`docs/CODE_WIKI.md` 新增 §17、根 `CODE_WIKI.md` 标注过期
 
----
+***
 
 ## 10. 后续（不在本轮）
 
@@ -493,7 +491,7 @@ jsdom 无 WebGL，且 `IconTexture` 构造需要真实 renderer。方案要求�
 - 多实例支持（引用计数式 GLB 缓存）
 - 阶段 C 的编辑器切换
 
----
+***
 
 ## 附录 A：`describeBuild` 诊断对象
 
@@ -515,15 +513,16 @@ export interface BuildDescription {
 
 ## 附录 B：错误消息 → code 映射
 
-| 来源 | 消息前缀 | code | phase |
-| --- | --- | --- | --- |
-| `parser.ts:1265` | `Invalid start` | `invalid-start` | parse |
-| `parser.ts:1272` | `Header too short` | `header-too-short` | parse |
-| `parser.ts:1287` | `Checksum not found` | `checksum-missing` | parse |
-| `parser.ts:1291` | `Checksum mismatch` | `checksum-mismatch` | parse |
-| `parser.ts:110/122` | 越界 | `buffer-overflow` | parse |
-| `planet.ts:66` | `No root area` | `no-root-area` | position |
-| `planet.ts:104` | `No suitable longitude` | `no-longitude` | position |
-| `planet.ts:131` | `same segments as its parent` | `inconsistent-area` | position |
-| `planet.ts:145/147` | `anchorLocalOffsetY == 0` | `inconsistent-area` | position |
-| 构建期其它 | — | `build-failed` | build |
+| 来源                  | 消息前缀                          | code                | phase    |
+| ------------------- | ----------------------------- | ------------------- | -------- |
+| `parser.ts:1265`    | `Invalid start`               | `invalid-start`     | parse    |
+| `parser.ts:1272`    | `Header too short`            | `header-too-short`  | parse    |
+| `parser.ts:1287`    | `Checksum not found`          | `checksum-missing`  | parse    |
+| `parser.ts:1291`    | `Checksum mismatch`           | `checksum-mismatch` | parse    |
+| `parser.ts:110/122` | 越界                            | `buffer-overflow`   | parse    |
+| `planet.ts:66`      | `No root area`                | `no-root-area`      | position |
+| `planet.ts:104`     | `No suitable longitude`       | `no-longitude`      | position |
+| `planet.ts:131`     | `same segments as its parent` | `inconsistent-area` | position |
+| `planet.ts:145/147` | `anchorLocalOffsetY == 0`     | `inconsistent-area` | position |
+| 构建期其它               | —                             | `build-failed`      | build    |
+
