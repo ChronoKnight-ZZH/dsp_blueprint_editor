@@ -171,7 +171,7 @@
                                     @change="commitMaxModel" />
                             </div>
                             <div class="slider-row">
-                                <input type="range" min="1" :max="limitSliderMax" step="1" :value="limitSliderValue"
+                                <input type="range" min="1" :max="limitSliderMax + 1" step="1" :value="limitSliderValue"
                                     @input="onLimitSliderInput" />
                                 <div class="slider-ticks">
                                     <span>1</span>
@@ -286,7 +286,7 @@ const textureChannels: { key: TextureChannel; suffix: string; label: string; una
 ];
 
 /** 滑动条数值上限；再往右那一档代表「无限」 */
-const limitSliderMax = 1000;
+const limitSliderMax = 2000;
 
 const limitSliderValue = computed(() => {
     const limit = renderSettings.maxInstancesPerModel;
