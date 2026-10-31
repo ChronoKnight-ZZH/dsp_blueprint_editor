@@ -1,0 +1,722 @@
+{
+    "header": {
+        "layout": 31,
+        "icons": [
+            2030,
+            2003,
+            2003,
+            0,
+            0
+        ],
+        "time": "2026-04-24T10:03:30.410Z",
+        "gameVersion": "0.10.34.28518",
+        "shortDesc": "Throughput matcher",
+        "author": "",
+        "blueprintVersion": "1",
+        "properties": "",
+        "desc": "Matches throughput of item 1 to the throughput of item 2 regardless of overflow or underflow of item 2.\nItem 1 = \\hongt;, Item 2 = \\lant;.\nChange filters in the splitters to use the items you need.\nRequires 100 placeholder items (\\tieb;\\tongb;) to be put in the depots.\nMonitors show alerts if placeholder items are missing. Monitors and the tesla tower can be removed after placeholder items are placed."
+    },
+    "version": 2,
+    "cursorOffset": {
+        "x": 6,
+        "y": 5
+    },
+    "cursorTargetArea": 0,
+    "dragBoxSize": {
+        "x": 13,
+        "y": 11
+    },
+    "primaryAreaIdx": 0,
+    "areas": [
+        {
+            "index": 0,
+            "parentIndex": -1,
+            "tropicAnchor": 0,
+            "areaSegments": 200,
+            "anchorLocalOffset": {
+                "x": 0,
+                "y": 0
+            },
+            "size": {
+                "x": 13,
+                "y": 11
+            }
+        }
+    ],
+    "buildings": [
+        {
+            "index": 0,
+            "areaIndex": 0,
+            "localOffset": [
+                {
+                    "x": 2.999998092651367,
+                    "y": 1.9999932050704956,
+                    "z": -0.00002517923894629348
+                },
+                {
+                    "x": 2.999998092651367,
+                    "y": 1.9999932050704956,
+                    "z": -0.00002517923894629348
+                }
+            ],
+            "yaw": [
+                90,
+                90
+            ],
+            "tilt": 0,
+            "itemId": 2020,
+            "modelIndex": 38,
+            "outputObjIdx": -1,
+            "inputObjIdx": -1,
+            "outputToSlot": 14,
+            "inputFromSlot": 15,
+            "outputFromSlot": 15,
+            "inputToSlot": 14,
+            "outputOffset": 0,
+            "inputOffset": 0,
+            "recipeId": 0,
+            "filterId": 0,
+            "parameters": {
+                "priority": [
+                    false,
+                    false,
+                    false,
+                    false
+                ],
+                "extra": [
+                    0,
+                    0
+                ]
+            }
+        },
+        {
+            "index": 1,
+            "areaIndex": 0,
+            "localOffset": [
+                {
+                    "x": 6.000003337860107,
+                    "y": 4.999997138977051,
+                    "z": -0.0000022910537609277526
+                },
+                {
+                    "x": 6.000003337860107,
+                    "y": 4.999997138977051,
+                    "z": -0.0000022910537609277526
+                }
+            ],
+            "yaw": [
+                90,
+                90
+            ],
+            "tilt": 0,
+            "itemId": 2020,
+            "modelIndex": 38,
+            "outputObjIdx": -1,
+            "inputObjIdx": -1,
+            "outputToSlot": 14,
+            "inputFromSlot": 15,
+            "outputFromSlot": 15,
+            "inputToSlot": 14,
+            "outputOffset": 0,
+            "inputOffset": 0,
+            "recipeId": 0,
+            "filterId": 0,
+            "parameters": {
+                "priority": [
+                    false,
+                    false,
+                    false,
+                    false
+                ],
+                "extra": [
+                    0,
+                    0
+                ]
+            }
+        },
+        {
+            "index": 2,
+            "areaIndex": 0,
+            "localOffset": [
+                {
+                    "x": 1.0000048875808716,
+                    "y": 2.000016927719116,
+                    "z": 0.00021514670515898615
+                },
+                {
+                    "x": 1.0000048875808716,
+                    "y": 2.000016927719116,
+                    "z": 0.00021514670515898615
+                }
+            ],
+            "yaw": [
+                269.95147705078125,
+                269.95147705078125
+            ],
+            "tilt": 0,
+            "itemId": 2030,
+            "modelIndex": 208,
+            "outputObjIdx": -1,
+            "inputObjIdx": -1,
+            "outputToSlot": 0,
+            "inputFromSlot": 0,
+            "outputFromSlot": 0,
+            "inputToSlot": 0,
+            "outputOffset": 0,
+            "inputOffset": 0,
+            "recipeId": 0,
+            "filterId": 0,
+            "parameters": {
+                "targetBeltId": 2338,
+                "offset": 0,
+                "targetCargoAmount": 0,
+                "periodTicksCount": 360,
+                "passOperator": 5,
+                "passColorId": 113,
+                "failColorId": 13,
+                "cargoFilter": 0,
+                "tone": 20,
+                "volume": 80,
+                "pitch": 35,
+                "repeat": true,
+                "length": 4,
+                "falloffRadius": [
+                    24,
+                    72
+                ],
+                "systemWarningMode": 4,
+                "systemWarningIconId": 1101,
+                "alarmMode": 0,
+                "spawnItemOperator": 0
+            }
+        },
+        {
+            "index": 3,
+            "areaIndex": 0,
+            "localOffset": [
+                {
+                    "x": 11.999999046325684,
+                    "y": 2.000007390975952,
+                    "z": 0.000009153039172815625
+                },
+                {
+                    "x": 11.999999046325684,
+                    "y": 2.000007390975952,
+                    "z": 0.000009153039172815625
+                }
+            ],
+            "yaw": [
+                0,
+                0
+            ],
+            "tilt": 0,
+            "itemId": 2020,
+            "modelIndex": 38,
+            "outputObjIdx": -1,
+            "inputObjIdx": -1,
+            "outputToSlot": 14,
+            "inputFromSlot": 15,
+            "outputFromSlot": 15,
+            "inputToSlot": 14,
+            "outputOffset": 0,
+            "inputOffset": 0,
+            "recipeId": 0,
+            "filterId": 0,
+            "parameters": {
+                "priority": [
+                    false,
+                    false,
+                    true,
+                    false
+                ],
+                "extra": [
+                    0,
+                    0
+                ]
+            }
+        },
+        {
+            "index": 4,
+            "areaIndex": 0,
+            "localOffset": [
+                {
+                    "x": 9,
+                    "y": 4.999987602233887,
+                    "z": -0.0000022910537609277526
+                },
+                {
+                    "x": 9,
+                    "y": 4.999987602233887,
+                    "z": -0.0000022910537609277526
+                }
+            ],
+            "yaw": [
+                6.08049077754913e-8,
+                6.08049077754913e-8
+            ],
+            "tilt": 0,
+            "itemId": 2020,
+            "modelIndex": 38,
+            "outputObjIdx": -1,
+            "inputObjIdx": -1,
+            "outputToSlot": 14,
+            "inputFromSlot": 15,
+            "outputFromSlot": 15,
+            "inputToSlot": 14,
+            "outputOffset": 0,
+            "inputOffset": 0,
+            "recipeId": 0,
+            "filterId": 0,
+            "parameters": {
+                "priority": [
+                    false,
+                    false,
+                    true,
+                    false
+                ],
+                "extra": [
+                    0,
+                    0
+                ]
+            }
+        },
+        {
+            "index": 5,
+            "areaIndex": 0,
+            "localOffset": [
+                {
+                    "x": 12,
+                    "y": 7.999996662139893,
+                    "z": 0.000009153039172815625
+                },
+                {
+                    "x": 12,
+                    "y": 7.999996662139893,
+                    "z": 0.000009153039172815625
+                }
+            ],
+            "yaw": [
+                -5.6298851802694116e-8,
+                -5.6298851802694116e-8
+            ],
+            "tilt": 0,
+            "itemId": 2020,
+            "modelIndex": 38,
+            "outputObjIdx": -1,
+            "inputObjIdx": -1,
+            "outputToSlot": 14,
+            "inputFromSlot": 15,
+            "outputFromSlot": 15,
+            "inputToSlot": 14,
+            "outputOffset": 0,
+            "inputOffset": 0,
+            "recipeId": 0,
+            "filterId": 6001,
+            "parameters": {
+                "priority": [
+                    true,
+                    false,
+                    false,
+                    false
+                ],
+                "extra": [
+                    0,
+                    0
+                ]
+            }
+        },
+        {
+            "index": 6,
+            "areaIndex": 0,
+            "localOffset": [
+                {
+                    "x": 1.0000001192092896,
+                    "y": 3.9999959468841553,
+                    "z": -0.0000022910537609277526
+                },
+                {
+                    "x": 1.0000001192092896,
+                    "y": 3.9999959468841553,
+                    "z": -0.0000022910537609277526
+                }
+            ],
+            "yaw": [
+                0,
+                0
+            ],
+            "tilt": 0,
+            "itemId": 2201,
+            "modelIndex": 44,
+            "outputObjIdx": -1,
+            "inputObjIdx": -1,
+            "outputToSlot": 0,
+            "inputFromSlot": 0,
+            "outputFromSlot": 0,
+            "inputToSlot": 0,
+            "outputOffset": 0,
+            "inputOffset": 0,
+            "recipeId": 0,
+            "filterId": 0,
+            "parameters": null
+        },
+        {
+            "index": 7,
+            "areaIndex": 0,
+            "localOffset": [
+                {
+                    "x": 6.000003337860107,
+                    "y": 4.999997138977051,
+                    "z": 2.0000016689300537
+                },
+                {
+                    "x": 6.000003337860107,
+                    "y": 4.999997138977051,
+                    "z": 2.0000016689300537
+                }
+            ],
+            "yaw": [
+                90,
+                90
+            ],
+            "tilt": 0,
+            "itemId": 2101,
+            "modelIndex": 51,
+            "outputObjIdx": -1,
+            "inputObjIdx": 1,
+            "outputToSlot": 14,
+            "inputFromSlot": 15,
+            "outputFromSlot": 15,
+            "inputToSlot": 14,
+            "outputOffset": 0,
+            "inputOffset": 0,
+            "recipeId": 0,
+            "filterId": 0,
+            "parameters": {
+                "automationLimit": 0,
+                "type": 0,
+                "grids": []
+            }
+        },
+        {
+            "index": 8,
+            "areaIndex": 0,
+            "localOffset": [
+                {
+                    "x": 8.999999046325684,
+                    "y": 1.9999979734420776,
+                    "z": -0.0000022910537609277526
+                },
+                {
+                    "x": 8.999999046325684,
+                    "y": 1.9999979734420776,
+                    "z": -0.0000022910537609277526
+                }
+            ],
+            "yaw": [
+                0,
+                0
+            ],
+            "tilt": 0,
+            "itemId": 2020,
+            "modelIndex": 38,
+            "outputObjIdx": -1,
+            "inputObjIdx": -1,
+            "outputToSlot": 14,
+            "inputFromSlot": 15,
+            "outputFromSlot": 15,
+            "inputToSlot": 14,
+            "outputOffset": 0,
+            "inputOffset": 0,
+            "recipeId": 0,
+            "filterId": 1101,
+            "parameters": {
+                "priority": [
+                    false,
+                    true,
+                    false,
+                    false
+                ],
+                "extra": [
+                    0,
+                    0
+                ]
+            }
+        },
+        {
+            "index": 9,
+            "areaIndex": 0,
+            "localOffset": [
+                {
+                    "x": 6.000002861022949,
+                    "y": 1.9999932050704956,
+                    "z": -0.000013735146239923779
+                },
+                {
+                    "x": 6.000002861022949,
+                    "y": 1.9999932050704956,
+                    "z": -0.000013735146239923779
+                }
+            ],
+            "yaw": [
+                90,
+                90
+            ],
+            "tilt": 0,
+            "itemId": 2020,
+            "modelIndex": 38,
+            "outputObjIdx": -1,
+            "inputObjIdx": -1,
+            "outputToSlot": 14,
+            "inputFromSlot": 15,
+            "outputFromSlot": 15,
+            "inputToSlot": 14,
+            "outputOffset": 0,
+            "inputOffset": 0,
+            "recipeId": 0,
+            "filterId": 0,
+            "parameters": {
+                "priority": [
+                    false,
+                    false,
+                    false,
+                    false
+                ],
+                "extra": [
+                    0,
+                    0
+                ]
+            }
+        },
+        {
+            "index": 10,
+            "areaIndex": 0,
+            "localOffset": [
+                {
+                    "x": 2.9999992847442627,
+                    "y": 4.999997138977051,
+                    "z": -0.000013735146239923779
+                },
+                {
+                    "x": 2.9999992847442627,
+                    "y": 4.999997138977051,
+                    "z": -0.000013735146239923779
+                }
+            ],
+            "yaw": [
+                90,
+                90
+            ],
+            "tilt": 0,
+            "itemId": 2020,
+            "modelIndex": 38,
+            "outputObjIdx": -1,
+            "inputObjIdx": -1,
+            "outputToSlot": 14,
+            "inputFromSlot": 15,
+            "outputFromSlot": 15,
+            "inputToSlot": 14,
+            "outputOffset": 0,
+            "inputOffset": 0,
+            "recipeId": 0,
+            "filterId": 1101,
+            "parameters": {
+                "priority": [
+                    false,
+                    true,
+                    false,
+                    false
+                ],
+                "extra": [
+                    0,
+                    0
+                ]
+            }
+        },
+        {
+            "index": 11,
+            "areaIndex": 0,
+            "localOffset": [
+                {
+                    "x": 3.0000040531158447,
+                    "y": 1.9999979734420776,
+                    "z": 2.0000016689300537
+                },
+                {
+                    "x": 3.0000040531158447,
+                    "y": 1.9999979734420776,
+                    "z": 2.0000016689300537
+                }
+            ],
+            "yaw": [
+                90,
+                90
+            ],
+            "tilt": 0,
+            "itemId": 2101,
+            "modelIndex": 51,
+            "outputObjIdx": -1,
+            "inputObjIdx": 0,
+            "outputToSlot": 14,
+            "inputFromSlot": 15,
+            "outputFromSlot": 15,
+            "inputToSlot": 14,
+            "outputOffset": 0,
+            "inputOffset": 0,
+            "recipeId": 0,
+            "filterId": 0,
+            "parameters": {
+                "automationLimit": 0,
+                "type": 0,
+                "grids": []
+            }
+        },
+        {
+            "index": 12,
+            "areaIndex": 0,
+            "localOffset": [
+                {
+                    "x": 2.9999992847442627,
+                    "y": 7.9999918937683105,
+                    "z": 0.000009153039172815625
+                },
+                {
+                    "x": 2.9999992847442627,
+                    "y": 7.9999918937683105,
+                    "z": 0.000009153039172815625
+                }
+            ],
+            "yaw": [
+                -1.741184405545937e-7,
+                -1.741184405545937e-7
+            ],
+            "tilt": 0,
+            "itemId": 2020,
+            "modelIndex": 38,
+            "outputObjIdx": -1,
+            "inputObjIdx": -1,
+            "outputToSlot": 14,
+            "inputFromSlot": 15,
+            "outputFromSlot": 15,
+            "inputToSlot": 14,
+            "outputOffset": 0,
+            "inputOffset": 0,
+            "recipeId": 0,
+            "filterId": 6002,
+            "parameters": {
+                "priority": [
+                    true,
+                    false,
+                    false,
+                    false
+                ],
+                "extra": [
+                    0,
+                    0
+                ]
+            }
+        },
+        {
+            "index": 13,
+            "areaIndex": 0,
+            "localOffset": [
+                {
+                    "x": 12,
+                    "y": 5.000006675720215,
+                    "z": 0.000020597131879185326
+                },
+                {
+                    "x": 12,
+                    "y": 5.000006675720215,
+                    "z": 0.000020597131879185326
+                }
+            ],
+            "yaw": [
+                -7.777890687066247e-8,
+                -7.777890687066247e-8
+            ],
+            "tilt": 0,
+            "itemId": 2020,
+            "modelIndex": 38,
+            "outputObjIdx": -1,
+            "inputObjIdx": -1,
+            "outputToSlot": 14,
+            "inputFromSlot": 15,
+            "outputFromSlot": 15,
+            "inputToSlot": 14,
+            "outputOffset": 0,
+            "inputOffset": 0,
+            "recipeId": 0,
+            "filterId": 0,
+            "parameters": {
+                "priority": [
+                    false,
+                    false,
+                    false,
+                    false
+                ],
+                "extra": [
+                    0,
+                    0
+                ]
+            }
+        },
+        {
+            "index": 14,
+            "areaIndex": 0,
+            "localOffset": [
+                {
+                    "x": 5.999998092651367,
+                    "y": 6.999995231628418,
+                    "z": 0.00008926168811740354
+                },
+                {
+                    "x": 5.999998092651367,
+                    "y": 6.999995231628418,
+                    "z": 0.00008926168811740354
+                }
+            ],
+            "yaw": [
+                -0.0003350406186655164,
+                -0.0003350406186655164
+            ],
+            "tilt": 0,
+            "itemId": 2030,
+            "modelIndex": 208,
+            "outputObjIdx": -1,
+            "inputObjIdx": -1,
+            "outputToSlot": 0,
+            "inputFromSlot": 0,
+            "outputFromSlot": 0,
+            "inputToSlot": 0,
+            "outputOffset": 0,
+            "inputOffset": 0,
+            "recipeId": 0,
+            "filterId": 0,
+            "parameters": {
+                "targetBeltId": 2048,
+                "offset": 0,
+                "targetCargoAmount": 0,
+                "periodTicksCount": 360,
+                "passOperator": 5,
+                "passColorId": 113,
+                "failColorId": 13,
+                "cargoFilter": 0,
+                "tone": 20,
+                "volume": 80,
+                "pitch": 35,
+                "repeat": true,
+                "length": 4,
+                "falloffRadius": [
+                    24,
+                    72
+                ],
+                "systemWarningMode": 4,
+                "systemWarningIconId": 1104,
+                "alarmMode": 0,
+                "spawnItemOperator": 0
+            }
+        }
+    ],
+    "patch": 1,
+    "reformData": null
+}

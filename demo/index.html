@@ -46,9 +46,12 @@
           <textarea id="blueprint" placeholder="粘贴 BLUEPRINT:… 字符串"></textarea>
           <div class="btns">
             <button id="btnLoad">loadBlueprint</button>
+            <button id="btnLoadJson">loadJson</button>
+            <button id="btnLoadJsonFile">导入本地 JSON 文件</button>
             <button id="btnLoadFixture">载入 fixture</button>
             <button id="btnBadString">坏字符串</button>
           </div>
+          <input type="file" id="jsonFile" accept=".json,application/json" style="display:none">
         </fieldset>
         <fieldset>
           <legend>RenderSettings</legend>
@@ -106,4 +109,36 @@
     </div>
     <!-- built files will be auto injected -->
   </body>
+  <script>
+    const { BlueprintViewer, parseBlueprint } = DSPBlueprintEditor;
+
+        // 创建纯 3D 预览器（不依赖 Vue）
+        const viewer = new BlueprintViewer({
+            container: '#canvas',
+            theme: 'dark',
+        });
+
+        const info = document.getElementById('info');
+        const bpInput = document.getElementById('bpInput');
+
+        // 加载蓝图
+        function load() {
+            const str = bpInput.value.trim();
+            if (!str) return;
+            try {
+                viewer.loadBlueprint(str);
+                const data = parseBlueprint(str);
+                info.textContent = `${data.header.shortDesc} | ${data.buildings.length} 个建筑`;
+            } catch (e) {
+                info.textContent = '解析失败: ' + e.message;
+            }
+        }
+
+        // 按钮事件
+        document.getElementById('loadBtn').onclick = load;
+        document.getElementById('resetBtn').onclick = () => viewer.resetCamera();
+
+        // 页面加载时自动渲染
+        load();
+  </script>
 </html>
