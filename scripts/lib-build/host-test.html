@@ -82,6 +82,50 @@
         font: inherit;
     }
     button:hover { border-color: var(--muted); }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+
+    /* 控制面板：宿主自己的 UI。按钮不来自库，全部由本页脚本绑定到实例方法 */
+    .panel {
+        margin-top: 14px;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 10px;
+    }
+    fieldset {
+        margin: 0;
+        padding: 8px 10px 10px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel);
+    }
+    legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+    .rows { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .rows + .rows { margin-top: 6px; }
+    .panel button { padding: 5px 9px; font-size: 12px; font-family: ui-monospace, Consolas, monospace; }
+    .panel button.danger { border-color: #f85149; color: #f85149; }
+    .panel button.danger:hover { background: #4a1e1e; }
+    .panel input[type=number] {
+        width: 62px;
+        background: #0d1117;
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 4px 6px;
+        font: inherit;
+    }
+    .panel label { color: var(--muted); font-size: 12px; }
+    #bpText {
+        width: 100%;
+        height: 54px;
+        margin-top: 6px;
+        resize: vertical;
+        background: #0d1117;
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 6px;
+        font: 11px/1.5 ui-monospace, Consolas, monospace;
+    }
 </style>
 </head>
 <body>
@@ -99,6 +143,89 @@
     <div id="viewer"></div>
     <pre id="log"></pre>
 </div>
+
+<!-- 控制面板：宿主侧 UI，按钮全部绑定到实例方法（库里没有任何按钮） -->
+<section class="panel">
+    <fieldset>
+        <legend>加载 / 数据</legend>
+        <div class="rows">
+            <button id="cLoadFixture" type="button">loadBlueprint(样本)</button>
+            <button id="cLoadInput" type="button">loadBlueprint(输入)</button>
+            <button id="cGetData" type="button">getBlueprintData()</button>
+        </div>
+        <div class="rows">
+            <button id="cParse" type="button">parseBlueprint(输入)</button>
+            <button id="cExportJSON" type="button">exportBlueprintJSON()</button>
+        </div>
+        <textarea id="bpText" placeholder="粘贴 BLUEPRINT:… 字符串；留空则用样本"></textarea>
+    </fieldset>
+
+    <fieldset>
+        <legend>选中 / 定位 / 信息</legend>
+        <div class="rows">
+            <label for="cIndex">建筑下标</label>
+            <input id="cIndex" type="number" min="0" value="3" />
+            <button id="cSelect" type="button">selectBuilding(idx)</button>
+            <button id="cSelectNull" type="button">selectBuilding(null)</button>
+        </div>
+        <div class="rows">
+            <button id="cFocus" type="button">focusBuilding(idx)</button>
+            <button id="cFocusNull" type="button">focusBuilding(null)</button>
+            <button id="cSelected" type="button">getSelectedIndex()</button>
+        </div>
+        <div class="rows">
+            <button id="cInfo" type="button">getBuildingInfo(idx)</button>
+            <button id="cUnknown" type="button">selectBuilding(999)</button>
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>主题</legend>
+        <div class="rows">
+            <button id="cThemeDark" type="button">setTheme('dark')</button>
+            <button id="cThemeLight" type="button">setTheme('light')</button>
+            <button id="cThemeAuto" type="button">setTheme('auto')</button>
+        </div>
+        <div class="rows">
+            <button id="cGetTheme" type="button">getTheme()</button>
+            <button id="cCustomTheme" type="button">setCustomTheme({grid})</button>
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>相机 / 尺寸 / 导出</legend>
+        <div class="rows">
+            <button id="cCamera" type="button">getCamera()</button>
+            <button id="cCameraVersion" type="button">getCameraVersion()</button>
+            <button id="cResetCamera" type="button">resetCamera()</button>
+        </div>
+        <div class="rows">
+            <button id="cSetSize" type="button">setSize(400,300)</button>
+            <button id="cResetSize" type="button">resetSize()</button>
+            <button id="cCanvas" type="button">getCanvas()</button>
+        </div>
+        <div class="rows">
+            <button id="cDataURL" type="button">toDataURL()</button>
+            <button id="cToBlob" type="button">toBlob()</button>
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>渲染设置 / 生命周期</legend>
+        <div class="rows">
+            <button id="cRealOn" type="button">showRealModels=true</button>
+            <button id="cRealOff" type="button">showRealModels=false</button>
+        </div>
+        <div class="rows">
+            <button id="cTexOn" type="button">textures=true</button>
+            <button id="cTexOff" type="button">textures=false</button>
+        </div>
+        <div class="rows">
+            <button id="cDispose" type="button" class="danger">dispose()</button>
+            <button id="cRebuild" type="button">重建并复验</button>
+        </div>
+    </fieldset>
+</section>
 
 <table id="report">
     <thead><tr><th>结果</th><th>检查项</th><th>详情</th></tr></thead>
@@ -442,6 +569,20 @@
 
     document.getElementById('rerun').addEventListener('click', run);
 
+    /**
+     * 控制面板取实例的唯一入口。
+     *
+     * 面板脚本是独立的一段（见下方 ④），不持有闭包里的 viewer——
+     * 这样「dispose → 重建」之后面板自动指向**新**实例，不会用到已销毁的旧对象。
+     */
+    window.__dspHost = {
+        log: log,
+        getViewer: function () { return currentViewer; },
+        run: run,
+        fixture: FIXTURE,
+        hasApi: typeof window.DSPBlueprintEditor !== 'undefined',
+    };
+
     // UMD 脚本没加载成功时也要给出可读结论，而不是白屏
     if (typeof window.DSPBlueprintEditor === 'undefined') {
         bannerEl.className = 'banner fail';
@@ -450,6 +591,342 @@
     else {
         run();
     }
+})();
+</script>
+
+<!-- ④ 控制面板：每个按钮绑一个 BlueprintViewer 实例方法（宿主侧代码，库里没有这些按钮） -->
+<script>
+(function () {
+    var host = window.__dspHost;
+    if (host === undefined || !host.hasApi)
+        return;
+
+    var log = host.log;
+    var textEl = document.getElementById('bpText');
+
+    /** 取当前实例；没有就先提示，绝不抛异常打断页面 */
+    function viewer() {
+        var v = host.getViewer();
+        if (v === null) {
+            log('✗ 当前没有实例：先点「重建并复验」');
+            return null;
+        }
+        return v;
+    }
+
+    function index() {
+        var n = parseInt(document.getElementById('cIndex').value, 10);
+        return Number.isFinite(n) && n >= 0 ? n : 0;
+    }
+
+    function hex(n) {
+        return '#' + (n >>> 0).toString(16).padStart(6, '0');
+    }
+
+    /** 统一绑定：同步 throw 与 Promise reject 都转成日志，不冒泡成页面错误 */
+    function on(id, handler) {
+        var el = document.getElementById(id);
+        if (el === null)
+            return;
+        el.addEventListener('click', function () {
+            try {
+                var result = handler();
+                if (result !== null && typeof result === 'object' && typeof result.then === 'function') {
+                    result.then(null, function (e) {
+                        log('✗ ' + id + ' 异步失败：' + (e && e.message ? e.message : e));
+                    });
+                }
+            }
+            catch (e) {
+                log('✗ ' + id + ' 抛异常：' + (e && e.message ? e.message : e));
+            }
+        });
+    }
+
+    /** 打印 load/Locate 这类返回结果 */
+    function report(label, out, describe) {
+        if (out === null || typeof out !== 'object' || !('ok' in out)) {
+            log('· ' + label + ' → ' + String(out));
+            return;
+        }
+        if (out.ok) {
+            // 两种成功形态：{ ok, value }（load/查询）与 { ok, index }（select/focus）
+            var value = out.value !== undefined ? out.value : out.index;
+            log('✓ ' + label + ' → ok' + (describe === undefined ? '' : '｜' + describe(value)));
+            return;
+        }
+        log('✗ ' + label + ' → ' + (out.error ? out.error.code + '（' + out.error.phase + '）：' + out.error.message : '未知错误'));
+    }
+
+    async function loadText() {
+        var text = textEl.value.trim();
+        if (text !== '')
+            return text;
+        var response = await fetch(host.fixture);
+        if (!response.ok)
+            throw new Error('fixture HTTP ' + response.status);
+        text = (await response.text()).trim();
+        textEl.value = text;
+        return text;
+    }
+
+    // ---- 加载 / 数据 ----
+    on('cLoadFixture', async function () {
+        var v = viewer();
+        if (v === null) return;
+        var response = await fetch(host.fixture);
+        var text = (await response.text()).trim();
+        textEl.value = text;
+        report('loadBlueprint(样本)', v.loadBlueprint(text), function (value) {
+            return 'buildings=' + value.buildingCount + ' areas=' + value.areas.length
+                + ' unknownModel=' + value.unknownModelIndexes.length;
+        });
+    });
+
+    on('cLoadInput', async function () {
+        var v = viewer();
+        if (v === null) return;
+        var text = await loadText();
+        report('loadBlueprint(输入 ' + text.length + ' 字节)', v.loadBlueprint(text), function (value) {
+            return 'buildings=' + value.buildingCount;
+        });
+    });
+
+    on('cGetData', function () {
+        var v = viewer();
+        if (v === null) return;
+        var data = v.getBlueprintData();
+        log(data === null
+            ? '· getBlueprintData() → null'
+            : '✓ getBlueprintData()｜buildings=' + data.buildings.length + ' areas=' + data.areas.length
+              + ' shortDesc=' + JSON.stringify(data.header.shortDesc));
+    });
+
+    on('cParse', async function () {
+        var text = await loadText();
+        try {
+            var data = DSPBlueprintEditor.parseBlueprint(text);
+            log('✓ parseBlueprint｜buildings=' + data.buildings.length + ' areas=' + data.areas.length
+                + ' shortDesc=' + JSON.stringify(data.header.shortDesc));
+        }
+        catch (e) {
+            log('✗ parseBlueprint 失败：' + (e && e.message ? e.message : e));
+        }
+    });
+
+    on('cExportJSON', function () {
+        var v = viewer();
+        if (v === null) return;
+        var json = v.exportBlueprintJSON();
+        log(json === null ? '· exportBlueprintJSON() → null' : '✓ exportBlueprintJSON()｜' + json.length + ' 字符');
+    });
+
+    // ---- 选中 / 定位 / 信息 ----
+    on('cSelect', function () {
+        var v = viewer();
+        if (v === null) return;
+        var i = index();
+        report('selectBuilding(' + i + ')', v.selectBuilding(i), function (value) { return 'index=' + value; });
+    });
+
+    on('cSelectNull', function () {
+        var v = viewer();
+        if (v === null) return;
+        report('selectBuilding(null)', v.selectBuilding(null), function (value) { return 'index=' + value; });
+    });
+
+    on('cFocus', function () {
+        var v = viewer();
+        if (v === null) return;
+        var i = index();
+        var before = v.getCameraVersion();
+        report('focusBuilding(' + i + ')', v.focusBuilding(i), function (value) { return 'index=' + value; });
+        var cam = v.getCamera();
+        if (cam !== null)
+            log('· cameraVersion ' + before + ' → ' + v.getCameraVersion()
+                + '，相机到球心 ' + cam.position.length().toFixed(1));
+    });
+
+    on('cFocusNull', function () {
+        var v = viewer();
+        if (v === null) return;
+        report('focusBuilding(null)', v.focusBuilding(null), function (value) { return 'index=' + value; });
+    });
+
+    on('cSelected', function () {
+        var v = viewer();
+        if (v === null) return;
+        var i = v.getSelectedIndex();
+        log(i === null ? '· getSelectedIndex() → null' : '✓ getSelectedIndex() → ' + i);
+    });
+
+    on('cInfo', function () {
+        var v = viewer();
+        if (v === null) return;
+        var i = index();
+        var out = v.getBuildingInfo(i);
+        if (!out.ok) {
+            report('getBuildingInfo(' + i + ')', out);
+            return;
+        }
+        var pos = out.value.matrix.elements.slice(12, 15).map(function (n) { return n.toFixed(2); }).join(', ');
+        report('getBuildingInfo(' + i + ')', out, function (value) {
+            return 'id=' + value.id + ' 位置=(' + pos + ')';
+        });
+    });
+
+    on('cUnknown', function () {
+        var v = viewer();
+        if (v === null) return;
+        // 越界下标：预期拿到 building-not-found，而不是抛异常
+        report('selectBuilding(999)', v.selectBuilding(999), function (value) { return 'index=' + value; });
+    });
+
+    // ---- 主题 ----
+    for (var theme of [['cThemeDark', 'dark'], ['cThemeLight', 'light'], ['cThemeAuto', 'auto']]) {
+        (function (id, name) {
+            on(id, function () {
+                var v = viewer();
+                if (v === null) return;
+                v.setTheme(name);
+                var t = v.getTheme();
+                log('✓ setTheme(' + name + ') → bg=' + hex(t.sceneBackground) + ' planet=' + hex(t.planet) + ' grid=' + hex(t.grid));
+            });
+        })(theme[0], theme[1]);
+    }
+
+    on('cGetTheme', function () {
+        var v = viewer();
+        if (v === null) return;
+        var t = v.getTheme();
+        log(t === null
+            ? '· getTheme() → null'
+            : '✓ getTheme()｜bg=' + hex(t.sceneBackground) + ' planet=' + hex(t.planet)
+              + ' grid=' + hex(t.grid) + ' text=' + t.textFill + '/' + t.textStroke);
+    });
+
+    on('cCustomTheme', function () {
+        var v = viewer();
+        if (v === null) return;
+        v.setCustomTheme({ grid: 0x3fb950 });
+        var t = v.getTheme();
+        log('✓ setCustomTheme({grid:0x3fb950}) → grid=' + hex(t.grid));
+    });
+
+    // ---- 相机 / 尺寸 / 导出 ----
+    on('cCamera', function () {
+        var v = viewer();
+        if (v === null) return;
+        var cam = v.getCamera();
+        if (cam === null) {
+            log('· getCamera() → null');
+            return;
+        }
+        var p = cam.position;
+        log('✓ getCamera()｜pos=(' + p.x.toFixed(1) + ', ' + p.y.toFixed(1) + ', ' + p.z.toFixed(1) + ')'
+            + ' fov=' + cam.fov + ' 到球心=' + p.length().toFixed(1));
+    });
+
+    on('cCameraVersion', function () {
+        var v = viewer();
+        if (v === null) return;
+        log('✓ getCameraVersion() → ' + v.getCameraVersion());
+    });
+
+    on('cResetCamera', function () {
+        var v = viewer();
+        if (v === null) return;
+        v.resetCamera();
+        var cam = v.getCamera();
+        log('✓ resetCamera()' + (cam === null ? '' : '｜到球心=' + cam.position.length().toFixed(1)));
+    });
+
+    on('cSetSize', function () {
+        var v = viewer();
+        if (v === null) return;
+        v.setSize(400, 300);
+        var canvas = v.getCanvas();
+        log('✓ setSize(400,300)' + (canvas === null ? '' : '｜canvas 绘制尺寸=' + canvas.width + '×' + canvas.height));
+    });
+
+    on('cResetSize', function () {
+        var v = viewer();
+        if (v === null) return;
+        v.resetSize();
+        var canvas = v.getCanvas();
+        log('✓ resetSize()' + (canvas === null ? '' : '｜canvas 绘制尺寸=' + canvas.width + '×' + canvas.height));
+    });
+
+    on('cCanvas', function () {
+        var v = viewer();
+        if (v === null) return;
+        var canvas = v.getCanvas();
+        log(canvas === null
+            ? '· getCanvas() → null'
+            : '✓ getCanvas()｜<' + canvas.tagName.toLowerCase() + '> ' + canvas.width + '×' + canvas.height
+              + '（CSS ' + canvas.clientWidth + '×' + canvas.clientHeight + '）');
+    });
+
+    on('cDataURL', function () {
+        var v = viewer();
+        if (v === null) return;
+        var url = v.toDataURL();
+        log(url === null
+            ? '· toDataURL() → null'
+            : '✓ toDataURL()｜' + url.length + ' 字符，前缀 ' + url.slice(0, 22) + '…');
+    });
+
+    on('cToBlob', function () {
+        var v = viewer();
+        if (v === null) return;
+        return v.toBlob().then(function (blob) {
+            log(blob === null ? '· toBlob() → null' : '✓ toBlob()｜' + blob.type + ' ' + blob.size + ' 字节');
+        });
+    });
+
+    // ---- 渲染设置 / 生命周期 ----
+    on('cRealOn', function () {
+        var v = viewer();
+        if (v === null) return;
+        v.setRenderSettings({ showRealModels: true });
+        log('✓ setRenderSettings({showRealModels:true})');
+    });
+
+    on('cRealOff', function () {
+        var v = viewer();
+        if (v === null) return;
+        v.setRenderSettings({ showRealModels: false });
+        log('✓ setRenderSettings({showRealModels:false})');
+    });
+
+    on('cTexOn', function () {
+        var v = viewer();
+        if (v === null) return;
+        v.setRenderSettings({ texturesEnabled: true });
+        log('✓ setRenderSettings({texturesEnabled:true})');
+    });
+
+    on('cTexOff', function () {
+        var v = viewer();
+        if (v === null) return;
+        v.setRenderSettings({ texturesEnabled: false });
+        log('✓ setRenderSettings({texturesEnabled:false})');
+    });
+
+    on('cDispose', function () {
+        var v = viewer();
+        if (v === null) return;
+        v.dispose();
+        var leftover = document.getElementById('viewer').querySelectorAll('canvas').length;
+        log('✓ dispose()｜容器内 canvas 残留=' + leftover);
+        // 随后任一调用都应返回 already-disposed，而不是抛异常
+        report('dispose 后 loadBlueprint', v.loadBlueprint('BLUEPRINT:x'));
+    });
+
+    on('cRebuild', function () {
+        log('· 重新创建实例并复验 …');
+        host.run();
+    });
 })();
 </script>
 </body>
