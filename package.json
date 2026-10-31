@@ -2,9 +2,18 @@
     "name": "dsp_blueprint_editor",
     "version": "0.1.0",
     "private": true,
+    "main": "dist-lib/dsp-blueprint-editor.umd.js",
+    "module": "dist-lib/dsp-blueprint-editor.esm.js",
+    "types": "dist-lib/index.d.ts",
+    "unpkg": "dist-lib/dsp-blueprint-editor.umd.js",
+    "jsdelivr": "dist-lib/dsp-blueprint-editor.umd.js",
+    "files": [
+        "dist-lib"
+    ],
     "scripts": {
         "serve": "vue-cli-service serve",
         "build": "vue-cli-service build",
+        "build:lib": "node scripts/lib-build/build.js",
         "test:unit": "jest --watchAll",
         "lint": "vue-cli-service lint",
         "build-cli": "tsc --module commonjs --outDir cli",

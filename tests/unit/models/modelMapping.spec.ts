@@ -1,4 +1,4 @@
-import { iconModelAliases, modelNameCandidates, resolveModelName } from '@/models/glbAssets';
+import { availableModelNames, iconModelAliases, modelNameCandidates, resolveModelName } from '@/models/glbAssets';
 import { itemsMap } from '@/data/items';
 
 /**
@@ -49,8 +49,16 @@ describe('GLB 模型解析表', () => {
         }
     });
 
-    test('jest 环境没有 require.context：全部解析为 null（静默回退，不抛错）', () => {
-        expect(resolveModelName('smelter')).toBeNull();
-        expect(resolveModelName('splitter-4dir', 0)).toBeNull();
+    test('未登记的图标名返回 null（静默回退，不抛错）', () => {
+        expect(resolveModelName('this-model-does-not-exist')).toBeNull();
+        expect(resolveModelName('this-model-does-not-exist', 3)).toBeNull();
+    });
+
+    test('模型清单由资产解析器提供（jest 注入磁盘真值，与构建同源）', () => {
+        // 改造后「哪些文件存在」不再由 jest 环境缺 require.context 推断，
+        // 而是由 @lib/asset-resolver 的清单决定；单测里注入的是磁盘扫描结果。
+        expect(availableModelNames.has('smelter')).toBe(true);
+        expect(resolveModelName('smelter')).toBe('smelter');
+        expect(resolveModelName('accumulator-full')).toBe('accumulator');
     });
 });

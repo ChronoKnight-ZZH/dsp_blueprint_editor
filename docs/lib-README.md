@@ -10,7 +10,8 @@
 | `BlueprintViewer` | **纯 3D 预览器**（仅 Three.js 球体渲染，无 UI） | 否 |
 | `parseBlueprint` | **蓝图解析**（字符串 → 数据对象） | 否 |
 | `serializeBlueprint` | **蓝图序列化**（数据对象 → 字符串，`parseBlueprint` 的逆运算） | 否 |
-| `describeBuild` | **构建诊断快照**（每个 modelIndex 的建筑数 / GLB / 回退盒，用于问题定位） | 否 |
+| `configureAssetBaseUrl` | **资产根地址**（库构建下决定 `assets/` 位置） | 否 |
+| `describeBuild` | ✗ **不在发布面**（诊断能力，仍可从源码 `@/lib/core/describeBuild` 引用） | 否 |
 | `createBlueprintApp` | ✗ **本仓库不提供**：编辑器是独立应用（`src/App.vue`），不是可嵌入的库工厂 | — |
 
 > `BlueprintViewer` 与编辑器共用 `src/lib/core/` 渲染内核，但**不依赖 Vue**；
@@ -20,13 +21,43 @@
 
 ## 引入
 
-本仓库**不产出 npm 包**，按源码引用（webpack 别名 `@` 指向 `src`）：
+### 方式 A：源码引用（本仓库内部 / 编辑器）
+
+webpack 别名 `@` 指向 `src`，直接用即可：
 
 ```javascript
 import { BlueprintViewer, parseBlueprint } from '@/lib';
 ```
 
-`three` 是唯一必需的运行时依赖（已在本仓库 `package.json` 中）：
+### 方式 B：构建产物（宿主工程 / 纯静态页面）
+
+```bash
+yarn build:lib     # → dist-lib/（UMD + ESM + index.d.ts + 外置 assets/ + host-test.html）
+```
+
+产物说明见 `dist-lib/README.md`。两种宿主都支持，**库本身不含任何 UI/按钮**：
+
+```html
+<!-- 纯静态 script 标签：全局名 DSPBlueprintEditor -->
+<div id="viewer" style="height:480px"></div>
+<script src="./dist-lib/dsp-blueprint-editor.umd.js"></script>
+<script>
+    const viewer = new DSPBlueprintEditor.BlueprintViewer({ container: '#viewer' });
+    viewer.loadBlueprint(blueprintText);
+</script>
+```
+
+```javascript
+// 工程内 import：ESM，three 作 external
+import { BlueprintViewer, configureAssetBaseUrl } from './dist-lib/dsp-blueprint-editor.esm.js';
+configureAssetBaseUrl('https://cdn.example.com/dsp/');   // ESM 场景请显式指定资产根
+```
+
+资产（模型 / 贴图 / 图标）外置在 `dist-lib/assets/`：UMD 场景默认按加载脚本的
+`<script src>` 同级目录自动定位，搬到任意路径都不用改代码；其余场景用
+`configureAssetBaseUrl(base)` 指定（传含 `assets/` 的目录，或 `.../assets` 本身）。
+
+`three` 是唯一必需的运行时依赖（ESM 形态需要宿主自带，UMD 形态已内联）：
 
 ```bash
 yarn add three

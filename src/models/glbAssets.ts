@@ -3,65 +3,28 @@
  *
  * 策略：外部 GLB 优先，`@/data/building` 的元数据表永远作为回退。
  *
- * 关键约束（请勿随意改动）：
- * 1. 目录/递归标记/过滤正则必须是**字面量**，webpack 在编译期静态解析这三个参数；
- *    换成变量会被 webpack 当成动态依赖而报错或整目录打包。
- * 2. 使用默认（同步）`require.context`：进主 bundle 的只有 **URL 字符串**（每个几十字节），
- *    .glb 文件本身由 `vue.config.js` 的 asset/resource 规则输出成独立文件，
- *    只有建筑真的出现时才 `fetch` 下载，因此首屏不会加载任何模型数据。
- * 3. `keys()` 只是编译期静态文件名列表，不产生任何网络请求，可以放心在模块初始化时调用；
- *    它也是“文件不存在 → 静默回退”的判定依据。
+ * 资产「怎么变成 URL」由 `@lib/asset-resolver` 决定（构建期用 `resolve.alias` 切换）：
+ * - 编辑器构建 → `assetResolver.webpack.ts`：同步 `require.context`，进 bundle 的只有
+ *   URL 字符串（每个几十字节），`.glb` 由 asset/resource 规则输出成独立文件，
+ *   只有建筑真的出现时才 `fetch` 下载，首屏不加载任何模型数据；
+ * - 库构建 → `assetResolver.ts`：URL = `assetBaseUrl` 拼字符串，模型清单由构建脚本注入。
+ *
+ * 两种实现都由 `keys()` 等价的「静态文件清单」支撑，因此
+ * **不产生任何网络请求**就能判定「文件不存在 → 静默回退」。
  */
 
-/**
- * webpack `require.context` 的最小接口（@types/webpack-env 的 RequireContext
- * 返回 `any`，这里收窄成实际用到的两个成员）。
- */
-interface GlbRequireContext {
-    keys(): string[];
-    /**
-     * 同步 context 返回模块导出。`asset/resource` 生成的是 **字符串 URL**
-     * （`module.exports = __webpack_public_path__ + "models/x.glb"`），
-     * 因此不能假设是 `{ default: url }`，取值时必须两种形态都兼容。
-     */
-    (id: string): unknown;
-}
+import { assetResolver } from '@lib/asset-resolver';
 
-function createGlbContext(): GlbRequireContext | null {
+/** 磁盘上（构建产物里）实际存在的模型名（不含目录与扩展名），例如 `smelter`、`turret-laser`。 */
+export const availableModelNames: ReadonlySet<string> = collectAvailableModelNames();
+
+function collectAvailableModelNames(): ReadonlySet<string> {
     try {
-        // 必须先拿到 require.context(...) 的**调用结果**再判断类型。
-        // 千万不要写成 `typeof require.context !== 'function'`：webpack 会把这个属性访问
-        // 编译成「某个空模块的 .context」（恒为 undefined），判断永远成立，
-        // 结果就是整个 GLB 功能静默失效、全部建筑回退元数据表（已实测验证）。
-        const context = require.context('../assets/icons/models', false, /\.glb$/i);
-        return typeof context === 'function' ? context as GlbRequireContext : null;
-    } catch (e) {
-        // 打包器不支持 require.context 时静默降级为“纯元数据表”模式
-        console.warn('[glb] require.context 不可用，全部建筑回退元数据表', e);
-        return null;
+        return new Set<string>(assetResolver.glbModelNames());
     }
-}
-
-const glbContext = createGlbContext();
-
-/** `./smelter.glb` → `smelter` */
-function modelNameFromKey(key: string): string {
-    const normalized = key.replace(/\\/g, '/');
-    const base = normalized.slice(normalized.lastIndexOf('/') + 1);
-    return base.replace(/\.glb$/i, '');
-}
-
-/** 磁盘上实际存在的模型名（不含目录与扩展名），例如 `smelter`、`turret-laser`。 */
-export const availableModelNames: ReadonlySet<string> = new Set(collectAvailableModelNames());
-
-function collectAvailableModelNames(): string[] {
-    if (glbContext === null)
-        return [];
-    try {
-        return glbContext.keys().map(modelNameFromKey);
-    } catch (e) {
-        console.warn('[glb] 读取模型目录失败，全部建筑回退元数据表', e);
-        return [];
+    catch (e) {
+        console.warn('[glb] 读取模型清单失败，全部建筑回退元数据表', e);
+        return new Set<string>();
     }
 }
 
@@ -135,32 +98,21 @@ export function resolveModelName(iconName: string, variantIndex = 0): string | n
 const urlCache = new Map<string, Promise<string | null>>();
 
 /**
- * 模型名 → 由 webpack 生成的最终 URL。
+ * 模型名 → 最终 URL（编辑器：webpack 生成的 publicPath URL；库：assetBaseUrl 拼接）。
  *
  * - 模型未注册/文件不存在 → 返回 null（不抛错，不回退到猜路径）
  * - 同一个模型名只解析一次（缓存 Promise），重复调用共享结果
  * - 资源解析（chunk 加载）失败也只返回 null，由调用方静默回退元数据表
  */
-/** 从 require.context 返回的模块导出里取出 URL：既支持字符串，也支持 `{ default }`。 */
-function pickModelUrl(mod: unknown): string | null {
-    if (typeof mod === 'string')
-        return mod.length > 0 ? mod : null;
-    const def = (mod as { default?: unknown } | null | undefined)?.default;
-    return typeof def === 'string' && def.length > 0 ? def : null;
-}
-
 export function modelUrl(name: string): Promise<string | null> {
     const cached = urlCache.get(name);
     if (cached !== undefined)
         return cached;
     const task = (async (): Promise<string | null> => {
-        if (glbContext === null || !availableModelNames.has(name))
+        if (!availableModelNames.has(name))
             return null;
         try {
-            const url = pickModelUrl(await glbContext(`./${name}.glb`));
-            if (url === null)
-                console.warn(`[glb] 模型 ${name} 没有解析出 URL，回退元数据表`);
-            return url;
+            return await assetResolver.glbModelUrl(name);
         } catch (e) {
             console.warn(`[glb] 模型 ${name} 的资源解析失败，回退元数据表`, e);
             return null;
