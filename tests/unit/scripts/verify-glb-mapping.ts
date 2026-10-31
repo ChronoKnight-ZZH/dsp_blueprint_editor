@@ -10,9 +10,9 @@
 /// <reference types="node" />
 import { readdirSync } from 'fs';
 import { join } from 'path';
-import { buildingMeta } from '../src/data/building';
-import { items } from '../src/data/itemsData';
-import { modelNameCandidates } from '../src/models/glbAssets';
+import { buildingMeta } from '../../../src/data/building';
+import { items } from '../../../src/data/itemsData';
+import { modelNameCandidates } from '../../../src/models/glbAssets';
 
 const modelDir = join(__dirname, '..', 'src', 'assets', 'icons', 'models');
 

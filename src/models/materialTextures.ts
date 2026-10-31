@@ -16,7 +16,7 @@
  */
 
 import type { Object3D, Texture } from 'three';
-import { renderSettings } from '@/renderSettings';
+import { getAppliedRenderSettings } from '@/renderSettings';
 import { getBuildingEnvironment } from './envMap';
 import type { LoadedGlbModel } from './glbLoader';
 import { METALNESS_WITHOUT_SPEC_MAP, resolveModelMaterialTuning } from './modelMaterialTuning';
@@ -115,17 +115,21 @@ function applyToMaterial(
     textures: MaterialTextureSet | null,
 ): void {
     const base = snapshotOf(material);
-    const useTextures = renderSettings.texturesEnabled;
+    // 读「已生效」设置快照：仅在导入蓝图时更新；普通对象、不被依赖跟踪 ——
+    // 本函数会随建场景在 Vue computed 里执行（reapplyLoadedModelMaterials），
+    // 若直接读响应式设置，改设置会立即重建场景
+    const settings = getAppliedRenderSettings();
+    const useTextures = settings.texturesEnabled;
 
     // 0) -a 反照率：关闭后只保留材质基础色（GLB 内嵌的底色图）
-    material.map = useTextures && renderSettings.textures.albedo ? base.map : null;
+    material.map = useTextures && settings.textures.albedo ? base.map : null;
 
     // 1) 环境反射强度：给所有标准材质都设，金属/玻璃都有反射可吃，避免发黑
     material.envMap = getBuildingEnvironment();
     material.envMapIntensity = tuning.envMapIntensity;
 
     // 2) -s 高光/粗糙：金属度 / 粗糙度
-    if (useTextures && renderSettings.textures.spec && textures !== null && textures.orm !== null) {
+    if (useTextures && settings.textures.spec && textures !== null && textures.orm !== null) {
         // 有 -s 图：完全交给贴图（G=粗糙度、B=金属度），tuning.metalness 作为乘数
         material.metalness = clamp01(tuning.metalness);
         material.metalnessMap = textures.orm;
@@ -141,7 +145,7 @@ function applyToMaterial(
     }
 
     // 3) -e 自发光：emissive 必须是白色，emissiveMap 才会按图发光
-    if (useTextures && renderSettings.textures.emissive && textures !== null && textures.emissive !== null) {
+    if (useTextures && settings.textures.emissive && textures !== null && textures.emissive !== null) {
         material.emissive.setRGB(1, 1, 1);
         material.emissiveMap = textures.emissive;
         material.emissiveIntensity = tuning.emissiveIntensity;
@@ -153,7 +157,7 @@ function applyToMaterial(
     }
 
     // 4) -n 法线
-    if (useTextures && renderSettings.textures.normal && textures !== null && textures.normal !== null) {
+    if (useTextures && settings.textures.normal && textures !== null && textures.normal !== null) {
         material.normalMap = textures.normal;
         material.normalScale.set(NORMAL_SCALE_X, NORMAL_SCALE_Y);
     }

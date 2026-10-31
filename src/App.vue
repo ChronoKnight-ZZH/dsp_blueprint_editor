@@ -130,6 +130,7 @@
                         </button>
                     </li>
                 </template>
+                <div v-else class="empty-hint">{{ t('请先打开蓝图') }}</div>
                 <li class="render-settings-li">
                     <section class="render-settings">
                         <button type="button" class="advanced-toggle" :class="{ open: advancedOpen }"
@@ -233,7 +234,7 @@ import ProductionStats from './components/ProductionStats.vue';
 import { CommandQueue } from './command';
 import BuildingOverview from './components/BuildingOverview.vue';
 import { useLang } from './i18n';
-import { renderSettings, persistRenderSettings } from '@/renderSettings';
+import { renderSettings, persistRenderSettings, captureRenderSettings } from '@/renderSettings';
 import type { TextureChannel } from '@/renderSettings';
 // 仅用于类型标注，编译时擦除，不影响 defineAsyncComponent 的异步分包
 import type BlueprintEditorImpl from './components/BlueprintEditor.vue';
@@ -286,7 +287,7 @@ const textureChannels: { key: TextureChannel; suffix: string; label: string; una
 ];
 
 /** 滑动条数值上限；再往右那一档代表「无限」 */
-const limitSliderMax = 2000;
+const limitSliderMax = 2048;
 
 const limitSliderValue = computed(() => {
     const limit = renderSettings.maxInstancesPerModel;
@@ -531,6 +532,8 @@ const parseBp = (s: string) => {
     selectedBuildingIndex.value = null;
     bpStr.value = s;
     codeExpired.value = false;
+    // 导入蓝图：把面板设置固化为「已生效」快照，本次及之后的中途重建都按它渲染
+    captureRenderSettings();
     // 重新导入后场景已按最新设置重建，清掉「待生效」提示
     settingsDirty.value = false;
 }
