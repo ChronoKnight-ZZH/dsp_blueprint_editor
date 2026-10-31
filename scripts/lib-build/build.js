@@ -331,13 +331,44 @@ function verify(statsByKind, inventory, copied) {
 
 // ---------------------------------------------------------------- 主流程
 
+/**
+ * 清空输出目录。
+ *
+ * 常见坑：目录被别的进程当成 cwd（例如你正用它跑 `http-server dist-lib`），
+ * Windows 会拒绝 rmdir 并抛 EBUSY。此时退化成「只删内容、留下目录本身」——
+ * 构建结果一样正确，也不要求你先关掉预览服务。
+ */
+function cleanOutputDir(dir) {
+    try {
+        fs.rmSync(dir, { recursive: true, force: true });
+        return;
+    }
+    catch (e) {
+        if (e.code !== 'EBUSY' && e.code !== 'EPERM')
+            throw e;
+        log(`  目录被占用（${e.code}），改为逐个删除内容`);
+    }
+
+    if (!fs.existsSync(dir))
+        return;
+    for (const entry of fs.readdirSync(dir)) {
+        try {
+            fs.rmSync(path.join(dir, entry), { recursive: true, force: true });
+        }
+        catch (e) {
+            // 单个文件删不掉（例如正被打开）：说明清楚，别让构建带着旧产物继续
+            fail(`无法删除 ${entry}（${e.code}）：请先关闭占用 dist-lib 的程序再重试`);
+        }
+    }
+}
+
 async function main() {
     const startedAt = Date.now();
 
     if (path.basename(OUT) !== 'dist-lib')
         fail(`输出目录异常，拒绝清理：${OUT}`);
     log(`清理输出目录 ${OUT}`);
-    fs.rmSync(OUT, { recursive: true, force: true });
+    cleanOutputDir(OUT);
     ensureDir(OUT);
 
     const inventory = buildInventory(ROOT);

@@ -89,6 +89,12 @@ npx serve dist-lib     # 或 python -m http.server -d dist-lib 8000
 都从 `assets/` 成功加载、`toDataURL()` 非空、无 `onError`。把整个 `dist-lib/` 换个路径
 再打开，结论应完全一致。
 
+页面下方还有一个**控制面板**：31 个按钮，每个直接绑一个 `BlueprintViewer` 实例方法
+（加载 / 选中 / 聚焦 / 主题 / 相机 / 尺寸 / 导出 / 渲染设置 / 销毁重建），点击结果写进
+旁边的日志。它演示的正是「黑盒里没有 UI，UI 由宿主自己写、方法由宿主自己调」：
+面板脚本不持有闭包里的实例，而是点击时向 `window.__dspHost.getViewer()` 取当前实例，
+所以「dispose → 重建」之后按钮自动指向新实例。
+
 ## 5. 已知约束
 
 - 单实例语义：模型 / 贴图 / 图标缓存是模块级单例，同一页面只建一个 `BlueprintViewer` 最省资源；
