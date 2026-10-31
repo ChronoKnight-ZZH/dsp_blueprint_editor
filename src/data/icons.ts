@@ -1,16 +1,25 @@
+import { assetResolver } from '@lib/asset-resolver';
 import { itemsMap } from "./items";
 import { recipesMap } from "./recipes";
 
-export async function itemRecipeIconUrl(name:string): Promise<string> {
-    return (await import(/* webpackMode: "eager" */`@/assets/icons/item_recipe/${name}.png`)).default;
+/**
+ * 图标 URL。
+ *
+ * 具体实现由 `@lib/asset-resolver` 在构建期决定（见 `src/lib/assets/types.ts`）：
+ * - 编辑器构建 → `require.context` / `eager` 模板字符串 `import()`，URL 由 publicPath 生成；
+ * - 库构建（UMD/ESM）→ `assetBaseUrl` 拼字符串 + 构建期注入的图标清单，
+ *   图标不存在时**直接 reject 而不发请求**（避免 404）。
+ */
+export async function itemRecipeIconUrl(name: string): Promise<string> {
+    return assetResolver.itemRecipeIconUrl(name);
 }
 
 export async function techIconUrl(techId: number): Promise<string> {
-    return (await import(/* webpackMode: "eager" */`@/assets/icons/tech/${techId}.png`)).default;
+    return assetResolver.techIconUrl(techId);
 }
 
 export async function signalIconUrl(signalId: number): Promise<string> {
-    return (await import(/* webpackMode: "eager" */`@/assets/icons/signal/signal-${signalId}.png`)).default;
+    return assetResolver.signalIconUrl(signalId);
 }
 
 export function signalIconId(signalId: number) { return signalId; }

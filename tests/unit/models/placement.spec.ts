@@ -112,16 +112,31 @@ describe('GLB 放置矩阵', () => {
     });
 
     it('没有可用模型时：回退元数据表，且完全忽略表里的偏移/旋转', () => {
-        // jest 环境没有 require.context → 所有建筑都解析不到模型
-        // 69 在表里写着 yaw:180，但没有模型时必须一个都不生效
-        const r = resolveBuildingModel(69);
+        // 改造后「有没有模型」由 @lib/asset-resolver 的清单决定（构建期注入 / 单测注入磁盘真值），
+        // 不再依赖 jest 缺 require.context。这里把解析器换成空清单，显式复现「模型文件缺失」。
+        jest.isolateModules(() => {
+            jest.doMock('@lib/asset-resolver', () => ({
+                assetResolver: {
+                    glbModelNames: () => [],
+                    glbModelUrl: async () => null,
+                    modelTextureUrl: () => null,
+                    itemRecipeIconUrl: async () => '',
+                    techIconUrl: async () => '',
+                    signalIconUrl: async () => '',
+                },
+            }));
 
-        expect(r.glb).toBeNull();
-        expect(r.glbName).toBeNull();
-        expect(r.source).toBe('meta');
-        expect(r.meta).toBeDefined();
-        // 单位矩阵 = 不做任何变换；回退方块走的是 meta.unitBoxTrans，与本表无关
-        expect(r.placement.equals(new Matrix4())).toBe(true);
+            const isolated = require('@/models/buildingModel') as typeof import('@/models/buildingModel');
+            // 69 在表里写着 yaw:180，但没有模型时必须一个都不生效
+            const r = isolated.resolveBuildingModel(69);
+
+            expect(r.glb).toBeNull();
+            expect(r.glbName).toBeNull();
+            expect(r.source).toBe('meta');
+            expect(r.meta).toBeDefined();
+            // 单位矩阵 = 不做任何变换；回退方块走的是 meta.unitBoxTrans，与本表无关
+            expect(r.placement.equals(new Matrix4())).toBe(true);
+        });
     });
 
     it('放置计算不修改元数据表（元数据盒 / 回退渲染不受本表影响）', () => {

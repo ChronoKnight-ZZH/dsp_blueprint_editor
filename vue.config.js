@@ -1,5 +1,6 @@
 const { defineConfig } = require('@vue/cli-service')
 const webpack = require('webpack')
+const path = require('path')
 const { execSync } = require('child_process')
 
 module.exports = defineConfig({
@@ -70,6 +71,10 @@ module.exports = defineConfig({
         resolve: {
             alias: {
                 three$: 'three/src/Three.js',
+                // 资产解析层：编辑器构建固定用 webpack 实现（require.context / require /
+                // 模板字符串 import），产物与改造前逐字节一致；库构建（yarn build:lib）
+                // 通过同一别名的 $ 精确匹配切到 runtime 实现（纯字符串拼接 + 外置资产）。
+                '@lib/asset-resolver$': path.resolve(__dirname, 'src/lib/assets/assetResolver.webpack.ts'),
             }
         },
         plugins: [
