@@ -7,9 +7,13 @@ import { modelTransform, modelTransformOf, ZERO_MODEL_TRANSFORM } from '@/data/m
 import type { ModelTransform } from '@/data/modelTransform';
 import { modelNameCandidates } from '@/models/glbAssets';
 
-type NumericField = 'x' | 'y' | 'z' | 'pitch' | 'yaw' | 'roll';
+type NumericField = 'x' | 'y' | 'z' | 'pitch' | 'yaw' | 'roll' | 'scale';
 
+/** 偏移 + 旋转：这 6 个字段在 ZERO_MODEL_TRANSFORM 里应当全为 0 */
 const OFFSET_ROTATION_FIELDS: NumericField[] = ['x', 'y', 'z', 'pitch', 'yaw', 'roll'];
+
+/** 所有核心数值字段（含 scale 大小） */
+const CORE_NUMERIC_FIELDS: NumericField[] = [...OFFSET_ROTATION_FIELDS, 'scale'];
 
 function isAllZero(t: ModelTransform): boolean {
     return OFFSET_ROTATION_FIELDS.every(f => t[f] === 0);
@@ -71,9 +75,9 @@ describe('建筑模型变换表 modelTransform', () => {
         expect(metaWithoutModel).toEqual([]);
     });
 
-    it('每一行都写满 6 个有限数值（不靠 undefined 兜底）', () => {
+    it('每一行都写满 7 个核心数值（不靠 undefined 兜底）', () => {
         for (const [key, t] of Object.entries(modelTransform)) {
-            for (const f of OFFSET_ROTATION_FIELDS) {
+            for (const f of CORE_NUMERIC_FIELDS) {
                 const v = t[f];
                 expect(`${key}.${f}=${typeof v}/${Number.isFinite(v)}`)
                     .toBe(`${key}.${f}=number/true`);
@@ -94,6 +98,12 @@ describe('建筑模型变换表 modelTransform', () => {
             for (const f of ['x', 'y', 'z'] as const) {
                 expect(`${key}.${f}=${Math.abs(t[f]) <= 100}`).toBe(`${key}.${f}=true`);
             }
+        }
+    });
+
+    it('大小 scale 为正数（默认 1；0 或负数会让模型消失/翻转）', () => {
+        for (const [key, t] of Object.entries(modelTransform)) {
+            expect(`${key}.scale=${t.scale > 0}`).toBe(`${key}.scale=true`);
         }
     });
 
