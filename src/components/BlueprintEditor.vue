@@ -575,6 +575,7 @@ const SEGMENT = 200;
 import { ref, onMounted, Ref, onUnmounted, watchEffect, computed, inject } from 'vue'
 import { Scene, PerspectiveCamera, SphereGeometry, AmbientLight } from 'three';
 import { PlanetMapControls } from '@/PlanetMapControls';
+import { createSkyGradient } from '@/skyGradient';
 import { attachCamera, attachRenderer } from '@/utils';
 import { createNeutralEnvironment, setBuildingEnvironment } from '@/models/envMap';
 import { setTextureMaxAnisotropy } from '@/models/textureMaps';
@@ -610,10 +611,20 @@ setTextureMaxAnisotropy(renderer.capabilities.getMaxAnisotropy());
 setBuildingEnvironment(createNeutralEnvironment(renderer));
 
 const camera = new PerspectiveCamera(50);
+// near 保持 0.5：相机最低离地 1.5（PlanetMapControls.minHeight），最近可见面约 1.5，
+// 再往小会让 24 位深度缓冲在 z≈200 处的精度掉到 0.015 的地基抬升量以下，地基会闪
 camera.near = 0.5;
 camera.far = 3000;
 camera.position.z = 2 * R;
 attachCamera(root, camera);
+
+// 天光/星空背景：平视时地平线上一条大气雾带 + 头顶星空；拉远时星球带一圈大气边缘光
+const sky = createSkyGradient({ planetRadius: R });
+scene.add(sky.mesh);
+onUnmounted(() => {
+	scene.remove(sky.mesh);
+	sky.dispose();
+});
 
 const commandQueue = inject(commandQueueKey)!;
 
@@ -675,17 +686,93 @@ watchEffect(onCleanUp => {
 	})
 }
 
+/** 入场仰角：85° ≈ 俯瞰（旧版的「正上方地图」视角） */
+const HOME_TILT = 85 * Math.PI / 180;
+
+/**
+ * 按当前场景算出入场姿态并回到它。
+ *
+ * 锚点 = 所有建筑的世界坐标质心对应的球面点，距离按图纸外接圆半径给，
+ * 朝向取「垂直于图纸长边的切向」，这样打开蓝图时图纸长边横在屏幕水平方向。
+ */
+const applyHome = () => {
+	const c = controls;
+	if (c === null)
+		return;
+
+	let distance = 150;
+	const boxes = b.value?.bvh.boxes;
+	if (boxes !== undefined && boxes.length > 0) {
+		// 质心
+		let cx = 0, cy = 0, cz = 0;
+		for (const m of boxes) {
+			const e = m.elements;
+			cx += e[12]; cy += e[13]; cz += e[14];
+		}
+		const n = boxes.length;
+		cx /= n; cy /= n; cz /= n;
+		const length = Math.hypot(cx, cy, cz);
+		if (length > 1e-6) {
+			// 锚点：球面法线
+			const nx = cx / length, ny = cy / length, nz = cz / length;
+			// 切平面基：e1 取 +Z 在切平面上的投影（退化成 +X）
+			let e1x = -nz * nx, e1y = -nz * ny, e1z = 1 - nz * nz;
+			if (e1x * e1x + e1y * e1y + e1z * e1z < 1e-6) {
+				e1x = 1 - nx * nx; e1y = -nx * ny; e1z = -nx * nz;
+			}
+			const e1Len = Math.hypot(e1x, e1y, e1z);
+			e1x /= e1Len; e1y /= e1Len; e1z /= e1Len;
+			// e2 = n × e1
+			const e2x = ny * e1z - nz * e1y;
+			const e2y = nz * e1x - nx * e1z;
+			const e2z = nx * e1y - ny * e1x;
+			// 在切平面上量一下图纸的延展
+			let min1 = Infinity, max1 = -Infinity, min2 = Infinity, max2 = -Infinity;
+			for (const m of boxes) {
+				const e = m.elements;
+				const px = e[12] - cx, py = e[13] - cy, pz = e[14] - cz;
+				const a = px * e1x + py * e1y + pz * e1z;
+				const b2 = px * e2x + py * e2y + pz * e2z;
+				min1 = Math.min(min1, a); max1 = Math.max(max1, a);
+				min2 = Math.min(min2, b2); max2 = Math.max(max2, b2);
+			}
+			const extent1 = max1 - min1;
+			const extent2 = max2 - min2;
+			// 相机站在「垂直于长边」的方向上，长边自然横在屏幕水平方向
+			const long = extent1 >= extent2;
+			c.anchor.set(nx, ny, nz);
+			if (long)
+				c.viewDir.set(e2x, e2y, e2z);
+			else
+				c.viewDir.set(e1x, e1y, e1z);
+			// 外接圆半径 → 视野刚好兜住图纸的距离
+			distance = Math.max(40, 0.5 * Math.hypot(extent1, extent2) * 2.4);
+		}
+	}
+
+	c.setHome(c.anchor, c.viewDir, HOME_TILT, distance);
+	c.reset();
+}
+
 onMounted(() => {
 	const rootEl = root.value!;
 
+	// 星球地图相机：锚点在球面上，可自由俯仰（0 = 平视，85° = 俯瞰）
 	controls = new PlanetMapControls(camera, renderer.domElement);
 	const c = controls;
 	c.listenToKeyEvents(rootEl);
-	c.minDistance = R * 1.04;
-	c.maxDistance = R * 4;
-	c.targetRadius = R;
+	c.planetRadius = R;
+	c.minDistance = 3;
+	c.maxDistance = 1200;
+	c.minHeight = 1.5;
+	c.minTilt = 0;
+	c.maxTilt = 85 * Math.PI / 180;
+	c.tilt = 85 * Math.PI / 180;
+	c.distance = 150;
 	onUnmounted(() => c.dispose());
 	c.update();
+	// 有蓝图就锚到图纸质心，没有就停在「+Z 正上方俯瞰」的默认位置
+	applyHome();
 
 	const ray = new Ray();
 	const planetSphere = new Sphere(new Vector3(), R);
@@ -709,17 +796,25 @@ onMounted(() => {
 
 		return intersects.length === 0 ? null : intersects[0].index
 	}
+	// 右键点击剔除建筑 / 左键点击选中：记录按下位置，避免把拖拽误判为点击
+	let rightDownPos: {x: number, y: number} | null = null;
+	let leftDownPos: {x: number, y: number} | null = null;
+
 	const onClick = (e: MouseEvent) => {
+		// 左键拖拽现在是平移，拖过阈值的一次松开不算「点击选中」
+		if (leftDownPos !== null
+			&& Math.hypot(e.clientX - leftDownPos.x, e.clientY - leftDownPos.y) > 6)
+			return;
 		emit('update:selectedBuildingIndex', pickBuilding(e));
 	}
 	renderer.domElement.addEventListener('click', onClick);
 	onUnmounted(() => renderer.domElement.removeEventListener('click', onClick));
 
-	// 右键点击剔除建筑：记录右键按下位置，避免把右键拖拽误判为点击
-	let rightDownPos: {x: number, y: number} | null = null;
 	const onMouseDown = (e: MouseEvent) => {
 		if (e.button === 2)
 			rightDownPos = { x: e.clientX, y: e.clientY };
+		else if (e.button === 0)
+			leftDownPos = { x: e.clientX, y: e.clientY };
 	}
 	const onContextMenu = (e: MouseEvent) => {
 		e.preventDefault();
@@ -796,9 +891,9 @@ const getModel = (index: number) => {
 	}
 	return ref.matrix
 }
-/** 重置相机视角到默认位置（星球正上方默认距离） */
+/** 重置相机视角到入场姿态（俯瞰 + 锚在图纸质心） */
 const resetCamera = () => {
-	controls?.reset(2 * R);
+	applyHome();
 };
 defineExpose({
 	selectBoxes,

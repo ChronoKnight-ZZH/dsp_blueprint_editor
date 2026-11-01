@@ -159,7 +159,8 @@
 │   ├── command.ts                     # CommandQueue / Command / Updater
 │   ├── utils.ts                       # attachRenderer/attachCamera 等小工具
 │   ├── cli.ts                         # Node 端蓝图字符串 → JSON CLI
-│   ├── PlanetMapControls.ts           # 类 OrbitControls 的星球相机控制
+│   ├── PlanetMapControls.ts           # 星球地图相机（锚点在球面上，可自由俯仰）
+│   ├── skyGradient.ts                 # 天光背景：大气雾带 + 星空 + 星球边缘光
 │   ├── SphereGridGeometry.ts          # 球面经纬网格几何体
 │   ├── iconTexture.ts                 # 图标图集（24×24 槽位，每槽 80px）
 │   ├── icons.ts                       # 建筑图标 InstancedMesh + Shader
@@ -331,7 +332,8 @@
 | 文件                               | 职责                                                                                                       |
 | -------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `components/BlueprintEditor.vue` | 编辑器主体：场景装配、相机/控件、BVH 拾取、点击/右键交互、建筑放置/删除（放置模式 / 删除模式 / 选择）、命令后重建场景、`defineExpose` 暴露相机/选择盒/`resetCamera`。 |
-| `PlanetMapControls.ts`           | 类 `OrbitControls` 但绕星球旋转、dolly、平移，支持鼠标与触摸。                                                               |
+| `PlanetMapControls.ts`           | 星球地图相机：锚点在球面上（`anchor`）、可自由俯仰（`tilt` 0=平视 / 85°=俯瞰）、左键沿球面平移、距离受地平线联动约束，支持鼠标与触摸。                       |
+| `skyGradient.ts`                 | 渐变天光背景：全屏四边形直接写 NDC，按视线方向与当地法线的夹角取色。                                                                     |
 | `SphereGridGeometry.ts`          | 经/纬度网格 `LineSegments` 几何，用于绘制星球网格。                                                                       |
 | `bvh/bvh.ts`                     | 自实现 BVH：对所有建筑选择盒建立层次包围盒，`raycast(ray)` 返回命中建筑 index。                                                     |
 | `iconTexture.ts`                 | 24×24 图标图集纹理，按 `allIconIds()` 预分配槽位，`requestIcon` 懒加载并 `copyTextureToTexture` 上传。                        |
@@ -495,7 +497,8 @@
   - `b = shallowRef<SceneModel | null>(null)`：持有当前生效的场景模型 `{ buildings, reforms, bvh, pos }`（下游仍读 `b.value.xxx`）。重建走 `editor/scene.ts` 的 `buildSceneData`（区域定位 + 建筑矩阵 + 选择盒 + BVH + 地基格）→ `buildReforms` → `buildBuildings` → `registerUpdater`；
   - 重建用 `rebuildScene(build, applySceneModel, onError)`：**先构建、后替换**，构建抛错时旧模型留在场景里（不会出现"模型消失且不恢复"）：替换/移除/`dispose`/`scene.add` 全在 `applySceneModel` 里；
   - 选择盒 `watchEffect`：根据 `props.selectedBuildingIndex` 把 BVH 的对应盒矩阵复制到 `selectBox`；
-  - `onMounted`：实例化 `PlanetMapControls`，绑定 click（拾取建筑 emit `selectedBuildingIndex`）、contextmenu（剔除单建筑并 `queue.push(new RemoveBuildingCommand(...))`）、`requestAnimationFrame(animate)` 渲染循环，并把 `controls.updateTimeDelta / cargos.cargoMove` 推进。
+  - `onMounted`：实例化 `PlanetMapControls`（设 `planetRadius / minHeight / minTilt / maxTilt / 距离范围`），绑定 click（拾取建筑 emit `selectedBuildingIndex`，左键拖拽超过 6px 时不当作点击）、contextmenu（剔除单建筑并 `queue.push(new RemoveBuildingCommand(...))`，右键拖拽超过 6px 时不当作点击）、`requestAnimationFrame(animate)` 渲染循环，并把 `controls.updateTimeDelta / cargos.cargoMove` 推进。
+  - `applyHome()`：按建筑质心的球面点作锚点、图纸长边横向摆正、外接圆半径定距离，算出 `setHome(...)` 后 `reset()`；`resetCamera()` 就是它。
   - `defineExpose({ selectBoxes, camera, cameraPosVersion, getModel })` 供父组件访问。
 
 ### 6.8 `iconTexture.ts` `IconTexture`
@@ -949,10 +952,16 @@ customReformColorMask(uint32)  colorLen(int32)  customReformColors[colorLen](uin
 
 ### 8.5 相机控件
 
-- `PlanetMapControls extends EventDispatcher`：旋转、dolly（缩放）、平移，支持鼠标 + 触摸 + 键盘。
-- `targetRadius`：旋转中心是星球表面点，dolly 限制 `[R*1.04, R*4]`。
-- `updateTimeDelta(dt)`：阻尼惯性。
-- `reset(distance)`：把 `target` 置 `(0,0,0)`、`spherical` 置 `(distance, π/2, 0)`、清空 `sphericalDelta / panOffset / scale` 并 `update()`，用于蓝图替换时重置视角；由 `BlueprintEditor.resetCamera()` 调用 `controls.reset(2 * R)`。
+- `PlanetMapControls extends EventDispatcher`：星球地图相机（高德地图网页版那一套）。锚点是**球面上的一点**（`anchor`，单位向量）而不是球心，相机永远看向 `anchor × R`，因此可以出现真正的俯仰。支持鼠标 + 触摸 + 键盘。
+- `anchor` / `viewDir`：前者是球面单位向量（同时是当地法线），后者是切平面内由锚点指向相机的单位向量；`update()` 负责把 `viewDir` 重新投影回切平面（等价于平移时的平行移动）。
+- `tilt`：仰角，`minTilt = 0`（平视）/ `maxTilt = 85°`（俯瞰；不取 90° 是因为正上方时相机 up 与视线平行，`lookAt` 会退化）。
+- `distance` 是用户设定的期望距离，`effectiveDistance` 是受地平线约束后的实际距离（压到平视时自动收回，抬回仰角能复原缩放级别）。
+- **地平线联动**：站在离地 h 处只能看到 `R·acos(R/(R+h))` 以内的目标。`setDistance()` 拉远到锚点会被挡住时自动抬高 `tilt`；`setTilt()` 只夹范围，距离由 `effectiveDistance` 收。见 `maxDistanceForTilt` / `minTiltForDistance`。
+- `updateTimeDelta(dt)`：键盘平移（`keyPanSpeed = 240 px/s`，W/S/A/D = 上/下/左/右，与拖拽共用像素→世界换算）。
+- 鼠标映射：右键 = `MOUSE.ROTATE`（水平 → 方位，竖直 → 仰角），左键 = `MOUSE.PAN`（锚点沿球面平移），滚轮 = 改距离（唯一缩放入口），**中键 `-1` 不绑定任何动作**。拖拽有 `dragThreshold = 3px` 死区，避免单击时抖视角，也让 `BlueprintEditor` 的点击选中/右键剔除不被拖拽误判。
+- `setHome(anchor, viewDir, tilt, distance)` / `reset()`：入场姿态；由 `BlueprintEditor.applyHome()` 按建筑质心 + 外接圆半径算出（图纸长边横在屏幕水平方向），蓝图替换时重置，`N` 键也调它。
+- 相机 `up` 取 `anchor`（当地法线）：地平线永远是水平的、建筑永远竖着，但**不吸附正北**。
+- 配套：`camera.near = 0.5`（再往小会让 24 位深度缓冲在 z≈200 处的精度低于地基 `REFORM_LIFT = 0.015` 的抬升量）；`src/skyGradient.ts` 的天光背景按 `camera.up`（当地法线）取色，由三部分组成：地平线附近的大气雾带（`exp(-elev²·6.76)`）+ 更窄的辉光（`exp(-elev²·81)`）、按方向 3D 哈希撒的两层星空 + 一层极淡星云噪点、以及解析算出的星球大气边缘光（视线到球心最近距离 ≈ R 处的一圈辉光，只在相机退到 1.15R 以外时出现）。
 
 ***
 
@@ -1192,7 +1201,7 @@ cat blueprint.txt | yarn cli > bp.json
 | `silent`                                                 | `Command` 接口标志位：`true`=纯数据变更（图标/颜色/文字），仅 `stateVersion++`；`false`=几何/拓扑变更，同时 `execVersion++` 触发重建。                                                                                  |
 | `stateVersion`                                           | `CommandQueue` 状态版本号 ref，每次命令（无论 silent）都递增；`App.vue` 监听它把 `codeExpired` 置 `true`。                                                                                                  |
 | `execVersion`                                            | `CommandQueue` 执行版本号 ref，仅非 silent 命令递增；`BlueprintEditor` 的 `computed(b)` 依赖它触发整场景重建。                                                                                               |
-| `resetCamera`                                            | `BlueprintEditor` 通过 `defineExpose` 暴露的方法，内部调用 `controls.reset(2 * R)`；`App.vue.parseBp` 在蓝图替换（建筑数或尾部 MD5 后 33 位变化）时调用以重置视角。                                                        |
+| `resetCamera`                                            | `BlueprintEditor` 通过 `defineExpose` 暴露的方法，内部调用 `applyHome()`：按当前建筑质心 + 外接圆半径算出 `setHome(...)` 再 `controls.reset()`；`App.vue.parseBp` 在蓝图替换（建筑数或尾部 MD5 后 33 位变化）时调用以重置视角。                                                        |
 | `BVH`                                                    | 自实现层次包围盒，加速鼠标射线与建筑选择盒求交。                                                                                                                                                            |
 | `IconTexture`                                            | 24×24 图标图集，懒加载并 `copyTextureToTexture` 上传。                                                                                                                                          |
 | `buildingMeta`                                           | 每个模型 ID 的颜色/单位盒/选择盒/图标位置变换。                                                                                                                                                         |

@@ -20,7 +20,8 @@
 | `src/iconTexture.ts` | 24×24 槽位图集，`copyTextureToTexture` 异步上传，74 行 |
 | `src/icons.ts` | `IconsMaterial`（自定义 shader）+ `IconGeometry`（InstancedBufferGeometry）+ `Icons` Mesh，238 行 |
 | `src/cargos.ts` | 带 `cargoDistance` 实例属性的几何体 + `cargoMove` uniform 实现滑动，75 行 |
-| `src/PlanetMapControls.ts` | 类 OrbitControls 的星球相机，641 行 |
+| `src/PlanetMapControls.ts` | 星球地图相机：锚点在球面上、可自由俯仰，731 行 |
+| `src/skyGradient.ts` | 渐变天光背景（全屏四边形 + 反投影取色），116 行 |
 | `src/SphereGridGeometry.ts` | 经/纬度网格线 BufferGeometry，96 行 |
 
 ## 公开接口
@@ -122,15 +123,30 @@ export class Cargos extends InstancedMesh {
 
 ### PlanetMapControls（参见：src/PlanetMapControls.ts）
 
-类 three `OrbitControls` 的星球相机，但绕星球中心旋转（target ≈ 星球中心）。
-- 状态：`target / targetRadius / minDistance / maxDistance / minPolarAngle / maxPolarAngle / minAzimuthAngle / maxAzimuthAngle`。
-- 输入：
-  - 中键（MOUSE.ROTATE）+ 拖拽 → 绕星球旋转（`rotate(deltaX, deltaY)` 行 313-326：把屏幕像素转为球面角度 `sphericalDelta.theta / phi`）。
-  - 滚轮 → dolly（缩放），`wheelDollyBase = 0.999`。
-  - WASD → `keyRotateSpeed = 200°/s`，`updateTimeDelta` 在主循环里调用。
-  - 触屏：单指旋转（TOUCH.ROTATE），双指旋转+dolly（TOUCH.DOLLY_ROTATE）。
-- `reset(distance)`（行 129-138）：回到正上方俯视（`camera.position.set(0,0,distance)`），直接改相机位置而不是 spherical，防止被 `setFromVector3` 覆盖。
-- `update()`（行 154-267）：核心每帧更新。`Spherical` 角度累加 `sphericalDelta`，夹紧到 `[min,max]`，radius 由 `targetRadius`（星球半径）+ 缩放系数得到，`offset.setFromSpherical` 后反变换到 camera-up-is-up 空间。`EPS = 0.000001` 微小位移即触发 changeEvent。
+星球地图相机（高德地图网页版那一套）。**锚点是球面上的一点**（`anchor`，单位向量），不是球心；相机永远看向 `anchor × R`，因此才能出现真正的俯仰 —— 旧版锚在球心时，屏幕中心的视线永远垂直于球面，怎么拖都只是一张俯视图。
+
+- 状态：
+  - `anchor`（球面单位向量，同时是当地法线）/ `viewDir`（切平面内由锚点指向相机的单位向量，`update()` 保证其与 `anchor` 正交，即平移时的平行移动）。
+  - `tilt` 仰角：`minTilt = 0`（平视）/ `maxTilt = 85°`（俯瞰）。上限不取 90° 是因为正上方时相机 `up` 与视线平行、`lookAt` 会退化。
+  - `distance`（用户设定的期望距离）与 `effectiveDistance`（受地平线约束后的实际距离）分开存：压到平视时距离自动收回，抬回仰角能复原缩放级别。
+  - `minHeight = 1.5`：平视时相机贴在离地 1.5 处，不会钻进地面。
+- 每帧解算（`update()`，行 306-345）：
+  `height = minHeight + sin(tilt) × effectiveDistance`，`horizontal = cos(tilt) × effectiveDistance`；
+  `camera.position = anchor × (R + height) + viewDir × horizontal`；`camera.up = anchor`；`camera.lookAt(anchor × R)`。
+  相机 up 取当地法线 → 地平线永远水平、建筑永远竖着，但**不吸附正北**。
+- 输入：右键拖拽（`MOUSE.ROTATE`：水平 → 方位，竖直 → 仰角）、左键拖拽（`MOUSE.PAN`：锚点沿球面平移，`anchor += 切向位移 / R` 后归一化）、滚轮（`wheelDollyBase = 0.999` 乘性改距离，唯一缩放入口）、`WASD`（上下左右平移，`keyPanSpeed = 240 px/s`，与拖拽同一套像素→世界换算）、触屏单指旋转 / 双指缩放+旋转。**中键不绑定任何动作**（`mouseButtons.MIDDLE = -1`）。拖拽有 `dragThreshold = 3px` 死区，避免单击时抖视角。
+- **地平线联动**：站在离地 h 处只能看到 `R·acos(R/(R+h))` 以内的目标。`setDistance()` 拉远到锚点会被挡住时自动抬高 `tilt`；`setTilt()` 只夹范围，距离由 `effectiveDistance` 收。实现在 `maxDistanceForTilt` / `minTiltForDistance`（二分）。
+- `setHome(anchor, viewDir, tilt, distance)` / `reset()`：入场姿态。`BlueprintEditor.applyHome()` 按建筑质心的球面点作锚点、图纸长边横向摆正、外接圆半径定距离；蓝图替换时重置，`N` 键也调它。
+- 配套：`camera.near = 0.5`（再往小会让 24 位深度缓冲在 z≈200 处的精度低于地基 `REFORM_LIFT = 0.015` 的抬升量）；`src/skyGradient.ts` 的天光背景（见下节）按 `camera.up`（当地法线）取色，俯瞰时星球铺满画面看不见，平视时地平线上一条大气雾带、抬头是星空。
+
+### skyGradient（参见：src/skyGradient.ts）
+
+全屏四边形直接写 NDC（不走相机/模型矩阵，与 FOV、宽高比无关），片元里用 `uProjectionInverse` + 相机旋转反投影出视线方向 `dir`，再按 `elevation = dot(dir, camera.up)` 取色。颜色按 sRGB 直接写，不做线性转换。
+
+- **大气雾带**：`haze = exp(-elev² × 6.76)`（约 ±40° 宽带）与 `rim = exp(-elev² × 81.0)`（约 ±12° 亮边），叠出「贴着地平线那层大气」的厚度。
+- **星空**：`starLayer()` 把方向向量乘 `scale` 切 3D 格子、`hash13` 命中阈值的格子放一个星点（两层：45/0.965 与 90/0.982×0.6），星星固定在世界空间、不随相机漂移；雾带里的星星按 `1 - haze × 0.85` 被吃掉（俯瞰时 haze≈0，星空不受影响）。再叠 `noise3()` 两阶噪声做极淡星云。
+- **星球边缘光**：解析算出视线到球心的最近距离 `closest`，取 `limb = closest / R`，在 `limb ≈ 1.02` 附近加一圈 `exp(-Δ² × 100)` 的亮边 + `exp(-Δ² × 10) × 0.22` 的柔和外扩；乘 `smoothstep(1.15, 1.9, 相机半径 / R)` 只在相机退到大气层外时出现，贴地时交给上面的雾带。
+- 所有高斯一律写成 `x * x`，不用 `pow(x, 2.0)` —— `elevation` 会是负数，GLSL 的 `pow` 在底数为负时是未定义行为。
 
 ### SphereGridGeometry（参见：src/SphereGridGeometry.ts）
 
