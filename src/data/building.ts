@@ -20,6 +20,9 @@ export interface BuildingMeta {
 
 // 'box' from selectSize in SlotConfig
 // 'offset' from selectCenter in SlotConfig
+// number：建筑编号,color: number | null：建筑的颜色，使用十六进制颜色值；null：默认灰色 0xdddddd。
+// box: [number, number, number]：建筑选择框的尺寸，三个数字分别对应原始数据里的三个轴向尺寸。当前代码约定 box[1] 是高度。
+// offset: [number, number, number]：选择框中心相对建筑原点的偏移，三个数字对应三个轴向；后续会转换到渲染使用的坐标系。
 const buildingMetaRaw: [number, { color: number | null, box: [number, number, number], offset: [number, number, number] }][] = ([
     [ 35, { color: 0xE3A263, box: [0.64, 0.12, 0.64], offset: [0.0, 0.05, 0.0]}], // 低速传送带
     [ 36, { color: 0x51A896, box: [0.64, 0.12, 0.64], offset: [0.0, 0.05, 0.0]}], // 高速传送带
@@ -28,13 +31,13 @@ const buildingMetaRaw: [number, { color: number | null, box: [number, number, nu
     [ 42, { color: 0x51A896, box: [1.0, 1.0, 1.0], offset: [0.0, 0.0, 0.0]}], // 高速分拣器
     [ 43, { color: 0x61A5D7, box: [1.0, 1.0, 1.0], offset: [0.0, 0.0, 0.0]}], // 极速分拣器
     [483, { color: 0xC0C0C0, box: [1.0, 1.0, 1.0], offset: [0.0, 0.0, 0.0]}], // 集装分拣器
-    [ 38, { color: 0x3B5666, box: [2.7, 2.4, 2.7], offset: [0.0, 1.2, 0.0] }], // 四向分流器 a
-    [ 39, { color: 0x3B5666, box: [1.5, 2.4, 2.7], offset: [0.0, 1.2, 0.0] }], // 四向分流器 b
-    [ 40, { color: 0x3B5666, box: [2.7, 2.4, 2.7], offset: [0.0, 1.2, 0.0] }], // 四向分流器 c
+    [ 38, { color: 0x3B5666, box: [2.7, 2.4, 2.0], offset: [0.0, 1.2, 0.0] }], // 四向分流器 a
+    [ 39, { color: 0x3B5666, box: [1.5, 2.4, 2.0], offset: [0.0, 1.2, 0.0] }], // 四向分流器 b
+    [ 40, { color: 0x3B5666, box: [2.7, 2.4, 2.0], offset: [0.0, 1.2, 0.0] }], // 四向分流器 c
     [257, { color: 0x42B4E7, box: [2.2, 2.0, 3.0], offset: [0.0, 1.0, 0.0] }], // 自动集装机
     [208, { color: 0x57FF8F, box: [1.3, 1.4, 2.3], offset: [0.0, 0.7, 0.05] }], // 流速监测器
     [120, { color: 0xFFDB00, box: [1.3, 2.5, 4.8], offset: [0.0, 1.25, -0.2] }], // 喷涂机
-    [ 51, { color: 0xD4DEDF, box: [3.2, 2.67, 3.2], offset: [0.0, 1.33, 0.0] }], // 小型储物仓
+    [ 51, { color: 0xD4DEDF, box: [3.2, 2.67, 3.2], offset: [0.0, 1.33, -1.0] }], // 小型储物仓
     [ 52, { color: 0xD4DEDF, box: [6.2, 4.0, 4.2], offset: [0.0, 2.0, 0.0] }], // 大型储物仓
     [121, { color: 0x4696BB, box: [4.8, 4.0, 4.8], offset: [0.0, 2.0, 0.0] }], // 储液罐
     [ 65, { color: 0xEDAB5C, box: [4.2, 4.6, 4.2], offset: [0.0, 2.3, 0.0] }], // 制造台 Mk.I

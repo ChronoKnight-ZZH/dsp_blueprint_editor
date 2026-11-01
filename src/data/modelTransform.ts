@@ -78,21 +78,21 @@ export const modelTransform: Readonly<Record<number, ModelTransform>> = {
     483: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 集装分拣器 · inserter-4.glb
 
     // ── 四向分流器（三种变形共用 icon，模型按变形下标区分）───────────────
-    38: { x: 0, y: 0, z: -0.5, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 四向分流器 a · splitter-1.glb
-    39: { x: 0, y: 0, z: -0.5, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 四向分流器 b · splitter-2.glb
-    40: { x: 0, y: 0, z: -0.5, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 四向分流器 c · splitter-3.glb
+    38: { x: 0, y: 0, z: -0.4, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 四向分流器 a · splitter-1.glb
+    39: { x: 0, y: 0, z: -0.4, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 四向分流器 b · splitter-2.glb
+    40: { x: 0, y: 0, z: -0.4, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 四向分流器 c · splitter-3.glb
 
     // ── 物流设备 ──────────────────────────────────────────────────────
     257: { x: 0, y: 0, z: -0.5, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 自动集装机 · piler.glb
-    208: { x: 0, y: 0, z: -0.2, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 流速监测器 · monitor.glb
+    208: { x: 0, y: 0, z: -0.1, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 流速监测器 · monitor.glb
     120: { x: -0, y: -0.3, z: -0.4, pitch: 0, yaw: -180, roll: 0, scale: 1 }, // 喷涂机 · spray-coater.glb
     371: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 物流配送器 · delivery-machine.glb
     49: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 物流运输站 · logistic-station.glb
     50: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 星际物流运输站 · interstellar-logistic-station.glb
 
     // ── 仓储 ─────────────────────────────────────────────────────────
-    51: { x: 0, y: 0, z: -0.5, pitch: 0, yaw: 0, roll: 0, scale: 2 }, // 小型储物仓 · storage-1.glb
-    52: { x: 0, y: 0, z: -0.5, pitch: 0, yaw: 0, roll: 0, scale: 2 }, // 大型储物仓 · storage-2.glb
+    51: { x: 0, y: 0, z: -1, pitch: 0, yaw: 0, roll: 0, scale: 1.1 }, // 小型储物仓 · storage-1.glb
+    52: { x: 0, y: 0, z: -1, pitch: 0, yaw: 0, roll: 0, scale: 1.1 }, // 大型储物仓 · storage-2.glb
     121: { x: 0, y: 0, z: -0.5, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 储液罐 · storage-tank.glb
 
     // ── 制造台 ───────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ export const modelTransform: Readonly<Record<number, ModelTransform>> = {
     456: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 制造台 Mk.IV · assembler-4.glb
 
     // ── 电力 ─────────────────────────────────────────────────────────
-    44: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 电力感应塔 · tesla-coil.glb
+    44: { x: 0, y: 0, z: -0.1, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 电力感应塔 · tesla-coil.glb
     71: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 无线输电塔 · charging-pole.glb
     68: { x: 0, y: 0, z: -8, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 卫星配电站 · orbital-substation.glb
     53: { x: 0, y: 0, z: -3, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 风力涡轮机 · wind-turbine.glb
