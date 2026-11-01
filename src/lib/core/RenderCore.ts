@@ -201,8 +201,11 @@ export class RenderCore {
 
         // 控件
         this.controls = new PlanetMapControls(this._camera, this.renderer.domElement);
-        this.controls.minDistance = PLANET_RADIUS * 1.04;
-        this.controls.maxDistance = PLANET_RADIUS * 4;
+        // 换算到合并后的相机模型：本控件的 min/maxDistance 是「相机到锚点的距离」，
+        // 而这里的约束来自库侧 API 的「相机到球心的距离」1.04R ~ 4R，
+        // 故取 (1.04R − R) 与 (4R − R)（85° 俯视下 相机半径 ≈ R + 视距）。
+        this.controls.minDistance = PLANET_RADIUS * 0.04;
+        this.controls.maxDistance = PLANET_RADIUS * 3;
         this.controls.targetRadius = PLANET_RADIUS;
         const keyTarget = options.keyboardTarget === undefined ? this.container : options.keyboardTarget;
         if (keyTarget !== null)

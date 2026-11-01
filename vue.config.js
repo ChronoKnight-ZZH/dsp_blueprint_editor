@@ -1,23 +1,30 @@
 const { defineConfig } = require('@vue/cli-service')
 const webpack = require('webpack')
 const path = require('path')
+const fs = require('fs')
 const { execSync } = require('child_process')
 
 module.exports = defineConfig({
     publicPath: '/dsp_blueprint_editor/',
     transpileDependencies: false,
     // BlueprintViewer demo 页（开发验证用）：http://localhost:8080/dsp_blueprint_editor/demo.html
+    // ⚠️ `demo/main.ts` / `demo/index.html` 在合并进来的两个分支里都没有被提交
+    // （BlueprintViewer 分支只留了这段配置，它自己的 yarn build 就会因
+    //  "Can't resolve demo/main.ts" 失败）。这里改成「入口文件存在才注册该页」：
+    // 合并分支的 yarn build 可以正常通过，等 demo 入口补上后会自动生效。
     pages: {
         index: {
             entry: 'src/main.ts',
             template: 'public/index.html',
             filename: 'index.html',
         },
-        demo: {
-            entry: 'demo/main.ts',
-            template: 'demo/index.html',
-            filename: 'demo.html',
-        },
+        ...(fs.existsSync(path.resolve(__dirname, 'demo/main.ts')) ? {
+            demo: {
+                entry: 'demo/main.ts',
+                template: 'demo/index.html',
+                filename: 'demo.html',
+            },
+        } : {}),
     },
     configureWebpack: {
         module: {
