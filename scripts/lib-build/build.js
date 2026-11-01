@@ -5,19 +5,30 @@
  * `yarn build:lib` —— 产出可发布的「无头黑盒」库。
  *
  * 产物（全部落在 `dist-lib/`）：
+ *   dsp-blueprint-editor.esm.js     ESM，**three 内联**，宿主零运行时依赖
+ *   dsp-blueprint-editor.esm.d.ts   与 ESM 产物同名的类型声明（TS 按同名规则解析）
  *   dsp-blueprint-editor.umd.js     UMD，内联 three，全局名 DSPBlueprintEditor
- *   dsp-blueprint-editor.esm.js     ESM，three 作 external
- *   index.d.ts                      手写公共类型（tsc 直出会带 @/ 内部别名，宿主无法解析）
- *   host-test.html                  纯静态宿主验证页（Network 零 404 验收用）
- *   assets/                         外置资产：models/、img/models/<建筑>/、icons/{item_recipe,tech,signal}/
+ *   index.d.ts                      手写公共类型（`package.json#types` 指向它，内容同 ESM 版）
+ *   host-test.html                  纯静态宿主验证页（UMD 形态，Network 零 404 验收用）
+ *   esm-test.html                   纯静态宿主验证页（ESM + import.meta.url 资产探测验收用）
+ *   models/<name>.glb               建筑模型
+ *   img/models/<建筑>/<贴图>.png      法线 / 自发光 / spec-gloss 通道贴图
+ *   img/item_recipe/*.png           物品与配方图标
+ *   img/tech/*.png                  科技图标
+ *   img/signal/*.png                信号图标
  *
  * 关键实现点：
  * 1. 直接用 Node 调 webpack API（仓库没装 webpack-cli）；两个 target 各跑一次编译。
- * 2. UMD/ESM 都必须挂 `LimitChunkCountPlugin({ maxChunks: 1 })`：`glbLoader.ts` 里
+ * 2. 两个 target 都必须挂 `LimitChunkCountPlugin({ maxChunks: 1 })`：`glbLoader.ts` 里
  *    GLTFLoader 走的是动态 `import()`，不合并就会甩出独立 chunk，单文件产物直接废掉。
- * 3. 资产解析走 `@lib/asset-resolver` 的 runtime 实现（纯字符串拼接），资产不进 bundle，
+ * 3. ESM 是**真 ESM**（`output.module` + `library.type: 'module'`），
+ *    不再有 UMD 的 CJS `exports`/`module` 分支探测，顶层也没有 `this` 包装器；
+ *    `three` 不再 external —— 内联进产物，宿主不需要（也不应该）装 three。
+ * 4. 资产根探测：ESM 产物由 DefinePlugin 注入 `import.meta.url`，UMD 注入 `undefined`
+ *    并回落到 `<script src>`（见 `src/lib/assets/assetBaseUrl.ts`）。
+ * 5. 资产解析走 `@lib/asset-resolver` 的 runtime 实现（纯字符串拼接），资产不进 bundle，
  *    因此 webpack 不应该产出任何 asset 文件——脚本会断言这一点。
- * 4. 资产清单（哪些文件真实存在）由 `assetInventory.js` 扫描磁盘得到，用 DefinePlugin
+ * 6. 资产清单（哪些文件真实存在）由 `assetInventory.js` 扫描磁盘得到，用 DefinePlugin
  *    注入 bundle，保证运行时「文件不存在 → 直接回退」而不是先发一个 404。
  *
  * 现有 `yarn build`（vue-cli）完全不受影响：本脚本不读写 `vue.config.js`。
@@ -33,12 +44,13 @@ const { buildInventory } = require('./assetInventory');
 const ROOT = path.resolve(__dirname, '..', '..');
 const SRC = path.join(ROOT, 'src');
 const OUT = path.join(ROOT, 'dist-lib');
-const ASSETS_OUT = path.join(OUT, 'assets');
 const TSCONFIG = path.join(ROOT, 'tsconfig.json');
 const ENTRY = path.join(SRC, 'lib', 'index.ts');
 
 const UMD_FILE = 'dsp-blueprint-editor.umd.js';
 const ESM_FILE = 'dsp-blueprint-editor.esm.js';
+/** 与 ESM 产物同名：TS 解析 `import('./x.js')` 时会找 `x.d.ts` */
+const ESM_TYPES_FILE = 'dsp-blueprint-editor.esm.d.ts';
 const GLOBAL_NAME = 'DSPBlueprintEditor';
 
 // ---------------------------------------------------------------- 工具
@@ -99,6 +111,11 @@ function fromAssetRelative(root, relativePath) {
     return path.join(root, ...relativePath.split('/'));
 }
 
+/** 清单键（相对 `src/assets/`）→ 产物内相对路径：`icons/` 落 `img/`，其余原样 */
+function toOutputRelative(relativePath) {
+    return relativePath.startsWith('icons/') ? `img/${relativePath.slice('icons/'.length)}` : relativePath;
+}
+
 // ---------------------------------------------------------------- webpack 配置
 
 function createConfig(kind, inventory) {
@@ -108,7 +125,8 @@ function createConfig(kind, inventory) {
     const config = {
         name: kind,
         mode: 'production',
-        target: 'web',
+        // 运行壳是 WebView2（Chromium），ES2020 语法无需降级
+        target: ['web', 'es2020'],
         context: ROOT,
         entry: ENTRY,
         devtool: 'source-map',
@@ -117,7 +135,6 @@ function createConfig(kind, inventory) {
             clean: false,
             filename: isUmd ? UMD_FILE : ESM_FILE,
             publicPath: '',
-            globalObject: 'this',
         },
         resolve: {
             extensions: ['.ts', '.tsx', '.js', '.json'],
@@ -125,6 +142,9 @@ function createConfig(kind, inventory) {
                 '@': SRC,
                 // 库构建固定走 runtime 实现：资产外置 + 纯字符串拼接，不进 webpack 资产管线
                 '@lib/asset-resolver$': path.join(SRC, 'lib', 'assets', 'assetResolver.ts'),
+                // 与编辑器构建保持一致：走 three 的 ESM 源码，享受 tree-shaking
+                // （直接解析 `three` 包会拿到 CJS 的 build/three.cjs，体积大且无法摇树）
+                three$: 'three/src/Three.js',
             },
         },
         module: {
@@ -138,7 +158,7 @@ function createConfig(kind, inventory) {
                         transpileOnly: true,
                         compilerOptions: {
                             module: 'esnext',
-                            target: 'es2019',
+                            target: 'es2020',
                             sourceMap: true,
                             declaration: false,
                             declarationMap: false,
@@ -153,6 +173,9 @@ function createConfig(kind, inventory) {
                 VERSION: JSON.stringify(readVersion()),
                 // 构建期资产清单（见 assetInventory.js）
                 __DSP_LIB_ASSET_INVENTORY__: JSON.stringify(inventory),
+                // 资产根自动探测：ESM 注入产物自身 URL；UMD 注入 undefined，
+                // 由源码里的 typeof 守卫跳过并回落到 <script src>（见 assetBaseUrl.ts）
+                __DSP_LIB_MODULE_URL__: isUmd ? 'undefined' : 'import.meta.url',
             }),
             // 单文件产物：把 gltf-loader 动态 import 拆出来的 chunk 合并回主 chunk
             new webpack.optimize.LimitChunkCountPlugin({ maxChunks: 1 }),
@@ -169,15 +192,18 @@ function createConfig(kind, inventory) {
 
     if (isUmd) {
         config.output.library = { name: GLOBAL_NAME, type: 'umd' };
+        // 关键：ESM 顶层 `this` 是 undefined，用 `this` 当 root 会让 UMD 包装器直接崩。
+        // globalThis 在 ESM / CJS / 浏览器 script 里都指向全局对象。
+        config.output.globalObject = 'globalThis';
     }
     else {
+        // 真 ESM：宿主按普通依赖 `import`，不再探测 exports/module（Wails 会注入它们）
         config.experiments = { outputModule: true };
         config.output.library = { type: 'module' };
         config.output.module = true;
         config.output.chunkFormat = 'module';
-        config.externalsType = 'module';
-        // ESM 只外置 three（宿主自带）；其余依赖（pako 等）内联，宿主只需装 three
-        config.externals = { three: 'three' };
+        // three 有意内联：宿主没装 three（也不该让它挑版本），产物单文件自足。
+        // 因此这里**不能**再设 config.externals / externalsType。
     }
 
     return config;
@@ -212,44 +238,88 @@ function compile(config) {
 
 function copyAssets(inventory) {
     const iconsIn = path.join(SRC, 'assets', 'icons');
+    const imgOut = path.join(OUT, 'img');          // 所有图片的目标根
+    const modelsOut = path.join(OUT, 'models');    // GLB 直接放 dist-lib/models
     let copied = 0;
 
-    // 1) 建筑 GLB：src/assets/icons/models/<name>.glb → assets/models/<name>.glb
+    // 1) 建筑 GLB：src/assets/icons/models/<name>.glb → dist-lib/models/<name>.glb
+    //    注意：只复制 .glb，避免把 models 下的贴图目录也带过来
     for (const rel of inventory.models) {
         const name = rel.slice('models/'.length);
-        copyFile(path.join(iconsIn, 'models', name), fromAssetRelative(ASSETS_OUT, rel));
+        copyFile(path.join(iconsIn, 'models', name), path.join(modelsOut, ...name.split('/')));
         copied++;
     }
 
-    // 2) 通道贴图：src/assets/icons/models/<建筑>/<文件>.png → assets/img/models/<建筑>/<文件>.png
-    //    （目录名可能含空格，必须原样保留，否则会与贴图清单对不上）
+    // 2) 通道贴图：src/assets/icons/models/<建筑>/<文件>.png → dist-lib/img/models/<建筑>/<文件>.png
     const textureRoot = path.join(iconsIn, 'models');
     const textureFiles = walkFiles(textureRoot, file => /\.png$/i.test(file));
     for (const from of textureFiles) {
         const rel = path.relative(textureRoot, from).split(path.sep).join('/');
-        const to = path.join(ASSETS_OUT, 'img', 'models', ...rel.split('/'));
-        copyFile(from, to);
+        copyFile(from, path.join(imgOut, 'models', ...rel.split('/')));
         copied++;
     }
 
-    // 3) 图标：目录结构原样保留（icons/item_recipe、icons/tech、icons/signal）
-    for (const rel of [...inventory.itemRecipe, ...inventory.tech, ...inventory.signal]) {
-        copyFile(fromAssetRelative(path.join(SRC, 'assets'), rel), fromAssetRelative(ASSETS_OUT, rel));
+    // 3) 三类图标：src/assets/icons/{item_recipe,tech,signal}/... → dist-lib/img/{item_recipe,tech,signal}/...
+    const iconGroups = [
+        ['item_recipe', inventory.itemRecipe],
+        ['tech', inventory.tech],
+        ['signal', inventory.signal],
+    ];
+    for (const [category, list] of iconGroups) {
+        for (const rel of list) {
+            // inventory 里的 rel 形如 `icons/item_recipe/xxx.png`，去掉 `icons/<category>/` 前缀
+            const prefix = `icons/${category}/`;
+            const name = rel.startsWith(prefix) ? rel.slice(prefix.length) : rel.slice(rel.indexOf('/', 6) + 1);
+            copyFile(
+                fromAssetRelative(path.join(SRC, 'assets'), rel),
+                path.join(imgOut, category, ...name.split('/')),
+            );
+            copied++;
+        }
+    }
+
+    // 4) 其他 logo 图片：src/assets/icons/ 下除 models/ 以外的所有图片
+    //    - icons/<子目录>/... → dist-lib/img/icons/<子目录>/...
+    //    - icons/<文件>      → dist-lib/img/<文件>
+    const otherFiles = walkFiles(iconsIn, file => {
+        if (!/\.(png|jpe?g|svg|webp|gif)$/i.test(file))
+            return false;
+        const rel = path.relative(iconsIn, file).split(path.sep).join('/');
+        // 排除已单独处理的 models（GLB + 贴图）和三类图标
+        if (rel.startsWith('models/'))
+            return false;
+        if (/^(item_recipe|tech|signal)\//.test(rel))
+            return false;
+        return true;
+    });
+    for (const from of otherFiles) {
+        const rel = path.relative(iconsIn, from).split(path.sep).join('/');
+        const segments = rel.split('/');
+        // 根下的文件直接进 img/；子目录的进 img/icons/<子目录>/...
+        const to = segments.length === 1
+            ? path.join(imgOut, ...segments)
+            : path.join(imgOut, 'icons', ...segments);
+        copyFile(from, to);
         copied++;
     }
 
     return { copied, textures: textureFiles.length };
 }
 
+
 // ---------------------------------------------------------------- 静态文件
 
 function copyStaticFiles() {
-    for (const name of ['index.d.ts', 'host-test.html', 'README.md']) {
+    for (const name of ['index.d.ts', 'host-test.html', 'esm-test.html', 'README.md']) {
         const source = path.join(__dirname, name);
         if (!fs.existsSync(source))
             fail(`缺少模板文件：${source}`);
         copyFile(source, path.join(OUT, name));
     }
+
+    // 与 ESM 产物同名的类型声明：宿主 `import('./dsp-blueprint-editor.esm.js')`
+    // 时 TS 按「同名 .d.ts」规则命中它，不需要额外包元数据。
+    copyFile(path.join(__dirname, 'index.d.ts'), path.join(OUT, ESM_TYPES_FILE));
 
     // 验证页用的蓝图样本（相对路径 fetch，跟页面一起搬家也不会坏）
     const fixture = path.join(ROOT, 'public', 'demo', 'sample_throughput.txt');
@@ -263,7 +333,7 @@ function copyStaticFiles() {
 
 /**
  * three 是否被内联的判据：`'THREE.WebGLRenderer: …'` 是 three 里的**字符串字面量**，
- * 压缩不会改名。UMD 必须能搜到，ESM 必须搜不到（three 走 external）。
+ * 压缩不会改名。ESM 与 UMD 都必须能搜到（three 一律内联）。
  */
 const THREE_INLINE_MARKER = 'THREE.WebGLRenderer';
 
@@ -274,8 +344,8 @@ function verify(statsByKind, inventory, copied) {
         const info = statsByKind[kind].toJson({ all: false, assets: true });
         const emitted = (info.assets ?? [])
             .map(asset => asset.name)
-            // 只允许「一个 js + 它的 sourcemap」；出现 chunk/图片说明单文件或资产外置被破坏
-            .filter(name => !name.endsWith('.map'));
+            // 只允许「一个 js + 它的 sourcemap / license」；出现 chunk/图片说明单文件或资产外置被破坏
+            .filter(name => !name.endsWith('.map') && !name.endsWith('.LICENSE.txt'));
 
         if (emitted.length !== 1 || emitted[0] !== file)
             problems.push(`${kind} 产物异常：期望只产出 ${file}，实际 ${JSON.stringify(emitted)}`);
@@ -292,36 +362,51 @@ function verify(statsByKind, inventory, copied) {
             problems.push(`UMD 产物里没有全局名 ${GLOBAL_NAME}`);
         if (!umdCode.includes(THREE_INLINE_MARKER))
             problems.push('UMD 产物里找不到 three 的特征字符串，three 没有被内联');
+        if (/import\.meta/.test(umdCode))
+            problems.push('UMD 产物里出现了 import.meta：非 ESM 输出会直接语法崩溃');
+        if (!umdCode.includes('globalThis'))
+            problems.push('UMD 产物里没有 globalThis，包装器可能仍在用 this 当 root');
     }
 
     const esmCode = fs.existsSync(path.join(OUT, ESM_FILE))
         ? fs.readFileSync(path.join(OUT, ESM_FILE), 'utf8')
         : '';
     if (esmCode !== '') {
-        if (!/from\s*["']three["']/.test(esmCode))
-            problems.push('ESM 产物里没有 `from "three"`，three 没有被外置');
-        if (esmCode.includes(THREE_INLINE_MARKER))
-            problems.push('ESM 产物里内联了 three，应为 external');
+        if (/\bfrom\s*["']three["']/.test(esmCode))
+            problems.push('ESM 产物里仍有 `from "three"`，three 没有被内联');
+        if (!esmCode.includes(THREE_INLINE_MARKER))
+            problems.push('ESM 产物里找不到 three 的特征字符串，three 没有被内联');
+        if (!/import\.meta\.url/.test(esmCode))
+            problems.push('ESM 产物里没有 import.meta.url，资产根兜底探测失效');
+        if (!/\bexport\s*\{/.test(esmCode))
+            problems.push('ESM 产物里没有 `export {`，不是可 import 的模块');
+        if (esmCode.includes('webpackUniversalModuleDefinition'))
+            problems.push('ESM 产物是 UMD 包装器，output.module 没生效');
     }
 
-    for (const name of ['index.d.ts', 'host-test.html']) {
+    for (const name of ['index.d.ts', ESM_TYPES_FILE, 'host-test.html', 'esm-test.html']) {
         if (!fs.existsSync(path.join(OUT, name)))
             problems.push(`缺失静态文件：${name}`);
     }
 
+    // 类型声明必须是纯模块：`export as namespace` 会向宿主全局注入名字，导致交叉类型冲突
+    const typesPath = path.join(OUT, 'index.d.ts');
+    if (fs.existsSync(typesPath) && /^\s*export\s+as\s+namespace\b/m.test(fs.readFileSync(typesPath, 'utf8')))
+        problems.push('index.d.ts 里仍有 `export as namespace`，会污染宿主全局');
+
     // 资产抽查：每个类别各挑一个真实存在的文件
     for (const rel of [inventory.models[0], inventory.itemRecipe[0], inventory.tech[0], inventory.signal[0]].filter(Boolean)) {
-        if (!fs.existsSync(fromAssetRelative(ASSETS_OUT, rel)))
+        if (!fs.existsSync(fromAssetRelative(OUT, toOutputRelative(rel))))
             problems.push(`资产缺失：${rel}`);
     }
 
-    const modelCount = walkFiles(path.join(ASSETS_OUT, 'models'), file => /\.glb$/i.test(file)).length;
+    const modelCount = walkFiles(path.join(OUT, 'models'), file => /\.glb$/i.test(file)).length;
     if (modelCount !== inventory.models.length)
-        problems.push(`assets/models 下 GLB 数量 ${modelCount} ≠ 清单 ${inventory.models.length}`);
+        problems.push(`models 下 GLB 数量 ${modelCount} ≠ 清单 ${inventory.models.length}`);
 
-    const textureCount = walkFiles(path.join(ASSETS_OUT, 'img', 'models'), file => /\.png$/i.test(file)).length;
+    const textureCount = walkFiles(path.join(OUT, 'img', 'models'), file => /\.png$/i.test(file)).length;
     if (textureCount === 0)
-        problems.push('assets/img/models 下没有任何贴图');
+        problems.push('img/models 下没有任何贴图');
 
     if (problems.length > 0)
         fail(`产物自检失败：\n- ${problems.join('\n- ')}`);
@@ -384,9 +469,9 @@ async function main() {
         log(`  ${file}  ${(size / 1024).toFixed(1)} KB`);
     }
 
-    log('复制资产到 dist-lib/assets …');
+    log('复制资产到 dist-lib（models/ + img/）…');
     const copyResult = copyAssets(inventory);
-    log('复制静态文件（index.d.ts / host-test.html / README.md / fixtures）…');
+    log('复制静态文件（index.d.ts / esm.d.ts / host-test.html / esm-test.html / README.md / fixtures）…');
     copyStaticFiles();
 
     const summary = verify(statsByKind, inventory, copyResult.copied);

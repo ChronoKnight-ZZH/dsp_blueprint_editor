@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="data:," />
+<title>BlueprintViewer ESM 自检（import.meta.url 资产探测）</title>
+<!--
+    故意把 <base> 指到一个不存在的域：
+    - 若库错误地用 document.baseURI 拼资产 URL，models/、img/ 会全部打到这个域并 404；
+    - 正确实现应走 import.meta.url（产物文件自身 URL）所在目录。
+    因此本页全绿 = ESM 资产根兜底探测生效。
+-->
+<base href="https://invalid.example.invalid/wrong-base/" />
+<style>
+    * { box-sizing: border-box; }
+    body {
+        margin: 0;
+        padding: 20px;
+        background: #0d1117;
+        color: #e6edf3;
+        font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    h1 { font-size: 18px; margin: 0 0 6px; }
+    .hint { color: #8b949e; margin: 0 0 14px; }
+    code { background: #21262d; padding: 1px 5px; border-radius: 4px; }
+    .banner {
+        padding: 10px 14px;
+        border-radius: 6px;
+        font-weight: 600;
+        margin-bottom: 14px;
+        border: 1px solid #30363d;
+        background: #161b22;
+    }
+    .banner.running { color: #8b949e; }
+    .banner.ok { color: #3fb950; border-color: #3fb950; }
+    .banner.fail { color: #f85149; border-color: #f85149; }
+    #viewer { height: 460px; border: 1px solid #30363d; border-radius: 6px; overflow: hidden; background: #000; }
+    #log {
+        height: 180px;
+        overflow: auto;
+        margin: 14px 0 0;
+        padding: 10px;
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        font: 12px/1.55 ui-monospace, Consolas, monospace;
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
+    table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 13px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #30363d; vertical-align: top; }
+    th { color: #8b949e; font-weight: 500; }
+    td.state { width: 74px; font-weight: 600; }
+    td.state.ok { color: #3fb950; }
+    td.state.fail { color: #f85149; }
+</style>
+</head>
+<body>
+<h1>BlueprintViewer ESM 产物自检</h1>
+<p class="hint">
+    本页用 <code>&lt;base href="https://invalid.example.invalid/…"&gt;</code> 故意干扰页面基准，
+    再用 <code>import.meta.url</code> 绝对地址动态 <code>import()</code> 本目录的
+    <code>dsp-blueprint-editor.esm.js</code>。若资产（<code>models/</code>、<code>img/</code>）
+    仍然全部从本目录成功加载，说明 ESM 的 <code>import.meta.url</code> 兜底探测生效。
+    <strong>必须用 http(s) 打开本页</strong>（<code>file://</code> 下模块会被 CORS 拦住）。
+</p>
+<div id="banner" class="banner running">正在运行…</div>
+<div id="viewer"></div>
+<pre id="log"></pre>
+<table>
+    <thead><tr><th>状态</th><th>检查项</th><th>详情</th></tr></thead>
+    <tbody id="report"></tbody>
+</table>
+
+<script type="module">
+(async function () {
+    const bannerEl = document.getElementById('banner');
+    const logEl = document.getElementById('log');
+    const reportEl = document.getElementById('report');
+    const checks = [];
+    let viewer = null;
+    const failures = [];
+    const lines = [];
+
+    function log(message) {
+        lines.push('[' + new Date().toLocaleTimeString() + '] ' + message);
+        logEl.textContent = lines.join('\n');
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function check(name, ok, detail) {
+        checks.push({ name: name, ok: ok, detail: detail || '' });
+        const row = document.createElement('tr');
+        const state = document.createElement('td');
+        state.className = 'state ' + (ok ? 'ok' : 'fail');
+        state.textContent = ok ? '✓' : '✗';
+        const nameCell = document.createElement('td');
+        nameCell.textContent = name;
+        const detailCell = document.createElement('td');
+        detailCell.textContent = detail || '';
+        row.append(state, nameCell, detailCell);
+        reportEl.appendChild(row);
+        log((ok ? '✓ ' : '✗ ') + name + (detail ? ' — ' + detail : ''));
+        if (!ok)
+            failures.push(name);
+        return ok;
+    }
+
+    function finish() {
+        bannerEl.className = 'banner ' + (failures.length === 0 ? 'ok' : 'fail');
+        bannerEl.textContent = failures.length === 0
+            ? '通过：' + checks.length + ' 项检查全部成功'
+            : '失败 ' + failures.length + ' / ' + checks.length + ' 项：' + failures.join('；');
+    }
+
+    // 产物目录 = 本页真实 URL 所在目录（window.location 不受 <base> 影响；
+    // 内联 module script 的 import.meta.url 会被 <base> 影响，这里不能用）
+    const pageUrl = new URL(window.location.href);
+    const libDir = new URL('.', pageUrl).href;
+    const libUrl = new URL('dsp-blueprint-editor.esm.js', pageUrl).href;
+    log('产物目录：' + libDir);
+    log('document.baseURI（<base> 干扰值）：' + document.baseURI);
+
+    // 记录 fetch（GLB / fixture）；图片走 Resource Timing + 元素 error 事件
+    const fetched = [];
+    const failed = [];
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async function (input, init) {
+        const url = typeof input === 'string' ? input : (input && input.url) || String(input);
+        const response = await originalFetch(input, init);
+        fetched.push(url);
+        if (!response.ok)
+            failed.push(url + ' → HTTP ' + response.status);
+        return response;
+    };
+    window.addEventListener('error', function (event) {
+        const target = event.target;
+        const tag = target && target.tagName;
+        if (tag === 'IMG' || tag === 'SCRIPT' || tag === 'LINK')
+            failed.push((target.currentSrc || target.src || target.href || '未知资源') + ' → 加载失败');
+    }, true);
+
+    try {
+        const api = await import(libUrl);
+        check('ESM 模块可 import（不是 UMD 包装器）', typeof api === 'object' && api !== null);
+        for (const name of ['BlueprintViewer', 'parseBlueprint', 'serializeBlueprint', 'configureAssetBaseUrl'])
+            check('导出 ' + name, typeof api[name] === 'function');
+
+        viewer = new api.BlueprintViewer(
+            { container: '#viewer', theme: 'dark' },
+            { onError: function (error) { failed.push('onError ' + error.code + ': ' + error.message); } },
+        );
+
+        const fixtureUrl = new URL('fixtures/sample_blueprint.txt', pageUrl).href;
+        const fixtureResponse = await originalFetch(fixtureUrl);
+        const text = await fixtureResponse.text();
+        const outcome = viewer.loadBlueprint(text);
+        check('loadBlueprint 成功', outcome.ok === true,
+            outcome.ok ? outcome.value.buildingCount + ' 个建筑' : outcome.error.code);
+        check('蓝图有建筑', outcome.ok === true && outcome.value.buildingCount > 0);
+
+        // 等模型/贴图/图标请求静置
+        await new Promise(function (resolve) { setTimeout(resolve, 2500); });
+
+        // 资产请求合集：fetch 钩子（GLB）+ Resource Timing（图标 / 通道贴图的 Image 请求）
+        const resourceEntries = performance.getEntriesByType('resource').filter(function (entry) {
+            return typeof entry.name === 'string' && entry.name.indexOf(libDir) === 0;
+        });
+        const assetRequests = Array.from(new Set(
+            fetched.concat(resourceEntries.map(function (entry) { return entry.name; })),
+        )).filter(function (url) {
+            return url.indexOf('/models/') !== -1
+                || url.indexOf('/img/models/') !== -1
+                || url.indexOf('/img/item_recipe/') !== -1
+                || url.indexOf('/img/tech/') !== -1
+                || url.indexOf('/img/signal/') !== -1;
+        });
+        const outside = assetRequests.filter(function (url) { return url.indexOf(libDir) !== 0; });
+        check('资产 URL 全部落在产物目录（import.meta.url 生效）', outside.length === 0,
+            outside.length === 0 ? assetRequests.length + ' 个请求' : outside.slice(0, 5).join(' | '));
+
+        const hasModels = assetRequests.some(function (url) { return url.indexOf('/models/') !== -1; });
+        const hasImages = assetRequests.some(function (url) {
+            return url.indexOf('/img/') !== -1 && url.indexOf('/img/models/') === -1;
+        });
+        const hasTextures = assetRequests.some(function (url) { return url.indexOf('/img/models/') !== -1; });
+        check('命中 GLB 模型请求', hasModels, '');
+        check('命中图标请求', hasImages, '');
+        check('命中通道贴图请求', hasTextures, '');
+
+        // Chromium 109+：Resource Timing 带 HTTP 状态；只统计本目录资源
+        const httpFailures = resourceEntries.filter(function (entry) {
+            return typeof entry.responseStatus === 'number' && entry.responseStatus >= 400;
+        });
+        check('Network 零失败请求', failed.length === 0,
+            failed.length === 0 ? '失败 0 个' : failed.slice(0, 6).join(' | '));
+        check('Resource Timing 无 4xx/5xx', httpFailures.length === 0,
+            httpFailures.length === 0
+                ? resourceEntries.length + ' 个本目录资源'
+                : httpFailures.map(function (entry) { return entry.name + ' → ' + entry.responseStatus; }).slice(0, 6).join(' | '));
+
+        check('canvas 已挂载', !!viewer.getCanvas() && document.querySelector('#viewer canvas') !== null, '');
+        check('toDataURL() 非空', typeof viewer.toDataURL() === 'string', '');
+    }
+    catch (error) {
+        check('运行未抛异常', false, String(error && error.stack || error));
+    }
+    finally {
+        finish();
+    }
+})();
+</script>
+</body>
+</html>

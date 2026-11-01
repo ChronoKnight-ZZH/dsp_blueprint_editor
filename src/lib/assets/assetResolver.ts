@@ -43,7 +43,16 @@ const inventory = injectedInventory();
 const MODEL_PREFIX = 'models/';
 const GLB_EXTENSION = /\.glb$/i;
 
-/** `assets/` 内的全部模型路径（用于 O(1) 判断「文件到底在不在」） */
+/** 清单里的图标键是 `icons/<category>/…`，产物里落在 `img/<category>/…` */
+const INVENTORY_ICON_PREFIX = 'icons/';
+const OUTPUT_ICON_PREFIX = 'img/';
+
+/** 清单键（相对 `src/assets/`）→ 产物相对路径 */
+function iconOutputPath(inventoryPath: string): string {
+    return `${OUTPUT_ICON_PREFIX}${inventoryPath.slice(INVENTORY_ICON_PREFIX.length)}`;
+}
+
+/** 清单（相对 `src/assets/`）里的全部模型路径（用于 O(1) 判断「文件到底在不在」） */
 const modelPaths = new Set(inventory.models);
 
 /** 模型名（不含目录与扩展名），顺序沿用清单（构建时已排序） */
@@ -79,7 +88,7 @@ export const assetResolver: AssetResolver = {
             console.warn(`[asset] 无法识别的贴图路径（不在 assets/icons/models 下）：${srcRelativePath}`);
             return null;
         }
-        // 清单里的贴图在产物中落在 assets/img/models/<建筑目录>/<文件>.png
+        // 清单里的贴图在产物中落在 img/models/<建筑目录>/<文件>.png
         return resolveAssetUrl(`img/models/${relative}`);
     },
 
@@ -87,20 +96,20 @@ export const assetResolver: AssetResolver = {
         const path = `icons/item_recipe/${name}.png`;
         if (!itemRecipePaths.has(path))
             throw new Error(`找不到物品/配方图标：${name}`);
-        return resolveAssetUrl(path);
+        return resolveAssetUrl(iconOutputPath(path));
     },
 
     async techIconUrl(techId: number): Promise<string> {
         const path = `icons/tech/${techId}.png`;
         if (!techPaths.has(path))
             throw new Error(`找不到科技图标：${techId}`);
-        return resolveAssetUrl(path);
+        return resolveAssetUrl(iconOutputPath(path));
     },
 
     async signalIconUrl(signalId: number): Promise<string> {
         const path = `icons/signal/signal-${signalId}.png`;
         if (!signalPaths.has(path))
             throw new Error(`找不到信号图标：${signalId}`);
-        return resolveAssetUrl(path);
+        return resolveAssetUrl(iconOutputPath(path));
     },
 };
