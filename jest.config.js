@@ -16,7 +16,7 @@ module.exports = {
     },
     globals: {
         // runtime 资产解析器靠「构建期注入的清单」判断文件是否存在；
-        // 单测没有构建步骤，这里用同一套磁盘扫描逻辑注入（见 scripts/lib-build/assetInventory.js）
+        // 单测没有构建步骤，这里用同一套磁盘扫描逻辑注入（见 lib-build/assetInventory.js）
         __DSP_LIB_ASSET_INVENTORY__: buildInventory(__dirname),
     },
 }

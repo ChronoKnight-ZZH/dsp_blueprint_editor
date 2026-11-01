@@ -17,7 +17,7 @@
  * 由 `tsc` 兜住两个实现之间的形状漂移。
  */
 
-/** 一个资产清单：全部路径都相对 `assets/` 目录，例如 `models/smelter.glb`。 */
+/** 一个资产清单：全部路径都相对 `src/assets/` 目录，例如 `models/smelter.glb`、`icons/tech/1001.png`。 */
 export interface AssetInventory {
     /** 建筑 GLB：`models/<name>.glb` */
     readonly models: readonly string[];

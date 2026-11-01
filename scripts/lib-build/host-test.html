@@ -276,7 +276,8 @@
             var entries = performance.getEntriesByType('resource');
             for (var i = 0; i < entries.length; i++) {
                 var entry = entries[i];
-                if (entry.name.indexOf('/assets/') === -1)
+                // 产物资产只有 models/*.glb 与 img/** 两类，其余（js / html / fixture）跳过
+                if (entry.name.indexOf('/models/') === -1 && entry.name.indexOf('/img/') === -1)
                     continue;
                 var status = typeof entry.responseStatus === 'number' ? entry.responseStatus : 0;
                 if (status >= 400)
@@ -392,17 +393,32 @@
                 ? '成功请求 ' + okCount + ' 个，失败 0 个'
                 : errors.length + ' 个失败：' + errors.slice(0, 8).join(' | '));
 
-        check('GLB 模型从 assets/models/ 加载成功',
-            assets.ok.some(function (u) { return u.indexOf('/assets/models/') !== -1; }),
-            '命中 ' + assets.ok.filter(function (u) { return u.indexOf('/assets/models/') !== -1; }).length + ' 个模型请求',
+        /** 模型请求：models/ 下，且不是 img/models/ 的贴图 */
+        function isModel(u) {
+            return u.indexOf('/models/') !== -1 && u.indexOf('/img/models/') === -1;
+        }
+        /** 图标请求：img/{item_recipe,tech,signal}/ 下 */
+        function isIcon(u) {
+            return u.indexOf('/img/item_recipe/') !== -1
+                || u.indexOf('/img/tech/') !== -1
+                || u.indexOf('/img/signal/') !== -1;
+        }
+        /** 通道贴图请求：img/models/ 下 */
+        function isTexture(u) {
+            return u.indexOf('/img/models/') !== -1;
+        }
+
+        check('GLB 模型从 models/ 加载成功',
+            assets.ok.some(isModel),
+            '命中 ' + assets.ok.filter(isModel).length + ' 个模型请求',
             true);
-        check('图标从 assets/icons/ 加载成功',
-            assets.ok.some(function (u) { return u.indexOf('/assets/icons/') !== -1; }),
-            '命中 ' + assets.ok.filter(function (u) { return u.indexOf('/assets/icons/') !== -1; }).length + ' 个图标请求',
+        check('图标从 img/{item_recipe,tech,signal}/ 加载成功',
+            assets.ok.some(isIcon),
+            '命中 ' + assets.ok.filter(isIcon).length + ' 个图标请求',
             true);
-        check('通道贴图从 assets/img/models/ 加载成功',
-            assets.ok.some(function (u) { return u.indexOf('/assets/img/models/') !== -1; }),
-            '命中 ' + assets.ok.filter(function (u) { return u.indexOf('/assets/img/models/') !== -1; }).length + ' 个贴图请求',
+        check('通道贴图从 img/models/ 加载成功',
+            assets.ok.some(isTexture),
+            '命中 ' + assets.ok.filter(isTexture).length + ' 个贴图请求',
             true);
     }
 
@@ -443,10 +459,10 @@
             document.querySelectorAll('#viewer button').length === 0, '容器内 button 数=0');
 
         // ---- 2. 资产根地址：本页**故意不调用** configureAssetBaseUrl ----
-        // UMD 场景的默认行为是「按加载本库的 <script src> 所在目录找 assets/」，
+        // UMD 场景的默认行为是「按加载本库的 <script src> 所在目录找 models/ 与 img/」，
         // 这才是「把 dist-lib 搬到任意路径都能跑」的关键，所以第一阶段先验证自动探测；
         // configureAssetBaseUrl 的可调用性放在资源静置之后再验（那时不会影响已发生的请求）。
-        check('未显式配置资产根（走自动探测）', true, 'assets/ 与 UMD 脚本同级');
+        check('未显式配置资产根（走自动探测）', true, 'models/、img/ 与 UMD 脚本同级');
 
         // ---- 3. 实例化 ----
         var errors = [];
@@ -546,7 +562,9 @@
                 // 的机器可验证形式（自动探测生效），而不是页面硬编码了某个绝对路径。
                 var scriptTag = document.querySelector('script[src*="dsp-blueprint-editor"]');
                 var scriptDir = scriptTag === null ? null : new URL('.', scriptTag.src).href;
-                var assetsAll = collectedAssets().ok.filter(function (u) { return u.indexOf('/assets/') !== -1; });
+                var assetsAll = collectedAssets().ok.filter(function (u) {
+                    return u.indexOf('/models/') !== -1 || u.indexOf('/img/') !== -1;
+                });
                 check('资产 URL 全部指向 UMD 脚本同级目录（自动探测生效）',
                     scriptDir !== null
                     && assetsAll.every(function (u) { return u.indexOf(scriptDir) === 0; }),

@@ -3,18 +3,19 @@
  *
  * 为什么不 `tsc --declaration` 直出：源码里的公共类型依赖 `@/blueprint/parser`、
  * `@/renderSettingsTypes` 这类内部别名，宿主工程没有 `@` 别名，直出会得到一串
- * 无法解析的 import。这里按发布面重写一遍，宿主只要装了 `three` 就能用。
+ * 无法解析的 import。这里按发布面重写一遍，宿主只要装了 `three` 的类型就能用。
  *
  * 对应运行时导出（`src/lib/index.ts`）：
  *   BlueprintViewer / parseBlueprint / serializeBlueprint / configureAssetBaseUrl
  *
- * UMD 宿主（`<script src="dsp-blueprint-editor.umd.js">`）可直接用全局
- * `DSPBlueprintEditor`，类型通过 `export as namespace` 一并提供。
+ * 本文件是**纯模块**声明，不写 `export as namespace`：
+ * 产出的 ESM 里宿主按 `import('./dsp-blueprint-editor.esm.js')` 使用，
+ * TS 会按同名规则解析到 `dsp-blueprint-editor.esm.d.ts`（与 `index.d.ts`
+ * 内容相同）。`export as namespace` 会给全局注入 `DSPBlueprintEditor`，
+ * 与宿主自己的全局声明交叉冲突，所以这里刻意不提供。
  */
 
 import type { Matrix4, PerspectiveCamera } from 'three';
-
-export as namespace DSPBlueprintEditor;
 
 // ---------------------------------------------------------------- 渲染设置
 
@@ -344,11 +345,17 @@ export function serializeBlueprint(data: BlueprintData): string;
 /**
  * 配置资产根地址（**仅库构建生效**；编辑器构建下资产 URL 由 webpack publicPath 决定）。
  *
- * @param baseUrl 含 `assets/` 的那个目录（写成 `.../assets` 本身也接受）；
+ * @param baseUrl 库产物根目录（含 `models/` 与 `img/` 的那一级）；
  *                传 `null` / `''` 清除配置，回到自动探测。
  *
- * 默认行为：UMD 场景自动取加载本库的 `<script src>` 所在目录，因此把 `dist-lib/`
- * 整体搬到任意路径、任意子目录都不需要改代码。ESM 场景（打包器里 import）通常
- * 需要显式指定，例如 CDN：`configureAssetBaseUrl('https://cdn.example.com/dsp/')`。
+ * 默认行为（优先级从高到低）：
+ * 1. ESM 产物自动取 `import.meta.url`（产物 chunk 自身 URL）所在目录 ——
+ *    Vite dev / 原生 `<script type="module">` 下就是产物同目录，零配置；
+ *    打包后指向宿主 chunk 目录，生产环境需把资产放到该目录或显式配置；
+ * 2. UMD 产物自动取加载本库的 `<script src>` 所在目录；
+ * 3. `document.baseURI` 兜底。
+ *
+ * 只有需要把资产放到别处（CDN、子路径）时才需要显式调用，例如：
+ * `configureAssetBaseUrl('https://cdn.example.com/dsp/')`。
  */
 export function configureAssetBaseUrl(baseUrl: string | null | undefined): void;
