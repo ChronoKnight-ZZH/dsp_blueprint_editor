@@ -22,8 +22,6 @@ const props = defineProps<{
     display: flex;
     flex-direction: row;
     justify-content: space-between;
-
-    background: #B2B2B2;
     &.opened {
         background: #4A8BA8;
     }

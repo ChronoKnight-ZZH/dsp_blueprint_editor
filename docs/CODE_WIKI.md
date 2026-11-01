@@ -22,6 +22,7 @@
 13. [运行与构建方式](#13-运行与构建方式)
 14. [CI/CD 与部署](#14-cicd-与部署)
 15. [附：关键概念速查表](#15-附关键概念速查表)
+16. [建筑模型渲染系统（GLB + 通道贴图）](#16-建筑模型渲染系统glb--通道贴图)
 
 ***
 
@@ -158,12 +159,14 @@
 │   ├── command.ts                     # CommandQueue / Command / Updater
 │   ├── utils.ts                       # attachRenderer/attachCamera 等小工具
 │   ├── cli.ts                         # Node 端蓝图字符串 → JSON CLI
-│   ├── PlanetMapControls.ts           # 类 OrbitControls 的星球相机控制
+│   ├── PlanetMapControls.ts           # 星球地图相机（锚点在球面上，可自由俯仰）
+│   ├── skyGradient.ts                 # 天光背景：大气雾带 + 星空 + 星球边缘光
 │   ├── SphereGridGeometry.ts          # 球面经纬网格几何体
 │   ├── iconTexture.ts                 # 图标图集（24×24 槽位，每槽 80px）
 │   ├── icons.ts                       # 建筑图标 InstancedMesh + Shader
 │   ├── iconSubscript.ts               # 传送带数字下标渲染
 │   ├── cargos.ts                      # 传送带/分拣器上的货物动画
+│   ├── renderSettings.ts              # 渲染高级设置（reactive + sessionStorage 持久化）
 │   ├── swStatus.vue                   # Service Worker 升级提示
 │   ├── shims-vue.d.ts                 # .vue 类型声明
 │   ├── blueprint/
@@ -230,12 +233,23 @@
 │   ├── editor/                        # 编辑器运行时（非 UI）
 │   │   ├── placementState.ts          # 放置/删除/地基模式与当前选中建筑（reactive 单例）
 │   │   └── scene.ts                   # 场景重建：buildSceneData（区域定位+矩阵+BVH+地基格）/ rebuildScene 原子替换
+│   ├── models/                        # 外部 GLB 建筑模型（当前「建筑模型」分支新增）
+│   │   ├── glbAssets.ts               # GLB 资源注册表：require.context 索引 / 别名 / 变形候选 / modelUrl
+│   │   ├── glbLoader.ts               # 加载器：懒加载 / 缓存 / 并发去重 / 8s 超时 / 失败负缓存 / 释放
+│   │   ├── buildingModel.ts           # 解析器：GLB 优先 + 元数据回退、放置矩阵、映射报告
+│   │   ├── glbInstances.ts            # 子网格级 InstancedMesh 实例化（几何/材质复用）
+│   │   ├── textureManifest.ts         # 自动生成：模型名::材质名 → 法线/自发光/spec 贴图 URL
+│   │   ├── textureMaps.ts             # 通道贴图加载 + Unity spec-gloss → ORM 打包
+│   │   ├── materialTextures.ts        # 把通道贴图/调参挂到材质（受 renderSettings 控制）
+│   │   ├── modelMaterialTuning.ts     # 78 个模型的手调参数表（emissive/envMap/metalness）
+│   │   └── envMap.ts                  # 程序化中性环境反射（PMREM，只挂建筑材质）
 │   ├── data/
 │   │   ├── index.ts                   # 汇总导出
 │   │   ├── types.ts                   # Item/Recipe/Tech/Signal/MIDI
 │   │   ├── items.ts / itemsData.ts    # 物品表 + 分类判定
 │   │   ├── recipes.ts / recipesData.ts # 配方表
 │   │   ├── building.ts                # 建筑元数据（盒子尺寸/颜色/图标位）
+│   │   ├── modelTransform.ts          # 逐模型偏移/旋转/缩放变换表（62 行，默认全 0）
 │   │   ├── buildingSlots.ts           # 建筑 slot 坐标表 + 面分组表
 │   │   ├── buildingCategories.ts      # 底部建筑面板分类表 + variants
 │   │   ├── buildingPowerData.ts       # 建筑基础功耗/速度倍率/是否可加速
@@ -311,20 +325,31 @@
 | `i18n.ts`    | `createI18n` + `useLang`（自动跟随浏览器语言）+ `itemName/recipeName` 名称查询。                                                       |
 | `utils.ts`   | `attachRenderer/attachCamera`：把 Three 的 renderer/camera 与 Vue 容器尺寸/窗口 resize 绑定。                                       |
 | `cli.ts`     | Node CLI：从 stdin 读蓝图字符串，输出 JSON 结构（`yarn cli`）。                                                                        |
+| `renderSettings.ts` | 渲染高级设置的全局响应式状态：`showRealModels / texturesEnabled / textures[7 通道] / maxInstancesPerModel`；从 `sessionStorage` 恢复，`persistRenderSettings()` 写回（`Infinity` 序列化为 `null`）。见 §16.9。 |
 
 ### 5.3 3D 渲染层 `src/`
 
 | 文件                               | 职责                                                                                                       |
 | -------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `components/BlueprintEditor.vue` | 编辑器主体：场景装配、相机/控件、BVH 拾取、点击/右键交互、建筑放置/删除（放置模式 / 删除模式 / 选择）、命令后重建场景、`defineExpose` 暴露相机/选择盒/`resetCamera`。 |
-| `PlanetMapControls.ts`           | 类 `OrbitControls` 但绕星球旋转、dolly、平移，支持鼠标与触摸。                                                               |
+| `PlanetMapControls.ts`           | 星球地图相机：锚点在球面上（`anchor`）、可自由俯仰（`tilt` 0=平视 / 85°=俯瞰）、左键沿球面平移、距离受地平线联动约束，支持鼠标与触摸。                       |
+| `skyGradient.ts`                 | 渐变天光背景：全屏四边形直接写 NDC，按视线方向与当地法线的夹角取色。                                                                     |
 | `SphereGridGeometry.ts`          | 经/纬度网格 `LineSegments` 几何，用于绘制星球网格。                                                                       |
 | `bvh/bvh.ts`                     | 自实现 BVH：对所有建筑选择盒建立层次包围盒，`raycast(ray)` 返回命中建筑 index。                                                     |
 | `iconTexture.ts`                 | 24×24 图标图集纹理，按 `allIconIds()` 预分配槽位，`requestIcon` 懒加载并 `copyTextureToTexture` 上传。                        |
 | `icons.ts`                       | 建筑图标的 `InstancedBufferGeometry` + 自定义 `ShaderMaterial`，按 iconId 计算 UV。                                   |
 | `iconSubscript.ts`               | 传送带货物计数（如 `12k`）下标渲染。                                                                                    |
 | `cargos.ts`                      | 传送带/分拣器上滑动的货物 `InstancedMesh`，通过自定义 shader 的 `cargoMove` uniform 实现沿 z 轴移动动画。                            |
-| `data/building.ts`               | 每种建筑模型的 `color/unitBoxTrans/selectUnitBoxTrans/iconTrans`，以及"无图标建筑"集合、物流塔槽位变换。                           |
+| `data/building.ts`               | 每种建筑模型的 `color/unitBoxTrans/selectUnitBoxTrans/iconTrans`，以及"无图标建筑"集合、物流塔槽位变换。**当前分支另派生** `boxSize / boxCenter`（z 轴向上的宽/深/高与中心），供 GLB 模型对齐使用。 |
+| `models/glbAssets.ts`            | GLB 资源注册表：同步 `require.context` 索引、文件名集合、别名/变形表、`modelUrl` Promise 缓存（§16.2）。 |
+| `models/glbLoader.ts`            | GLB 加载器：懒加载、缓存、并发去重、8s 超时、失败负缓存、释放；契约「永不 reject」（§16.3）。 |
+| `models/buildingModel.ts`        | 模型解析器：`modelIndex → Item.icon → GLB`、放置矩阵、按需请求、变更订阅、`getModelMappingReport()`（§16.2/§16.4）。 |
+| `models/glbInstances.ts`         | `GlbModelInstances`：每个 GLB 子网格一个 `InstancedMesh`，几何/材质复用一份（§16.5）。 |
+| `models/textureManifest.ts`      | **自动生成**的材质 → 通道贴图 URL 清单（`模型名::材质名 → {normal, emissive, spec}`）（§16.6）。 |
+| `models/textureMaps.ts`          | 通道贴图懒加载/去重/超时；`flipY=false`；把 Unity spec-gloss 现场打包成 ORM 图（§16.6）。 |
+| `models/materialTextures.ts`     | 把通道贴图与调参挂到 `MeshStandardMaterial`，并遵守 `renderSettings` 的通道开关（§16.7）。 |
+| `models/modelMaterialTuning.ts`  | 78 个模型的手调参数表（`emissiveIntensity / envMapIntensity / metalness`）（§16.7）。 |
+| `models/envMap.ts`               | 程序化中性环境反射（PMREM 渐变图），只挂建筑材质、不设 `scene.environment`（§16.8）。 |
 
 ### 5.4 UI 组件层 `src/components/`
 
@@ -356,7 +381,8 @@
 | `types.ts`                                | `Item / ItemStack / Recipe / Tech / Signal / MIDI` 类型定义。                                                                                                                                                                                                                                              |
 | `items.ts`                                | 由 `itemsData.ts` 构建 `itemsMap`；提供 `isBelt/isInserter/isStation/...` 等 itemId 分类判定；`allAssemblers` 集合（用于 `parser.ts` 注册参数解析器）。                                                                                                                                                                         |
 | `recipes.ts`                              | 由 `recipesData.ts` 构建 `recipesMap`。                                                                                                                                                                                                                                                                   |
-| `building.ts`                             | `buildingMeta` 表：每种模型 ID 的颜色、单位盒/选择盒变换、图标位置；`noIconBuildings`、`stationSlotTrans`。                                                                                                                                                                                                                     |
+| `building.ts`                             | `buildingMeta` 表：每种模型 ID 的颜色、单位盒/选择盒变换、图标位置；`noIconBuildings`、`stationSlotTrans`。**当前分支另派生只读字段** `boxSize / boxCenter`（`[宽, 深, 高]` 与中心，z 轴向上，供 GLB 放置矩阵使用，表内数值未改动）。 |
+| `modelTransform.ts`                       | 逐模型变换表（与 `buildingMeta` 同键，62 行，默认全 0）：`x/y/z`（格）+ `pitch/yaw/roll`（度）+ 可选 `upAxis/align/scale`；`modelTransformOf(modelIndex)` 查询（§16.4）。 |
 | `buildingSlots.ts`                        | 建筑 slot 坐标表（下标 = 游戏 slot 编号）+ **面分组表**（每面恰好 3 个，见 §6.15）：`getBuildingSlots / hasSlots / faceSlotIndices / slotFaceOf / slotDisplayPos / findNearestSlot / findNearestFreeSlot`；常量 `FACE_TOL = 0.03`、`SLOT_MARKER_FACE_INSET = 0.18`。                                                                  |
 | `beltPorts.ts`                            | **建筑传送带口表**（下标 = 游戏 slot，`{x, y, z, nx, ny}`；x 为赤道基准、`nx/ny` 为朝外法线）+ 查询：`getBeltPorts / beltPortAt / hasBeltPorts / portWorldOffset / portWorldNormal / nearestBeltPort / pickBeltPort`，见 §6.20。未标定建筑退回 `buildingSlots` 同名 slot（近似）。                                                                  |
 | `stacking.ts`                             | 建筑堆叠与箱顶放置规则（见 §6.14）：`stackOffsetFor / stackBaseFor / stackedZ / linkStack / stackColumn / inheritLabSettings / stackPortDefaults / requiresBase / isStackLink`；常量 `STACK_TOP_SLOT = 15`、`STACK_BOTTOM_SLOT = 14`、`BOX_TOP_SLOT = 13`。                                                                |
@@ -471,7 +497,8 @@
   - `b = shallowRef<SceneModel | null>(null)`：持有当前生效的场景模型 `{ buildings, reforms, bvh, pos }`（下游仍读 `b.value.xxx`）。重建走 `editor/scene.ts` 的 `buildSceneData`（区域定位 + 建筑矩阵 + 选择盒 + BVH + 地基格）→ `buildReforms` → `buildBuildings` → `registerUpdater`；
   - 重建用 `rebuildScene(build, applySceneModel, onError)`：**先构建、后替换**，构建抛错时旧模型留在场景里（不会出现"模型消失且不恢复"）：替换/移除/`dispose`/`scene.add` 全在 `applySceneModel` 里；
   - 选择盒 `watchEffect`：根据 `props.selectedBuildingIndex` 把 BVH 的对应盒矩阵复制到 `selectBox`；
-  - `onMounted`：实例化 `PlanetMapControls`，绑定 click（拾取建筑 emit `selectedBuildingIndex`）、contextmenu（剔除单建筑并 `queue.push(new RemoveBuildingCommand(...))`）、`requestAnimationFrame(animate)` 渲染循环，并把 `controls.updateTimeDelta / cargos.cargoMove` 推进。
+  - `onMounted`：实例化 `PlanetMapControls`（设 `planetRadius / minHeight / minTilt / maxTilt / 距离范围`），绑定 click（拾取建筑 emit `selectedBuildingIndex`，左键拖拽超过 6px 时不当作点击）、contextmenu（剔除单建筑并 `queue.push(new RemoveBuildingCommand(...))`，右键拖拽超过 6px 时不当作点击）、`requestAnimationFrame(animate)` 渲染循环，并把 `controls.updateTimeDelta / cargos.cargoMove` 推进。
+  - `applyHome()`：按建筑质心的球面点作锚点、图纸长边横向摆正、外接圆半径定距离，算出 `setHome(...)` 后 `reset()`；`resetCamera()` 就是它。
   - `defineExpose({ selectBoxes, camera, cameraPosVersion, getModel })` 供父组件访问。
 
 ### 6.8 `iconTexture.ts` `IconTexture`
@@ -925,10 +952,16 @@ customReformColorMask(uint32)  colorLen(int32)  customReformColors[colorLen](uin
 
 ### 8.5 相机控件
 
-- `PlanetMapControls extends EventDispatcher`：旋转、dolly（缩放）、平移，支持鼠标 + 触摸 + 键盘。
-- `targetRadius`：旋转中心是星球表面点，dolly 限制 `[R*1.04, R*4]`。
-- `updateTimeDelta(dt)`：阻尼惯性。
-- `reset(distance)`：把 `target` 置 `(0,0,0)`、`spherical` 置 `(distance, π/2, 0)`、清空 `sphericalDelta / panOffset / scale` 并 `update()`，用于蓝图替换时重置视角；由 `BlueprintEditor.resetCamera()` 调用 `controls.reset(2 * R)`。
+- `PlanetMapControls extends EventDispatcher`：星球地图相机（高德地图网页版那一套）。锚点是**球面上的一点**（`anchor`，单位向量）而不是球心，相机永远看向 `anchor × R`，因此可以出现真正的俯仰。支持鼠标 + 触摸 + 键盘。
+- `anchor` / `viewDir`：前者是球面单位向量（同时是当地法线），后者是切平面内由锚点指向相机的单位向量；`update()` 负责把 `viewDir` 重新投影回切平面（等价于平移时的平行移动）。
+- `tilt`：仰角，`minTilt = 0`（平视）/ `maxTilt = 85°`（俯瞰；不取 90° 是因为正上方时相机 up 与视线平行，`lookAt` 会退化）。
+- `distance` 是用户设定的期望距离，`effectiveDistance` 是受地平线约束后的实际距离（压到平视时自动收回，抬回仰角能复原缩放级别）。
+- **地平线联动**：站在离地 h 处只能看到 `R·acos(R/(R+h))` 以内的目标。`setDistance()` 拉远到锚点会被挡住时自动抬高 `tilt`；`setTilt()` 只夹范围，距离由 `effectiveDistance` 收。见 `maxDistanceForTilt` / `minTiltForDistance`。
+- `updateTimeDelta(dt)`：键盘平移（`keyPanSpeed = 240 px/s`，W/S/A/D = 上/下/左/右，与拖拽共用像素→世界换算）。
+- 鼠标映射：右键 = `MOUSE.ROTATE`（水平 → 方位，竖直 → 仰角），左键 = `MOUSE.PAN`（锚点沿球面平移），滚轮 = 改距离（唯一缩放入口），**中键 `-1` 不绑定任何动作**。拖拽有 `dragThreshold = 3px` 死区，避免单击时抖视角，也让 `BlueprintEditor` 的点击选中/右键剔除不被拖拽误判。
+- `setHome(anchor, viewDir, tilt, distance)` / `reset()`：入场姿态；由 `BlueprintEditor.applyHome()` 按建筑质心 + 外接圆半径算出（图纸长边横在屏幕水平方向），蓝图替换时重置，`N` 键也调它。
+- 相机 `up` 取 `anchor`（当地法线）：地平线永远是水平的、建筑永远竖着，但**不吸附正北**。
+- 配套：`camera.near = 0.5`（再往小会让 24 位深度缓冲在 z≈200 处的精度低于地基 `REFORM_LIFT = 0.015` 的抬升量）；`src/skyGradient.ts` 的天光背景按 `camera.up`（当地法线）取色，由三部分组成：地平线附近的大气雾带（`exp(-elev²·6.76)`）+ 更窄的辉光（`exp(-elev²·81)`）、按方向 3D 哈希撒的两层星空 + 一层极淡星云噪点、以及解析算出的星球大气边缘光（视线到球心最近距离 ≈ R 处的一圈辉光，只在相机退到 1.15R 以外时出现）。
 
 ***
 
@@ -1064,6 +1097,10 @@ python3 i18n.py ... -o ../locales     # 生成 zh/en locale
 | `beltPorts.spec.ts`           | 建筑传送带口标定表（§6.20）：全部样本里每个"带↔建筑"连接都能用口表复现带端位置（≤0.15 格）与朝向（取出沿法线、送入沿法线反向）；分流器口分两层（接 z=1 的口时带端也在 z=1）；物流站 12 口环绕向与法线。                                                                                                                                                                                                  |
 | `beltBuilding.spec.ts`        | 传送带直连建筑（串联）与建筑骑带（并联）：取出/送入的连接字段与带端精确坐标、串联链路与末格终结、高层口整条带同层、导出再解析保持；带从建筑格中间穿过或建筑放在带格上都不写任何连接字段；站口 `dir` 随连接同步与撤销、口已被占用时截断。                                                                                                                                                                                           |
 | `stationPort.spec.ts`         | 物流站端口物品序号语义（小塔 1..4 / 大塔 1..5 + 第 6 项空间翘曲器 1210，`sample_outpost_ils` #5 的 `storageIdx=6`）；`SetStationPortCommand` 的 do/undo、`silent`、导出再解析、改物品时同步口上那条带的图标、删带时口方向归零与撤销还原。                                                                                                                                           |
+| `modelMapping.spec.ts`        | GLB 映射：别名 / 变形（splitter-4dir → splitter-1/2/3）/ LOD 回退的候选顺序；无 `require.context` 时全部解析为 `null`（静默回退、不抛错）。 |
+| `modelTransform.spec.ts`      | 变换表：62 行与 `buildingMeta` 同键、每行都有真实 `.glb` 对应；偏移的格→世界单位换算与角度→弧度换算。 |
+| `placement.spec.ts`           | 放置矩阵：`yaw=90` 把模型 +X 转到 +Y、`yaw=180` 翻到 -X、`z` 按 4/3 世界单位下沉、62 个建筑矩阵全部有限；无 GLB 时回退渲染与未接入本表时一致。 |
+| `textureManifest.spec.ts`     | 贴图清单完整性：每个 `manifestTextureFiles` 都在磁盘上、键里的模型名都有真实 `.glb`、每个条目至少一张通道图；规模断言（清单 69 条 / 法线 67 / 自发光 61 / spec 69 / 161 文件）；参数表 78 个模型全覆盖、无僵尸条目、数值区间合法。 |
 
 fixtures 位于 `tests/unit/blueprint/fixtures/`：除原有蓝图外新增 `starting_base_01029.txt`（0.10.29 老版本基地）、`foundation_only_99.txt`、`facilities_with_foundation_320.txt`、`sorter_belt_replay.txt`、`sorter_building_belt_replay.txt`、`sorter_multi_building_replay.txt`、`tool_export_pose_broken.txt`（早期工具导出的坏 pose）、`slot_face_game_sample.txt`（游戏 14 种建筑 × 全部 slot 的分拣器环）、`stacking_game_sample.txt`（游戏逐层堆叠样本）、`analyzer_box_game_sample.txt`（分析基站上叠箱子整条链）、`splitter_6states_game_sample.txt`（分流器 6 种状态：只输入 / 只输出 / 双口 / 优先输入 / 优先输出 / 优先输出+筛选）。调试/标定脚本位于 `tests/tools/`（`parseBlueprint.ts` 蓝图→JSON、`sorterReplay.ts` 分拣器连接复现比对、`dumpBuildings.ts` 紧凑建筑表、`dumpParams.ts` 参数级样本扫描（带参数的传送带 / 设了优先或筛选的分流器 / 研究站）、`dumpSplitterPorts.ts` 分流器口诊断（口角色 + 优先/筛选 + 相邻带 wire 字段）、`dumpSlotSamples.ts` 逐 slot 原始样本、`replaySlots.ts` slot 面归属复现比对、`deriveSlots.ts` slot 表反推/校验、`genBeltPorts.ts` 建筑传送带口标定表生成、`analyzeBeltBuilding.ts` 逐条列出建筑↔传送带连接、`placementOffsetProbe.ts` 光标→放置格偏移诊断、`scanStationSlots.ts` 物流站端口 `storageIdx` 分布扫描、`byteRoundTrip.ts` 解析→重出的字节级比对、`slotScaleProbe.ts` 分区尺度诊断、`fitBeltOffset.ts` 皮带 offset 分段数拟合、`compareBlueprints.ts` / `checkPoseConsistency.ts` / `reproToolExport.ts` 导出姿态回归），样本 `分拣器.txt` / `分拣器示例.txt` / `特殊用法建筑.txt` / `特殊用法_生成.txt` / `分析仪上放置箱子.txt` / `分流器6状态.txt` / `传送带连接建筑_串联.txt` / `传送带连接建筑_并联.txt` / `物流塔连接传送带.txt` 为游戏 0.10.35 实测蓝图。
 
@@ -1164,7 +1201,7 @@ cat blueprint.txt | yarn cli > bp.json
 | `silent`                                                 | `Command` 接口标志位：`true`=纯数据变更（图标/颜色/文字），仅 `stateVersion++`；`false`=几何/拓扑变更，同时 `execVersion++` 触发重建。                                                                                  |
 | `stateVersion`                                           | `CommandQueue` 状态版本号 ref，每次命令（无论 silent）都递增；`App.vue` 监听它把 `codeExpired` 置 `true`。                                                                                                  |
 | `execVersion`                                            | `CommandQueue` 执行版本号 ref，仅非 silent 命令递增；`BlueprintEditor` 的 `computed(b)` 依赖它触发整场景重建。                                                                                               |
-| `resetCamera`                                            | `BlueprintEditor` 通过 `defineExpose` 暴露的方法，内部调用 `controls.reset(2 * R)`；`App.vue.parseBp` 在蓝图替换（建筑数或尾部 MD5 后 33 位变化）时调用以重置视角。                                                        |
+| `resetCamera`                                            | `BlueprintEditor` 通过 `defineExpose` 暴露的方法，内部调用 `applyHome()`：按当前建筑质心 + 外接圆半径算出 `setHome(...)` 再 `controls.reset()`；`App.vue.parseBp` 在蓝图替换（建筑数或尾部 MD5 后 33 位变化）时调用以重置视角。                                                        |
 | `BVH`                                                    | 自实现层次包围盒，加速鼠标射线与建筑选择盒求交。                                                                                                                                                            |
 | `IconTexture`                                            | 24×24 图标图集，懒加载并 `copyTextureToTexture` 上传。                                                                                                                                          |
 | `buildingMeta`                                           | 每个模型 ID 的颜色/单位盒/选择盒/图标位置变换。                                                                                                                                                         |
@@ -1211,8 +1248,210 @@ cat blueprint.txt | yarn cli > bp.json
 | `medianCutQuantize`                                      | 中位切分颜色量化：按频率加权，切最大通道范围的 box，每盒取加权平均色；不迭代、稳定、覆盖均匀。                                                                                                                                   |
 | `buildRectsFromSlots`                                    | 颜色槽位数组 → 地基矩形列表：行内横向 run-length 合并、纵向同 x/w/slot 合并，w/h 上限 255（游戏 u8 限制）。                                                                                                            |
 | `PHOTO_ROWS` / `PHOTO_MAX_WIDTH`                         | 160 / 1000：照片输出固定行数与列数上限（赤道整圈 200 段 × 5 格/段）。                                                                                                                                       |
+| `resolveBuildingModel(modelIndex)`                       | 模型解析（§16.2）：`glbName / glb / meta / placement / source`，按 modelIndex 缓存；任何异常只让 `glb = null`，绝不影响元数据回退。                                                                                       |
+| `modelTransformOf(modelIndex)`                           | 取逐模型变换（§16.4）：`x/y/z`（格）、`pitch/yaw/roll`（度）、可选 `upAxis/align/scale`；未登记返回全 0。                                                                                          |
+| `GlbModelInstances`                                      | GLB 实例化渲染组（§16.5）：每个子网格一个 `InstancedMesh`，矩阵 = 建筑世界矩阵 × placement × 子网格局部矩阵。                                                                                    |
+| `renderSettings` / `persistRenderSettings()`             | 渲染高级设置单例（§16.9）：`showRealModels / texturesEnabled / textures / maxInstancesPerModel`；`sessionStorage` 持久化（`Infinity` ↔ `null`）。                                                          |
+| `getModelMappingReport()`                                | 运行时权威映射报告（§16.11）：`availableFiles / mapped / unmappedBuildings / missingMetaModels / unusedFiles / failedModels`。                                                                   |
+| `materialMapUrls` / `manifestTextureFiles`               | 自动生成的贴图清单（§16.6）：`模型名::材质名 → {normal, emissive, spec}` 与全量文件列表。                                                                                                    |
 
 ***
 
-> 本 Wiki 基于当前仓库代码静态生成，若 `src/blueprint/parser.ts`、`data/` 或 `components/BlueprintEditor.vue` 发生结构性变更，请同步更新对应章节。
+## 16. 建筑模型渲染系统（GLB + 通道贴图）
+
+> 本章描述当前 `建筑模型` 分支新增的**外部 GLB 模型 + 通道贴图**渲染能力。它与 §1–§15 的蓝图解析/命令/地基等功能相互独立：关闭模型渲染（`renderSettings.showRealModels = false`）时，渲染行为与元数据方块完全一致。
+
+### 16.1 模块总览
+
+| 文件 | 职责 |
+| --- | --- |
+| `models/glbAssets.ts` | GLB 资源注册表：`require.context` 编译期索引、`availableModelNames`、别名/变形表、`modelUrl()`（Promise 缓存）。 |
+| `models/glbLoader.ts` | 加载器：懒加载、`loaded/pending/failed` 三层缓存、并发闸门、8s 超时、错误吞掉、释放；**契约「永不 reject」**。 |
+| `models/buildingModel.ts` | 解析器：`modelIndex → Item → icon → GLB`、放置矩阵、按需请求、变更订阅、映射报告。 |
+| `models/glbInstances.ts` | `GlbModelInstances`：每个 GLB 子网格一个 `InstancedMesh`，几何/材质复用一份。 |
+| `models/textureManifest.ts` | **自动生成**的材质→通道贴图 URL 清单（`模型名::材质名 → {normal, emissive, spec}`）。 |
+| `models/textureMaps.ts` | 通道贴图加载/去重/超时；`flipY=false`；Unity spec-gloss → ORM 现场打包。 |
+| `models/materialTextures.ts` | 把贴图与调参挂到 `MeshStandardMaterial`，并遵守 `renderSettings` 的通道开关。 |
+| `models/modelMaterialTuning.ts` | 78 个模型的手调参数表（`emissiveIntensity / envMapIntensity / metalness`）。 |
+| `models/envMap.ts` | 程序化中性环境反射（PMREM），只挂建筑材质，不设 `scene.environment`。 |
+| `data/modelTransform.ts` | 逐模型偏移/旋转/缩放变换表（62 行，默认全 0）。 |
+| `renderSettings.ts` | 渲染高级设置（`reactive` + `sessionStorage` 持久化）。 |
+| `scripts/gen-texture-manifest.mjs` | 扫描 GLB 与 PNG、按 MD5 锚定材质，生成 `texture-mapping.json` 与 `textureManifest.ts`。 |
+| `scripts/prune-model-textures.mjs` | 只保留清单引用的贴图，其余移出仓库（只移动、不删除）。 |
+| `scripts/verify-glb-mapping.ts` / `check-glb-extensions.ts` / `inspect-glb.ts` | 只读诊断：映射核对、GLB 扩展检查、包围盒量测。 |
+
+### 16.2 解析链与回退策略（`glbAssets.ts` + `buildingModel.ts`）
+
+```text
+modelIndex → itemsMap 中的 Item.models 下标 → Item.icon
+          → iconModelAliases（变形 / 别名 / 回退）→ availableModelNames → *.glb
+```
+
+- **文件名真相**：GLB 文件名 = `itemsData.ts` 条目的 `icon` 字段（不是中文名）。例如「无线输电塔」对应 `charging-pole.glb`。
+- **索引方式**：`require.context('../assets/icons/models', false, /\.glb$/i)`；`ctx.keys()` 是编译期静态文件名列表，**零网络请求**，也是「文件不存在 → 静默回退」的判定依据。
+- **不预加载**：进主 bundle 的只有 URL 字符串，`.glb` 本身是独立资源，只有建筑真的出现时才 `fetch`。
+- **别名/变形表** `iconModelAliases`：
+
+| `Item.icon` | 解析结果 | 类型 |
+| --- | --- | --- |
+| `splitter-4dir` | `splitter-1 / splitter-2 / splitter-3`（按 `Item.models` 下标 0/1/2） | 变形 variants |
+| `assembler-1` | `assembler-1`，缺失时回退 `assembler` | 别名 + 回退 |
+| `accumulator-full` | `accumulator` | 别名 |
+| `mining-drill` / `mining-drill-mk2` | 同名文件（显式登记，避免两代采矿机被合并） | 显式登记 |
+
+- **禁止模糊匹配**：未登记且文件名与图标名不一致的一律视为「未匹配 → 回退元数据表」，避免把 A 建筑的模型错挂到 B 建筑上。
+- `resolveBuildingModel()` 返回 `{ glbName, glb, meta, placement, source }`；`source` 为 `'glb' | 'meta' | 'unknown'`。全过程包在 `try/catch` 中，任何异常都只让 `glb = null`，`meta` 照常可用。
+- 结果按 `modelIndex` 缓存；`onGlbModelLoaded` 到达时清空缓存并通知渲染层重建。
+
+### 16.3 加载器（`glbLoader.ts`）
+
+| 场景 | 行为 |
+| --- | --- |
+| 正常 | 写入 `loaded`，回调监听器，返回 `{ name, url, scene, bbox }`。 |
+| 文件不存在 | `modelUrl` 返回 `null` → 记入 `failed` 负缓存 → 返回 `null`。 |
+| HTTP 非 2xx / parse 失败 / 空场景 / 空包围盒 | 记入 `failed`，`console.warn`，返回 `null`。 |
+| 超时（`DEFAULT_TIMEOUT_MS = 8000`，覆盖 chunk + fetch + parse） | `Promise.race` 超时 + `AbortController.abort()`，返回 `null`。 |
+| 并发请求同一模型 | 复用 `pending` 里的同一个 Promise（去重）。 |
+| 并发请求多个模型 | 信号量闸门，`MAX_CONCURRENT_LOADS = 3`。 |
+| 失败后再次请求 | 负缓存直接返回 `null`；重试调用 `resetGlbFailure(name?)`。 |
+| 释放 | `releaseGlbModel / releaseAllGlbModels`：释放几何、材质与材质上的非共享贴图。 |
+
+- `GLTFLoader` 本身也是懒加载（`import(/* webpackChunkName: "gltf-loader" */ 'three/examples/jsm/loaders/GLTFLoader.js')`），首屏不为解析器付费；`BlueprintEditor.vue` 同样在 `renderer` chunk 中。
+- 模型加载成功后会 `void applyModelMaterialTextures(model)`：通道贴图**不 await**，没到之前先显示底色，到了材质原地更新。
+- `reapplyLoadedModelMaterials()`：按当前 `renderSettings` 重新挂载所有已加载模型的通道贴图（设置变更后重新导入蓝图时调用）。
+
+### 16.4 放置矩阵与变换表（`buildingModel.ts` + `data/modelTransform.ts`）
+
+- 格→世界单位：`GRID_HORIZONTAL = 2π / 200 / 5 × 200.2 ≈ 1.2579`；`GRID_VERTICAL = 4/3`（与 `planet.ts` 的 `HEIGHT_GRID_SIZE` 一致）。
+- 建筑局部空间约定与 `buildingMeta.unitBoxTrans` 相同：`x/y` 水平、`+z` 指向星球法线（向上）；`meta.boxSize = [x 宽, y 深, 高度]`、`meta.boxCenter = [x, y, z]`。
+- 变换顺序：**glTF y-up → z-up（Rx 90°）→ 按元数据高度等比缩放 → 旋转（Roll 绕 Y → Pitch 绕 X → Yaw 绕 Z）→ 平移到盒心 → 叠加格偏移**。偏移乘在最后一步的平移量上，**不受旋转影响**（`z: -8` 永远往下 8 格）。
+- 自动缩放：`scale = 元数据高度 / 模型原始高度`，clamp 到 `[1/3, 3]`（元数据盒高度多为近似值，个别模型差数倍，超出部分用 `scale` 逐条修正）。
+- `modelTransform` 与 `buildingMeta` 同键（62 行），每行字段：
+
+| 字段 | 含义 | 单位 |
+| --- | --- | --- |
+| `x` / `y` / `z` | 左右 / 前后 / 上下偏移 | 格 |
+| `pitch` | 俯仰，绕 X 轴 | 度 |
+| `yaw` | 水平旋转，绕 Z 轴（竖直轴） | 度 |
+| `roll` | 侧倾，绕 Y 轴 | 度 |
+| `upAxis` / `align` / `scale` | 可选高级项，默认 `'y'` / `'height'` / 不填 | — |
+
+- 当前非 0 的行（共 6 条，其余全 0）：`68`（卫星配电站 `z: -8`）、`53`（风力涡轮机 `z: -3`）、`255`（地热发电站 `z: -8`）、`69`（微型粒子对撞机 `yaw: 180`）、`63`（原油精炼厂 `yaw: -180`）、`453`（战场分析基站 `yaw: -180`）。
+- **本表只作用于真实加载成功的 GLB**：模型缺失/加载失败时回退渲染与未接入本表时完全一致。
+
+### 16.5 实例化渲染（`glbInstances.ts` + `BlueprintEditor.vue`）
+
+- `GlbModelInstances` 遍历 GLB 原型场景的每个子网格，**一个子网格一个 `InstancedMesh`**；几何/材质直接复用缓存对象（贴图、多材质原样保留，显存只有一份）。
+- 实例矩阵 = `建筑世界矩阵 × placement × 子网格模型内局部矩阵`；蒙皮网格跳过；`frustumCulled = false`；所有实例打 `userData.sharedResource = true`。
+- `BlueprintEditor.vue` 的 `buildBoxes` 流程：
+  1. 对所有非传送带/非分拣器建筑调用 `resolveBuildingModel`；
+  2. 统计每个 modelIndex 的实例数，超过 `renderSettings.maxInstancesPerModel` 时整组回退元数据盒（默认 `Infinity`，仅受设置面板调整）；
+  3. 有已加载 GLB 的建筑按 modelIndex 分组实例化；实例化抛错或子网格为 0 → 整组回退，其余建筑不受影响；
+  4. 无 GLB 但有外部模型且有元数据 → `requestBuildingModel()` 触发懒加载；
+  5. 元数据盒回退路径与改动前逐行一致（`transforms × unitBoxTrans` + `setColorAt(meta.color)`），未知建筑用退化矩阵占位（不可见、不报错）。
+- `modelRef` 语义保持：GLB 建筑存 `{ matrix }`（建筑中心世界矩阵，供 `SpitterInfo` 投影），元数据盒存 `{ mesh, instance }`；`getModel(index)` 两种形态都支持。
+- 模型到达 → `onBuildingModelsChanged` → **150ms 节流** → `modelVersion++` → `b` computed 重建一次场景，避免 N 个模型各触发一次重建。
+- `AllBuildings.dispose` 跳过 `userData.sharedResource` 的几何/材质，避免释放跨场景复用的 GLB 缓存资源。
+- **传送带 / 分拣器仍走程序化几何**（圆柱 + 连杆 + `Cargos` 货物动画），不接 GLB。
+
+### 16.6 通道贴图清单与加载（`textureManifest.ts` + `textureMaps.ts`）
+
+- GLB 内只内嵌**底色图**（`map`）；法线 `-n`、自发光 `-e`、spec-gloss `-s` 三张通道图在 `src/assets/icons/models/<建筑>/` 下，由 `textureManifest.ts` 登记。
+- 清单键为 `模型名::材质名`（与 GLTFLoader 赋给材质的 `name` 一致），值为三条 webpack URL（`require(...)`）。当前规模：**78 个 GLB、129 个材质锚定**（`scripts/texture-mapping.json`），其中 **69 个材质至少挂一张通道图**（清单 `materialMapUrls` 共 69 条）；通道覆盖：法线 67、自发光 61、spec 69；外置贴图 161 张。体积：GLB 约 125 MB、外置贴图约 210 MB，合计约 335 MB（均以独立资源文件产出，不进主 bundle）。
+- 映射生成规则（`scripts/gen-texture-manifest.mjs`）：GLB 内嵌底色图与磁盘 PNG 做 **MD5 全等**比对锚定材质 → 由文件名词干找同组通道图；兼容 `assembler-mk-n.png` 与 `tesla-tower-1n.png` 两种命名家族，并优先取与底色图同 LOD 层级的通道图。
+- `textureMaps.ts`：
+
+| 关注点 | 做法 |
+| --- | --- |
+| 懒加载 | 模型可用后再取图，不阻塞模型显示。 |
+| 去重 | 同 URL 只解码一次（`imageCache`/`setCache` 双层 Promise 缓存）。 |
+| 失败 | 单通道失败为 `null`，模型保留底色；整体**永不 reject**；单图 15s 超时。 |
+| UV | `texture.flipY = false`（glTF 的 UV v 轴朝下）。 |
+| 色彩空间 | 自发光 `SRGBColorSpace`；法线/ORM `NoColorSpace`。 |
+| 过滤 | `anisotropy` 由 `BlueprintEditor` 初始化时通过 `setTextureMaxAnisotropy(renderer.capabilities.getMaxAnisotropy())` 注入。 |
+| spec-gloss → three | 内存中重打包为 **ORM**：`G = 255·(1−A)`（粗糙度）、`B = 255·luma(RGB)`（金属度），R/A 留白；`roughnessMap` 与 `metalnessMap` 共用一张，不落盘。 |
+
+- 已知缺口（原包就没有该图）：`inserter-1..4` / `monitor` / `splitter-a/b/c` 无 `-e`，`smelter-2-glass-1/2` 无 `-n`。
+
+### 16.7 材质接入与调参（`materialTextures.ts` + `modelMaterialTuning.ts`）
+
+`applyModelMaterialTextures(model)`（模型加载成功后触发）：
+
+1. 收集场景里所有 `MeshStandardMaterial`（按 `uuid` 去重，同一材质只改一次）；
+2. 先快照材质的原始 `map/metalness/roughness/emissive/normalMap/...`（便于关闭贴图后逐项恢复）；
+3. `envMap = 中性环境图`、`envMapIntensity = tuning.envMapIntensity`（所有标准材质都设）；
+4. 有 `-s`：`metalness = tuning.metalness`（乘数）、`metalnessMap/roughnessMap = orm`、`roughness = 1`；没有 `-s`：`metalness = tuning.metalness × 0.25`（`METALNESS_WITHOUT_SPEC_MAP`，避免纯金属无反射发黑）；
+5. 有 `-e`：`emissive = 白`、`emissiveMap`、`emissiveIntensity = tuning.emissiveIntensity`；
+6. 有 `-n`：`normalMap`、`normalScale = (1, 1)`；
+7. `material.needsUpdate = true`。
+
+每一项都受 `renderSettings.texturesEnabled` 与对应通道开关控制；关闭时恢复快照值。材质是 GLB 缓存里的**共享对象**，原地修改即对已建好的实例生效，无需重建场景。
+
+`modelMaterialTuning.ts` 是唯一手调入口，键 = `.glb` 文件名，78 个模型各一条：
+
+| 参数 | 语义 |
+| --- | --- |
+| `emissiveIntensity` | 自发光强度；只有带 `-e` 图的模型才生效。 |
+| `envMapIntensity` | 环境反射权重；整批偏暗先调它。 |
+| `metalness` | 有 `-s` 图时为乘数；没有时按 0.25 缩放后作为固定金属度。 |
+
+兜底：`DEFAULT_MODEL_MATERIAL_TUNING = { emissiveIntensity: 1.0, envMapIntensity: 0.8, metalness: 1.0 }`。
+
+### 16.8 环境反射（`envMap.ts`）
+
+- 用 `PMREMGenerator.fromEquirectangular()` 从一张 256×128 的**程序化渐变图**（天顶偏冷 → 地平线偏亮 → 地面偏暗）生成环境图，**不引入外部资源**。
+- 只设置 `material.envMap`，**不设 `scene.environment`**——否则行星本体与经纬网格也会被环境光洗亮。
+- 生成失败（无 WebGL / PMREM 不可用）返回 `null`，材质按「无环境反射」降级。
+
+### 16.9 渲染高级设置（`renderSettings.ts` + `App.vue`）
+
+| 字段 | 默认 | 作用 |
+| --- | --- | --- |
+| `showRealModels` | `true` | 总开关；关闭后全部回退元数据方块。 |
+| `texturesEnabled` | `true` | 贴图总开关；关闭后不挂任何外部通道贴图。 |
+| `textures` | 全 `true` | 7 个通道开关：`albedo(-a) / normal(-n) / spec(-s) / emissive(-e) / effect(-eff) / dirt(-dirt) / glass(-glass)`；后三项当前素材包未提供，面板置灰。 |
+| `maxInstancesPerModel` | `Infinity` | 同一模型最多用 GLB 渲染的实例数；超出整组回退方块。 |
+
+- 存储键 `dsp-blueprint-editor:render-settings`，位置 `sessionStorage`（刷新保留、关闭标签页清空）；`Infinity` 序列化为 `null`，读取时再还原。
+- UI 在侧栏「高级」折叠区：开关 + 通道列表 + 「渲染最大模型」文本框 + 滑块（`1..1000`，最右一档 = 无限）；修改后显示「设置已修改，重新导入蓝图后生效」。
+- 生效时机：**不立即改已建好的场景**；下次重建场景（重新导入蓝图）时生效。`buildBuildings` 开头调用 `reapplyLoadedModelMaterials()` 按最新设置重挂贴图。
+
+### 16.10 构建配置（`vue.config.js`）
+
+```js
+// GLB 独立文件（不进 <8KB 内联）
+{ test: /\.glb$/i, type: 'asset/resource',
+  generator: { filename: 'models/[name].[contenthash:8][ext]' } }
+
+// 建筑通道贴图：独立文件 + 保留目录结构
+{ test: /assets[\\/]icons[\\/]models[\\/].+\.png$/i, type: 'asset/resource',
+  generator: { filename: 'textures/[path][name].[contenthash:8][ext]' } }
+```
+
+- 两条规则都排在 `/\/assets\//` 之后（后匹配覆盖前面的 `type`）。
+- 贴图正则必须同时兼容 `/` 与 `\`（Windows 下 webpack 给反斜杠路径），否则静默失配。
+- 用 `[path]` 保留字段目录：不同建筑目录有同名贴图（如 `color-palette-256.png`），只按 `[name]` 会互相覆盖。
+
+### 16.11 诊断、测试与已知缺口
+
+- 运行时映射报告 `getModelMappingReport()`：`{ availableFiles, mapped, unmappedBuildings, missingMetaModels, unusedFiles, failedModels }`。
+- 诊断接口：`glbFailedModels()`（失败负缓存）、`resetGlbFailure(name?)`（重试）、`releaseGlbModel / releaseAllGlbModels`（释放）、`hasMaterialTextures(model, material)`。
+- 单测 `tests/unit/models/`：`modelMapping.spec.ts`、`modelTransform.spec.ts`、`placement.spec.ts`、`textureManifest.spec.ts`（见 §12.2）。
+- 已知缺口：
+  - `modelIndex 117`（轨道采集器，item 2105）有 `orbital-collector.glb`，但 `building.ts` 没有元数据 → 不渲染（定位/拾取/图标都缺基准）；
+  - `logistic-vessel.glb`（物流运输机，飞行器）没有对应建筑模型号，未被引用。
+
+### 16.12 易踩的坑（改代码前先读）
+
+1. **不要探测 `typeof require.context`**：webpack 会把它编译成某空模块的 `.context`（恒 `undefined`）。必须取 `require.context(...)` 的**调用结果**再判断类型，否则整个 GLB 功能静默失效。
+2. `asset/resource` 的模块导出是**字符串 URL**（不是 `{ default }`）；取值用 `pickModelUrl()` 兼容两种形态。
+3. `require.context` 的三个参数必须是**字面量**，否则 webpack 无法静态解析。
+4. 自动缩放必须 clamp `[1/3, 3]`，否则个别元数据高度偏差大的模型会被压成一个点。
+5. 通道贴图必须 `flipY = false`，否则法线/自发光整体上下错位。
+6. 环境反射只挂 `material.envMap`，不要设 `scene.environment`。
+7. 共享几何/贴图在 `dispose` 时要跳过（`userData.sharedResource` / `userData.sharedTexture`），否则会释放其他场景仍在用的资源。
+
+***
+
+> 本 Wiki 基于当前仓库代码静态生成。§16 对应当前 `建筑模型` 分支（GLB 模型 + 通道贴图 + 渲染设置）；其余章节描述仓库的蓝图解析/命令/地基等功能。若 `src/blueprint/parser.ts`、`src/models/`、`data/` 或 `components/BlueprintEditor.vue` 发生结构性变更，请同步更新对应章节。
 

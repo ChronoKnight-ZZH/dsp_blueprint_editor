@@ -1,10 +1,10 @@
-import { EventDispatcher, MOUSE, PerspectiveCamera, Quaternion, Spherical, TOUCH, Vector2, Vector3 } from 'three';
+import { EventDispatcher, MOUSE, PerspectiveCamera, Quaternion, TOUCH, Vector2, Vector3 } from 'three';
 
 enum STATE {
     NONE,
     ROTATE,
-    DOLLY,
     PAN,
+    DOLLY,
     TOUCH_ROTATE,
     TOUCH_PAN,
     TOUCH_DOLLY_PAN,
@@ -12,9 +12,45 @@ enum STATE {
 }
 
 const EPS = 0.000001;
+const DEG2RAD = Math.PI / 180;
 
-// Like three/examples/jsm/controls/OrbitControls
-export class PlanetMapControls extends EventDispatcher<{change: object, start: object, end: object}> {
+/** 入场姿态：由外部通过 setHome() 给出，reset() / N 键回到这里 */
+export interface CameraHome {
+    /** 球面上的单位方向向量（锚点 / 当地法线） */
+    anchor: Vector3;
+    /** 切平面内由锚点指向相机的单位向量 */
+    viewDir: Vector3;
+    /** 仰角（弧度）：0 = 平视，maxTilt = 俯瞰 */
+    tilt: number;
+    /** 相机到锚点的距离 */
+    distance: number;
+}
+
+/**
+ * 星球地图相机（高德地图网页版那一套）。
+ *
+ * 与旧版「绕球心轨道」的根本区别：**视线的锚点从球心挪到了球面上的一点**，
+ * 于是一定会出现真正的俯仰 —— 旧版因为永远盯着球心，屏幕中心的视线永远垂直于
+ * 球面，所以只能是一张俯视图，拖拽只是让星球在画面里滚。
+ *
+ *   tilt = 0        → 平视：相机贴在离地 minHeight 处，视线擦着球面，看得到建筑立面
+ *   tilt = maxTilt  → 俯瞰：几乎从正上方看下去，接近旧版的地图视角
+ *
+ * 操作（右键拖拽在旧版里是空着的，右键单击才剔除建筑，已有位移阈值区分）：
+ *   右键左右拖 → 绕锚点转方位（锚点不动，星球在画面里转）
+ *   右键上下拖 → 改仰角（向下 = 更俯瞰，向上 = 更平视）
+ *   左键拖     → 沿球面平移锚点
+ *   滚轮       → 改相机到锚点的距离（唯一的缩放入口，中键不承担任何操作）
+ *   WASD       → 上下左右平移（与左键拖拽同一套换算）
+ *
+ * **不再固定 N 极朝上**：相机的 up 取锚点处的球面法线，这样地平线永远是水平的、
+ * 建筑永远竖着，但 N 极在画面上的位置随锚点自然变化，不再往正北做吸附。
+ *
+ * 球面自带一条硬约束：站在球面上看不到地平线以外的目标。所以距离与仰角必须联动
+ * （maxDistanceForTilt / minTiltForDistance）：拉远时自动抬高视角，压到平视时
+ * 自动收缩距离 —— 否则视线会穿进球体，锚点被星球自己挡在后面。
+ */
+export class PlanetMapControls extends EventDispatcher<{ change: object, start: object, end: object }> {
 
     static changeEvent = { type: 'change' } as const;
     static startEvent = { type: 'start' } as const;
@@ -22,48 +58,55 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
 
     enabled = true;
 
-    /** sets the location of focus, where the object orbits around */
-    target = new Vector3();
-    /** focus when dolly and rotate */
-    targetRadius = 0;
+    /** 星球半径（世界单位），挂载后由外部设置 */
+    planetRadius = 200.2;
 
-    // How far you can dolly in and out ( PerspectiveCamera only )
-    minDistance = 0;
-    maxDistance = Infinity;
+    /** 视线锚点：球面上的单位方向向量，同时也是该处的球面法线 */
+    readonly anchor = new Vector3(0, 0, 1);
+    /** 水平朝向：切平面内由锚点指向相机的单位向量（update 保证与 anchor 正交） */
+    readonly viewDir = new Vector3(0, 1, 0);
 
-    // How far you can orbit vertically, upper and lower limits.
-    // Range is 0 to Math.PI radians.
-    minPolarAngle = 0; // radians
-    maxPolarAngle = Math.PI; // radians
+    /** 仰角（弧度）：minTilt = 平视，maxTilt = 俯瞰 */
+    tilt = 85 * DEG2RAD;
+    minTilt = 0;
+    /** 上限不取 90°：正上方时相机 up 与视线平行，lookAt 会退化 */
+    maxTilt = 85 * DEG2RAD;
 
-    // How far you can orbit horizontally, upper and lower limits.
-    // If set, the interval [ min, max ] must be a sub-interval of [ - 2 PI, 2 PI ], with ( max - min < 2 PI )
-    minAzimuthAngle = - Infinity; // radians
-    maxAzimuthAngle = Infinity; // radians
+    /** 用户设定的相机到锚点距离（世界单位）；实际生效的见 effectiveDistance */
+    distance = 150;
+    minDistance = 3;
+    maxDistance = 1200;
 
-    // Set to true to enable damping (inertia)
-    // If damping is enabled, you must call controls.update() in your animation loop
-    enableDamping = false;
-    dampingFactor = 0.05;
+    /** 相机离球面的最低高度：平视时贴在离地 minHeight 处，不会钻进地面 */
+    minHeight = 1.5;
 
     enableDolly = true;
     dollySpeed = 1.0;
     wheelDollyBase = 0.999;
 
+    /** 右键拖拽的旋转开关与灵敏度 */
     enableRotate = true;
     rotateSpeed = 1.0;
 
-    keys: Record<string, { rotate: Vector2 }> = {
-        KeyW: { rotate: new Vector2( 0,  1) },
-        KeyS: { rotate: new Vector2( 0, -1) },
-        KeyA: { rotate: new Vector2( 1,  0) },
-        KeyD: { rotate: new Vector2(-1,  0) },
+    /**
+     * 键盘平移：屏幕像素 / 秒（与拖拽同一套换算，所以看起来是「箭头键滚动地图」）。
+     * 语义按拖拽算：W = 把内容往下推 = 视野上移，A = 把内容往右推 = 视野左移。
+     */
+    keys: Record<string, { pan: Vector2 }> = {
+        KeyW: { pan: new Vector2( 0,  1) },
+        KeyS: { pan: new Vector2( 0, -1) },
+        KeyA: { pan: new Vector2( 1,  0) },
+        KeyD: { pan: new Vector2(-1,  0) },
     };
-    keyRotateSpeed = 200.0;
+    keyPanSpeed = 240.0;
 
-    mouseButtons = { LEFT: -1 as MOUSE, MIDDLE: MOUSE.ROTATE, RIGHT: -1 as MOUSE };
+    /** 拖拽死区（css 像素）：位移小于它按点击处理，避免单击时抖一下视角 */
+    dragThreshold = 3;
 
-    touches = { ONE: -1 as TOUCH, TWO: TOUCH.DOLLY_ROTATE };
+    /** 左键平移、右键旋转；中键不承担任何操作（缩放只走滚轮） */
+    mouseButtons = { LEFT: MOUSE.PAN, MIDDLE: -1 as MOUSE, RIGHT: MOUSE.ROTATE };
+
+    touches = { ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_ROTATE };
 
     constructor(public object: PerspectiveCamera, public domElement: HTMLElement) {
         super();
@@ -87,134 +130,208 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
         this.domElementKeyEvents = domElement;
     }
 
-    protected spherical = new Spherical();
-    protected sphericalDelta = new Spherical();
-    protected scale = 1.0;
-    protected panOffset = new Vector3();
+    /** 入场姿态；null 时 reset() 不做事 */
+    home: CameraHome | null = null;
 
-    getPolarAngle() {
-        return this.spherical.phi;
+    setHome(anchor: Vector3, viewDir: Vector3, tilt: number, distance: number) {
+        this.home = {
+            anchor: anchor.clone(),
+            viewDir: viewDir.clone(),
+            tilt,
+            distance,
+        };
     }
 
-    getAzimuthalAngle() {
-        return this.spherical.theta;
-    }
-
-    getDistance() {
-        return this.object.position.distanceTo(this.target);
-    }
-
-    /** 重置视角：目标回到原点，相机回到正上方默认距离 */
-    reset(distance: number) {
-        this.target.set(0, 0, 0);
-        this.spherical.set(distance, Math.PI / 2, 0);
-        this.sphericalDelta.set(0, 0, 0);
-        this.panOffset.set(0, 0, 0);
-        this.scale = 1.0;
+    /** 回到入场姿态（预览蓝图替换 / 按 N 时调用） */
+    reset() {
+        const home = this.home;
+        if (home === null)
+            return;
+        this.anchor.copy(home.anchor).normalize();
+        this.viewDir.copy(home.viewDir);
+        this.tilt = home.tilt;
+        this.distance = home.distance;
+        this.dragging = false;
         this.update();
     }
 
-    private keyRotate = new Vector2();
-    updateTimeDelta(deltaTimeInSeconds: number) {
-        for (const code of this.downKeys) {
-            const act = this.keys[code];
-            if (act === undefined)
-                continue;
-            this.keyRotate.copy(act.rotate).multiplyScalar(this.keyRotateSpeed * deltaTimeInSeconds);
-            this.rotate(this.keyRotate.x, this.keyRotate.y);
-        }
+    //
+    // 角度 / 距离 / 可见性
+    //
+
+    /**
+     * 实际生效的距离：压到平视时被地平线收到 maxDistanceForTilt 以内。
+     * 与 distance 分开存，是为了「把仰角压下去再抬回来」时还能回到原来的缩放级别。
+     */
+    get effectiveDistance() {
+        return Math.min(this.distance, this.maxDistanceForTilt(this.tilt));
     }
+
+    /** 竖直方向满屏对应的竖直 FOV */
+    private anglePerPixel() {
+        const h = Math.max(1, this.domElement.clientHeight);
+        return (this.object.fov * DEG2RAD) / h;
+    }
+
+    /** 相机到锚点的实际距离（含 minHeight 抬升） */
+    private targetDistance() {
+        const distance = this.effectiveDistance;
+        const height = this.minHeight + Math.sin(this.tilt) * distance;
+        const horizontal = Math.cos(this.tilt) * distance;
+        return Math.hypot(height, horizontal);
+    }
+
+    /** 锚点处的地面尺度（世界单位 / 像素） */
+    private worldPerPixel() {
+        const h = Math.max(1, this.domElement.clientHeight);
+        return 2 * this.targetDistance() * Math.tan(this.object.fov * DEG2RAD / 2) / h;
+    }
+
+    /** 站在离地 h 高处的相机，能否看到球面上水平距离 horizontal 外的点 */
+    private visibleAt(distance: number, tilt: number) {
+        const R = this.planetRadius;
+        const height = this.minHeight + Math.sin(tilt) * distance;
+        const horizontal = Math.cos(tilt) * distance;
+        // 地平线角：acos(R / (R + h))，乘 R 换成球面弧长
+        return horizontal <= R * Math.acos(Math.min(1, R / (R + height)));
+    }
+
+    /** 给定仰角，锚点仍在地平线内的最大距离 */
+    private maxDistanceForTilt(tilt: number) {
+        let lo = 0;
+        let hi = this.maxDistance * 4;
+        for (let i = 0; i < 32; i++) {
+            const mid = (lo + hi) / 2;
+            if (this.visibleAt(mid, tilt)) lo = mid;
+            else hi = mid;
+        }
+        return lo;
+    }
+
+    /** 给定距离，锚点仍在地平线内所需的最小仰角 */
+    private minTiltForDistance(distance: number) {
+        if (!this.visibleAt(distance, this.maxTilt))
+            return this.maxTilt;
+        let lo = this.minTilt;
+        let hi = this.maxTilt;
+        for (let i = 0; i < 32; i++) {
+            const mid = (lo + hi) / 2;
+            if (this.visibleAt(distance, mid)) hi = mid;
+            else lo = mid;
+        }
+        return hi;
+    }
+
+    /** 改仰角：只夹范围，距离由 effectiveDistance 自动收缩（抬回来能复原） */
+    setTilt(tilt: number) {
+        this.tilt = Math.max(this.minTilt, Math.min(this.maxTilt, tilt));
+    }
+
+    /** 改距离：拉远到锚点会被地平线挡住时，自动抬高仰角（相当于视角往上漂） */
+    setDistance(distance: number) {
+        this.distance = Math.max(this.minDistance, Math.min(this.maxDistance, distance));
+        if (!this.visibleAt(this.distance, this.tilt))
+            this.tilt = this.minTiltForDistance(this.distance);
+    }
+
+    //
+    // 输入 → 状态
+    //
+
+    /** 方位：绕锚点转 */
+    rotateAzimuth(angle: number) {
+        this.viewDir.applyAxisAngle(this.anchor, angle);
+        this.viewDir.addScaledVector(this.anchor, -this.viewDir.dot(this.anchor));
+        if (this.viewDir.lengthSq() < EPS) {
+            // 退化兜底：随便取一个与 anchor 正交的方向
+            this.viewDir.set(0, 1, 0);
+            if (Math.abs(this.anchor.y) > 0.9)
+                this.viewDir.set(1, 0, 0);
+            this.viewDir.addScaledVector(this.anchor, -this.viewDir.dot(this.anchor));
+        }
+        this.viewDir.normalize();
+    }
+
+    /** unit: css pixel。水平 → 方位，竖直 → 仰角 */
+    rotate(deltaX: number, deltaY: number) {
+        const k = this.anglePerPixel() * this.rotateSpeed;
+        this.rotateAzimuth(-deltaX * k);
+        this.setTilt(this.tilt + deltaY * k);
+    }
+
+    private basisForward = new Vector3();
+    private basisUp = new Vector3();
+    private basisRight = new Vector3();
+    private basisTemp = new Vector3();
+    private panStep = new Vector3();
+
+    /** 相机基向量，与 update() 里的 lookAt 保持一致 */
+    private updateBasis() {
+        const R = this.planetRadius;
+        const n = this.anchor;
+        const distance = this.effectiveDistance;
+        const height = this.minHeight + Math.sin(this.tilt) * distance;
+        const horizontal = Math.cos(this.tilt) * distance;
+
+        this.basisTemp.copy(n).multiplyScalar(R + height).addScaledVector(this.viewDir, horizontal);
+        this.basisForward.copy(n).multiplyScalar(R).sub(this.basisTemp).normalize();
+        this.basisUp.copy(n).addScaledVector(this.basisForward, -n.dot(this.basisForward)).normalize();
+        this.basisRight.crossVectors(this.basisForward, this.basisUp).normalize();
+    }
+
+    /** unit: css pixel。把锚点沿球面推走，让地面跟着光标走 */
+    pan(deltaX: number, deltaY: number) {
+        this.updateBasis();
+        const scale = this.worldPerPixel();
+        this.panStep.set(0, 0, 0)
+            .addScaledVector(this.basisRight, -deltaX * scale)
+            .addScaledVector(this.basisUp, deltaY * scale);
+        // 弧长 → 角度：锚点沿切平面推 s 后归一化，等价于转 s/R
+        this.anchor.addScaledVector(this.panStep, 1 / this.planetRadius).normalize();
+    }
+
+    dollyOut(dollyScale: number) {
+        this.setDistance(this.distance / dollyScale);
+    }
+
+    dollyIn(dollyScale: number) {
+        this.setDistance(this.distance * dollyScale);
+    }
+
+    //
+    // 每帧解算
+    //
 
     private lastPosition = new Vector3();
     private lastQuaternion = new Quaternion();
+
     update() {
-        const twoPI = Math.PI * 2;
-        // so camera.up is the orbit axis
-        const quat = new Quaternion().setFromUnitVectors(this.object.up, new Vector3(0, 1, 0));
-        const quatInverse = quat.clone().invert();
-        const offset = new Vector3();
+        this.anchor.normalize();
+
+        // pan 之后 viewDir 会略微离开切平面，投影回去（等价于平行移动）
+        this.viewDir.addScaledVector(this.anchor, -this.viewDir.dot(this.anchor));
+        if (this.viewDir.lengthSq() < EPS) {
+            this.viewDir.set(0, 1, 0);
+            if (Math.abs(this.anchor.y) > 0.9)
+                this.viewDir.set(1, 0, 0);
+            this.viewDir.addScaledVector(this.anchor, -this.viewDir.dot(this.anchor));
+        }
+        this.viewDir.normalize();
+
+        this.tilt = Math.max(this.minTilt, Math.min(this.maxTilt, this.tilt));
+        this.distance = Math.max(this.minDistance, Math.min(this.maxDistance, this.distance));
+
+        const R = this.planetRadius;
+        const distance = this.effectiveDistance;
+        const height = this.minHeight + Math.sin(this.tilt) * distance;
+        const horizontal = Math.cos(this.tilt) * distance;
 
         const position = this.object.position;
+        position.copy(this.anchor).multiplyScalar(R + height).addScaledVector(this.viewDir, horizontal);
 
-        offset.copy(position).sub(this.target);
-
-        // rotate offset to "y-axis-is-up" space
-        offset.applyQuaternion(quat);
-
-        // angle from z-axis around y-axis
-        this.spherical.setFromVector3(offset);
-
-        if (this.enableDamping) {
-            this.spherical.theta += this.sphericalDelta.theta * this.dampingFactor;
-            this.spherical.phi += this.sphericalDelta.phi * this.dampingFactor;
-        } else {
-            this.spherical.theta += this.sphericalDelta.theta;
-            this.spherical.phi += this.sphericalDelta.phi;
-        }
-
-        // restrict theta to be between desired limits
-
-        let min = this.minAzimuthAngle;
-        let max = this.maxAzimuthAngle;
-
-        if (isFinite(min) && isFinite(max)) {
-            if (min < - Math.PI)
-                min += twoPI;
-            else if (min > Math.PI)
-                min -= twoPI;
-
-            if (max < - Math.PI)
-                max += twoPI;
-            else if (max > Math.PI)
-                max -= twoPI;
-
-            if (min <= max) {
-                this.spherical.theta = Math.max(min, Math.min(max, this.spherical.theta));
-            } else {
-                this.spherical.theta = (this.spherical.theta > (min + max) / 2) ?
-                    Math.max(min, this.spherical.theta) :
-                    Math.min(max, this.spherical.theta);
-            }
-
-        }
-
-        // restrict phi to be between desired limits
-        this.spherical.phi = Math.max(this.minPolarAngle, Math.min(this.maxPolarAngle, this.spherical.phi));
-        this.spherical.makeSafe();
-
-        this.spherical.radius = this.targetRadius + (this.spherical.radius - this.targetRadius) * this.scale;
-
-        // restrict radius to be between desired limits
-        this.spherical.radius = Math.max(this.minDistance, Math.min(this.maxDistance, this.spherical.radius));
-
-        // move target to panned location
-
-        if (this.enableDamping) {
-            this.target.addScaledVector(this.panOffset, this.dampingFactor);
-        } else {
-            this.target.add(this.panOffset);
-        }
-
-        offset.setFromSpherical(this.spherical);
-
-        // rotate offset back to "camera-up-vector-is-up" space
-        offset.applyQuaternion(quatInverse);
-
-        position.copy(this.target).add(offset);
-
-        this.object.lookAt(this.target);
-
-        if (this.enableDamping === true) {
-            this.sphericalDelta.theta *= (1 - this.dampingFactor);
-            this.sphericalDelta.phi *= (1 - this.dampingFactor);
-
-            this.panOffset.multiplyScalar(1 - this.dampingFactor);
-        } else {
-            this.sphericalDelta.set(0, 0, 0);
-            this.panOffset.set(0, 0, 0);
-        }
-
-        this.scale = 1;
+        // up 取当地法线：地平线水平、建筑竖着（不再吸附正北）
+        this.object.up.copy(this.anchor);
+        this.object.lookAt(this.anchor.x * R, this.anchor.y * R, this.anchor.z * R);
 
         // update condition is:
         // min(camera displacement, camera rotation in radians)^2 > EPS
@@ -248,9 +365,16 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
 
     private state = STATE.NONE;
 
+    /** 已经越过拖拽死区，本次按下算拖拽而不是点击 */
+    private dragging = false;
+
     private rotateStart = new Vector2();
     private rotateEnd = new Vector2();
     private rotateDelta = new Vector2();
+
+    private panStart = new Vector2();
+    private panEnd = new Vector2();
+    private panDelta = new Vector2();
 
     private dollyStart = new Vector2();
     private dollyEnd = new Vector2();
@@ -259,38 +383,15 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
     private pointers: PointerEvent[] = [];
     private pointerPositions: Record<number, Vector2> = {};
 
-    rotateLeft(angle: number) {
-        this.sphericalDelta.theta -= angle;
-    }
-
-    rotateUp(angle: number) {
-        this.sphericalDelta.phi -= angle;
-    }
-
-    /** unit: css pixel */
-    rotate(deltaX: number, deltaY: number) {
-        const offset = new Vector3();
-        offset.copy(this.object.position).sub(this.target);
-        const targetDistance = offset.length() - this.targetRadius;
-        const unitAngle = targetDistance * Math.tan(this.object.fov / 2 * (Math.PI / 180.0)) * 2 / this.targetRadius / this.domElement.clientHeight;
-
-        this.rotateLeft(deltaX * unitAngle);
-        this.rotateUp(deltaY * unitAngle);
-    }
-
-    dollyOut(dollyScale: number) {
-        this.scale /= dollyScale;
-    }
-
-    dollyIn( dollyScale: number ) {
-        this.scale *= dollyScale;
-    }
-
     //
     // event callbacks - update the object state
     //
     handleMouseDownRotate(event: PointerEvent) {
         this.rotateStart.set(event.clientX, event.clientY);
+    }
+
+    handleMouseDownPan(event: PointerEvent) {
+        this.panStart.set(event.clientX, event.clientY);
     }
 
     handleMouseDownDolly(event: PointerEvent) {
@@ -299,14 +400,35 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
 
     handleMouseMoveRotate(event: PointerEvent) {
         this.rotateEnd.set(event.clientX, event.clientY);
-        this.rotateDelta.subVectors(this.rotateEnd, this.rotateStart)
-            .multiplyScalar(this.rotateSpeed);
+        this.rotateDelta.subVectors(this.rotateEnd, this.rotateStart);
+        if (!this.passDragThreshold(this.rotateDelta))
+            return;
 
         this.rotate(this.rotateDelta.x, this.rotateDelta.y);
 
         this.rotateStart.copy(this.rotateEnd);
     }
 
+    handleMouseMovePan(event: PointerEvent) {
+        this.panEnd.set(event.clientX, event.clientY);
+        this.panDelta.subVectors(this.panEnd, this.panStart);
+        if (!this.passDragThreshold(this.panDelta))
+            return;
+
+        this.pan(this.panDelta.x, this.panDelta.y);
+
+        this.panStart.copy(this.panEnd);
+    }
+
+    /** 死区判定：第一次越过阈值才放行，避免单击时抖一下视角 */
+    private passDragThreshold(delta: Vector2) {
+        if (this.dragging)
+            return true;
+        if (delta.length() < this.dragThreshold)
+            return false;
+        this.dragging = true;
+        return true;
+    }
 
     handleMouseWheel(event: WheelEvent) {
         this.dollyOut(Math.pow(this.wheelDollyBase, event.deltaY));
@@ -315,7 +437,12 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
     private downKeys = new Set<string>();
 
     protected handleKeyDown(event: KeyboardEvent) {
-        if (event.code in this.keys) {
+        if (event.code === 'KeyN') {
+            this.reset();
+            event.preventDefault();
+            return;
+        }
+        if (this.keys[event.code] !== undefined) {
             this.downKeys.add(event.code);
             event.preventDefault();
         }
@@ -323,6 +450,17 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
 
     protected handleKeyUp(event: KeyboardEvent) {
         this.downKeys.delete(event.code);
+    }
+
+    private keyPan = new Vector2();
+    updateTimeDelta(deltaTimeInSeconds: number) {
+        for (const code of this.downKeys) {
+            const act = this.keys[code];
+            if (act === undefined)
+                continue;
+            this.keyPan.copy(act.pan).multiplyScalar(this.keyPanSpeed * deltaTimeInSeconds);
+            this.pan(this.keyPan.x, this.keyPan.y);
+        }
     }
 
     handleTouchStartRotate() {
@@ -363,8 +501,7 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
 
             this.rotateEnd.set(x, y);
         }
-        this.rotateDelta.subVectors(this.rotateEnd, this.rotateStart)
-            .multiplyScalar(this.rotateSpeed);
+        this.rotateDelta.subVectors(this.rotateEnd, this.rotateStart);
 
         this.rotate(this.rotateDelta.x, this.rotateDelta.y);
 
@@ -402,6 +539,7 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
             return;
 
         if (this.pointers.length === 0) {
+            this.dragging = false;
             this.domElement.setPointerCapture(event.pointerId);
             this.domElement.addEventListener('pointermove', this.onPointerMove);
             this.domElement.addEventListener('pointerup', this.onPointerUp);
@@ -436,6 +574,7 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
         }
         this.dispatchEvent(PlanetMapControls.endEvent);
         this.state = STATE.NONE;
+        this.dragging = false;
     }
 
     onPointerCancel = (event: PointerEvent) => {
@@ -471,6 +610,11 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
                 this.state = STATE.ROTATE;
                 break;
 
+            case MOUSE.PAN:
+                this.handleMouseDownPan(event);
+                this.state = STATE.PAN;
+                break;
+
             default:
                 this.state = STATE.NONE;
 
@@ -489,6 +633,9 @@ export class PlanetMapControls extends EventDispatcher<{change: object, start: o
                 if (!this.enableRotate)
                     return;
                 this.handleMouseMoveRotate(event);
+                break;
+            case STATE.PAN:
+                this.handleMouseMovePan(event);
                 break;
         }
     }
