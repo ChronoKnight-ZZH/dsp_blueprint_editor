@@ -13,6 +13,7 @@ import { Box3, Group, Object3D, Texture } from 'three';
 import type { Material } from 'three';
 import { modelUrl } from './glbAssets';
 import { applyModelMaterialTextures } from './materialTextures';
+import type { TextureSettings } from '@/renderSettingsTypes';
 
 /** 已加载完成的 GLB 模型（`scene` 作为实例化渲染的原型，不要直接加进场景） */
 export interface LoadedGlbModel {
@@ -38,6 +39,48 @@ const loaded = new Map<string, LoadedGlbModel>();
 const pending = new Map<string, Promise<LoadedGlbModel | null>>();
 const failed = new Set<string>();
 const listeners = new Set<(model: LoadedGlbModel) => void>();
+
+/**
+ * 贴图设置提供者。
+ *
+ * 加载器在「模型加载完成」和「设置变更后重挂」两处需要知道当前贴图设置，
+ * 但它不能直接 import `@/renderSettings`（该模块 import vue，见方案 D1）。
+ * 由宿主在启动时注入，例如编辑器里：
+ *
+ * ```ts
+ * setSettingsProvider(() => renderSettings);
+ * ```
+ *
+ * 未注入时使用默认值（全部开启），保证 lib 单独使用时行为合理。
+ */
+const DEFAULT_TEXTURE_SETTINGS: TextureSettings = {
+    texturesEnabled: true,
+    textures: { albedo: true, normal: true, spec: true, emissive: true, effect: true, dirt: true, glass: true },
+};
+
+let settingsProvider: (() => TextureSettings) | null = null;
+
+/** 注入设置读取函数（返回当前生效的贴图设置） */
+export function setSettingsProvider(provider: (() => TextureSettings) | null): void {
+    settingsProvider = provider;
+}
+
+/** 读取当前贴图设置；未注入或读取抛错时回退默认值 */
+export function currentTextureSettings(): TextureSettings {
+    if (settingsProvider === null)
+        return DEFAULT_TEXTURE_SETTINGS;
+    try {
+        return settingsProvider();
+    } catch (e) {
+        console.warn('[glb] 读取贴图设置失败（使用默认值）', e);
+        return DEFAULT_TEXTURE_SETTINGS;
+    }
+}
+
+/** 显式传入设置时用它，否则用 provider/default；供 core 这类不依赖全局的调用方使用 */
+export function resolveTextureSettings(override?: TextureSettings): TextureSettings {
+    return override ?? currentTextureSettings();
+}
 
 /** 同步查询已加载的模型（渲染时先用它决定能否走外部模型） */
 export function getLoadedGlbModel(name: string): LoadedGlbModel | null {
@@ -177,7 +220,7 @@ async function runLoad(name: string, timeoutMs: number): Promise<LoadedGlbModel 
         loaded.set(name, model);
         // 通道贴图（法线/自发光/spec-gloss）不在 GLB 里，按清单异步补挂：
         // 不 await、不许失败——贴图没到之前先显示底色，到了材质原地更新即可
-        void applyModelMaterialTextures(model).catch(e => {
+        void applyModelMaterialTextures(model, currentTextureSettings()).catch(e => {
             console.warn(`[glb] 模型 ${name} 的通道贴图接入失败（保留底色）`, e);
         });
         for (const cb of listeners) {
@@ -241,11 +284,14 @@ export function resetGlbFailure(name?: string): void {
 
 /**
  * 按当前渲染设置重新挂载所有已加载模型的通道贴图。
- * 设置变更后重建场景（重新导入蓝图）时调用；材质是共享对象，原地更新即可。
+ * 设置变更后调用；材质是共享对象，原地更新即可，**不需要重建场景**（方案 §4.1）。
+ *
+ * @param settings 显式设置；省略时用 `setSettingsProvider()` 注入的读取函数
  */
-export function reapplyLoadedModelMaterials(): void {
+export function reapplyLoadedModelMaterials(settings?: TextureSettings): void {
+    const effective = resolveTextureSettings(settings);
     for (const model of loaded.values()) {
-        void applyModelMaterialTextures(model).catch(e => {
+        void applyModelMaterialTextures(model, effective).catch(e => {
             console.warn(`[glb] 重新挂载模型 ${model.name} 的通道贴图失败（保留底色）`, e);
         });
     }

@@ -4,6 +4,7 @@ node_modules
 /cli
 /data
 /dist-lib
+/lib-build
 # local env files
 .env.local
 .env.*.local

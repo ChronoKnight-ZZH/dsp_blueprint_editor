@@ -1,5 +1,5 @@
 import { fromStr, BlueprintData } from '@/blueprint/parser';
-import { CommandQueue, Command } from '@/command';
+import { CommandQueue } from '@/command';
 import { RemoveBuildingCommand } from '@/blueprint/removeBuilding';
 import { ReplaceCommand, ReplaceParams } from '@/blueprint/replace';
 import { AcceleratorMode } from '@/blueprint/parser';

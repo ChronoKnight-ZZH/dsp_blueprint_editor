@@ -142,16 +142,106 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
         };
     }
 
-    /** 回到入场姿态（预览蓝图替换 / 按 N 时调用） */
-    reset() {
-        const home = this.home;
-        if (home === null)
-            return;
-        this.anchor.copy(home.anchor).normalize();
-        this.viewDir.copy(home.viewDir);
-        this.tilt = home.tilt;
-        this.distance = home.distance;
+    /** 相机绕球心的方位角（本控件用「锚点 + 仰角 + 视距」，方位由锚点决定） */
+    getAzimuthalAngle() {
+        return Math.atan2(this.anchor.x, this.anchor.z);
+    }
+
+    /** 相机到锚点（视线落点）的实际距离 */
+    getDistance() {
+        return this.targetDistance();
+    }
+
+    /**
+     * [库侧兼容] OrbitControls 风格的「环绕目标点」。
+     *
+     * 本控件的轨道中心恒为球心，所以它**始终是零向量**：
+     * `RenderCore` 与单元测试都按「target 留在球心」来断言，聚焦不会把它挪到建筑上
+     * （那正是旧实现「聚焦后镜头锁死」的根因）。
+     */
+    readonly target = new Vector3(0, 0, 0);
+
+    /** [库侧兼容] `planetRadius` 的别名，供 `RenderCore` 按旧 API 设置星球半径 */
+    get targetRadius() {
+        return this.planetRadius;
+    }
+
+    set targetRadius(value: number) {
+        this.planetRadius = value;
+    }
+
+    /**
+     * 把「相机到**球心**的距离」换算成本模型的 `distance`（相机到锚点的距离）。
+     *
+     * 由 `hypot(R + minHeight + sin·d, cos·d) = D` 解出：
+     * `d = −sin·(R+minHeight) + √(D² − cos²·(R+minHeight)²)`
+     */
+    private distanceForCameraRadius(cameraRadius: number) {
+        const R = this.planetRadius + this.minHeight;
+        const s = Math.sin(this.tilt);
+        const c = Math.cos(this.tilt);
+        const inner = cameraRadius * cameraRadius - c * c * R * R;
+        if (inner <= 0)
+            return this.minDistance;
+        return Math.max(this.minDistance, -s * R + Math.sqrt(inner));
+    }
+
+    /**
+     * 重置视角（合并后统一实现，两种模式共用）：
+     *  - **编辑器**：调用过 `setHome` 时回到入场姿态（俯仰 + 锚在图纸质心），
+     *    即「预览蓝图替换」/ 按 N 键的行为；
+     *  - **库**：无 `home` 时按 `distance`（相机到**球心**的距离）回到正上方俯视，
+     *    `RenderCore.reset(2 * PLANET_RADIUS)` 走这一支。
+     */
+    reset(distance?: number) {
         this.dragging = false;
+
+        const home = this.home;
+        if (home !== null) {
+            this.anchor.copy(home.anchor).normalize();
+            this.viewDir.copy(home.viewDir);
+            this.tilt = home.tilt;
+            this.distance = home.distance;
+            this.update();
+            return;
+        }
+
+        if (distance === undefined)
+            return;
+
+        this.anchor.set(0, 0, 1);
+        this.viewDir.set(0, 1, 0);
+        this.tilt = this.maxTilt;
+        this.distance = this.distanceForCameraRadius(distance);
+        this.update();
+    }
+
+    /**
+     * 把镜头对准球面某点，**轨道中心保持在球心**。
+     *
+     * 合并说明：旧实现（BlueprintViewer）直接摆相机位置并依赖 OrbitControls 的
+     * `target` / `spherical`；本文件的相机模型已改为「锚点 + 仰角 + 视距」，
+     * 相机位置由 `update()` 每帧解算，因此改为设置这三个参数。
+     *
+     * - `anchor` 取目标点的法线 → `update()` 的 lookAt 目标正是 `anchor × R`，
+     *   目标点依然**精确居中**；
+     * - 轨道中心仍是球心 → 聚焦后滚轮缩放（= 改离地高度）、拖拽旋转、平移全部照常，
+     *   不会再出现「聚焦后镜头锁死」；
+     * - `distance` 是相机到目标点的眼距，内部换算成视距参数；
+     * - 受 `maxTilt = 85°` 限制，相机会偏离法线约 `cos(85°) ≈ 8.7%` 的距离，
+     *   这是「正上方 lookAt 会因 up 与视线平行而退化」的有意取舍。
+     */
+    focusSpherePoint(point: Vector3, distance: number) {
+        const dir = point.clone().normalize();
+        // 退化情形（目标点在球心）：回落到 +Z，避免零向量
+        if (dir.lengthSq() === 0)
+            dir.set(0, 0, 1);
+
+        this.anchor.copy(dir);
+        this.viewDir.set(0, 1, 0);
+        this.tilt = this.maxTilt;
+        this.dragging = false;
+        this.distance = this.distanceForCameraRadius(point.length() + distance);
         this.update();
     }
 

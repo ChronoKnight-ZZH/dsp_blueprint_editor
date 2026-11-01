@@ -3,493 +3,32 @@
 </template>
 
 <script lang="ts">
-import {
-	Group, LineSegments, InstancedMesh, WebGLRenderer,
-	LineBasicMaterial, MeshStandardMaterial, MeshLambertMaterial, CylinderGeometry, BoxGeometry,
-	Matrix4, DirectionalLight, Vector3, Object3D, Color, Ray, Sphere, Vector2, Mesh,
-} from 'three';
-import { SphereLatitudeGridGeometry, SphereLongitudeGridGeometry } from '@/SphereGridGeometry';
-import { BeltParameters, BlueprintBuilding } from '@/blueprint/parser';
-import { findPosForAreas, gridAreas, calcBuildingTrans, PositionedBlueprint } from '@/blueprint/planet';
-import { buildReforms } from '@/blueprint/reform';
-import { buildingMeta, noIconBuildings } from '@/data/building';
-import { isBelt, isInserter } from '@/data/items';
-import { itemIconId, recipeIconId } from '@/data/icons';
-import { IconTexture } from '@/iconTexture';
-import { IconGeometry, Icons } from '@/icons';
-import { IconSubscript } from '@/iconSubscript';
-import { Cargos } from '@/cargos';
-import { BVH } from '@/bvh';
+/**
+ * 蓝图编辑器。
+ *
+ * 渲染构建（场景装配、GLB/白模、图标、货物、下标、BVH）已下沉到 `src/lib/core/`，
+ * 与 `BlueprintViewer` 共用同一套实现（见 docs/BlueprintViewer-实施计划.md 阶段 A）。
+ * 本文件只保留 Vue 交互：放置 / 删除 / 预览 / 选中 / 快捷键 / 侧栏联动。
+ */
+import { BeltParameters } from '@/blueprint/parser';
+import { calcBuildingTrans, PositionedBlueprint } from '@/blueprint/planet';
+import { Vector3 } from 'three';
+import { itemIconId } from '@/data/icons';
 import { Updater } from '@/command';
-import { RemoveBuildingCommand } from '@/blueprint/removeBuilding';
-import { commandQueueKey } from '@/define';
-import { onBuildingModelsChanged, requestBuildingModel, resolveBuildingModel } from '@/models/buildingModel';
-import type { ResolvedBuildingModel } from '@/models/buildingModel';
-import { GlbModelInstances } from '@/models/glbInstances';
-import { reapplyLoadedModelMaterials } from '@/models/glbLoader';
-import type { LoadedGlbModel } from '@/models/glbLoader';
-import { getAppliedRenderSettings } from '@/renderSettings';
+import { PLANET_RADIUS } from '@/planetConstants';
+import { AllBuildings } from '@/lib/core/AllBuildings';
+import {
+	buildingIconId, beltIconPos, beltIconScale,
+	sorterIconPos, sorterIconScale,
+} from '@/lib/core/iconHelpers';
 
-function buildPlanetGrid(radius = 1, segment = 200) {
-	const allGrids = new Group();
-	const material = new LineBasicMaterial( { color: 0xf0f0f0, depthWrite: false } );
-
-	const latitudeGeometry = new SphereLatitudeGridGeometry({
-		radius,
-		widthSegments: segment,
-		heightSegments: segment / 2
-	});
-	allGrids.add(new LineSegments(latitudeGeometry, material));
-
-	const radPerSeg = 2 * Math.PI / segment;
-	for (const {minLatitudeSeg, latitudeSeg, longitudeSeg} of gridAreas(segment)) {
-		const geometry = new SphereLongitudeGridGeometry({
-			radius,
-			widthSegments: longitudeSeg, heightSegments: Math.abs(latitudeSeg),
-			phiStart: 0, phiLength: Math.PI * 2,
-			thetaStart: (minLatitudeSeg + segment / 4) * radPerSeg, thetaLength: latitudeSeg * radPerSeg,
-		});
-		allGrids.add(new LineSegments(geometry, material));
-	}
-	return allGrids;
-}
-
-/** 回退建筑（元数据盒 / 程序化几何）的实例引用 */
-interface ModelRefInstanced {
-    mesh: InstancedMesh;
-    instance: number;
-}
-
-/** 外部 GLB 建筑：直接给出建筑中心的世界矩阵，保持旧 `getModel` 的投影语义 */
-interface ModelRefMatrix {
-    matrix: Matrix4;
-}
-
-type BuildingModelRef = ModelRefInstanced | ModelRefMatrix;
-
-class AllBuildings extends Object3D {
-    constructor(
-        objects: Object3D[],
-        public readonly iconsMesh: Icons,
-        public readonly iconTexture: IconTexture,
-        public readonly cargos: Cargos,
-        public readonly modelRef: BuildingModelRef[],
-        public readonly subscriptMesh: IconSubscript | null = null,
-        /** 建筑 → 下标文本在 subscriptMesh 中的起始字符位置与长度；belt count 变化时用于局部刷新 */
-        public readonly subscriptMap: Map<BlueprintBuilding, { startIdx: number; length: number }> = new Map(),
-    ) {
-        super();
-        this.add(...objects);
-        this.add(iconsMesh);
-        if (cargos)
-            this.add(cargos);
-        if (subscriptMesh)
-            this.add(subscriptMesh);
-    }
-
-    public get icons() {
-        return this.iconsMesh.geometry;
-    }
-
-    public dispose() {
-        this.traverse(o => {
-            if (o instanceof InstancedMesh) {
-                o.dispose();
-                // GLB 的几何是跨场景复用的缓存对象，这里不能释放
-                if (!o.userData.sharedResource)
-                    o.geometry.dispose();
-                return;
-            }
-            if (o instanceof Mesh && !o.userData.sharedResource) {
-                (o as Mesh).geometry.dispose();
-            }
-        });
-    }
-}
-
-const pos1 = new Vector3();
-const pos2 = new Vector3();
-const dir = new Vector3();
-const inserterHeight = 0.3;
-function inserterTrans(transforms: Matrix4[], trans: Matrix4) {
-	pos1.setFromMatrixPosition(transforms[0]);
-	dir.copy(pos1).normalize().multiplyScalar(inserterHeight);
-	pos1.add(dir);
-
-	pos2.setFromMatrixPosition(transforms[1]);
-	dir.copy(pos2).normalize().multiplyScalar(inserterHeight);
-	pos2.add(dir);
-
-	trans.setPosition(pos1.x, pos1.y, pos1.z);
-	trans.lookAt(pos1, pos2, pos1);
-	return dir.subVectors(pos1, pos2).length();
-}
-
-function buildingIconId(b: BlueprintBuilding) {
-    return b.recipeId > 0 ? recipeIconId(b.recipeId) : itemIconId(b.itemId);
-}
-
-const scale3 = new Vector3();
-const trans = new Matrix4();
-function buildingIconPos(b: BlueprintBuilding, buildingTrans: Matrix4, pos: Vector3, scale: Vector2) {
-    const meta = buildingMeta.get(b.modelIndex);
-    if (meta === undefined)
-        return false;  // TODO: unknown building, print warning
-    trans.multiplyMatrices(buildingTrans, meta.iconTrans);
-    scale3.setFromMatrixScale(trans);
-    scale.set(scale3.x, scale3.y);
-    pos.setFromMatrixPosition(trans);
-    return true;
-}
-
-const beltIconScale = new Vector2(1.1, 1.1);
-const beltIconTrans = new Matrix4().makeTranslation(0., 0., 0.5);
-function beltIconPos(b: BlueprintBuilding, buildingTrans: Matrix4, pos: Vector3) {
-    trans.multiplyMatrices(buildingTrans, beltIconTrans);
-    pos.setFromMatrixPosition(trans);
-}
-
-const sorterIconScale = new Vector2(0.8, 0.8);
-const sorterIconTrans = new Matrix4().makeTranslation(0., 0., inserterHeight);
-function sorterIconPos(b: BlueprintBuilding, buildingTrans: Matrix4, pos: Vector3) {
-    trans.multiplyMatrices(buildingTrans, sorterIconTrans);
-    pos.setFromMatrixPosition(trans);
-}
-
-function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[], renderer: WebGLRenderer) {
-	// 设置变更后重新导入蓝图 → 按最新「已生效」快照重挂通道贴图（材质是共享对象，原地生效）
-	reapplyLoadedModelMaterials();
-	// 读「已生效」设置快照：仅在导入蓝图时更新；快照是普通对象，本函数虽在 computed
-	// 里执行也不会被依赖跟踪 —— 改设置不会触发场景重建，只影响下次导入
-	const settings = getAppliedRenderSettings();
-
-	const buildBelts = (belts: BlueprintBuilding[]) => {
-		const thickness = 0.1;
-		const material = new MeshLambertMaterial();
-		const objects: Object3D[] = [];
-		{
-			const geometry = new CylinderGeometry(0.32, 0.32, thickness, 8);
-			const mesh = new InstancedMesh(geometry, material, belts.length);
-			const offset = new Matrix4().makeRotationX(Math.PI / 2);
-			offset.premultiply(new Matrix4().makeTranslation(0, 0, thickness / 2));
-			const trans = new Matrix4();
-			for (let i = 0; i < belts.length; i++) {
-				const b = belts[i];
-				trans.copy(transforms[b.index][0]);
-				trans.multiply(offset);
-				mesh.setMatrixAt(i, trans);
-				mesh.setColorAt(i, buildingMeta.get(b.modelIndex)!.color);
-				modelRef[b.index] = { mesh, instance: i };
-			}
-			mesh.instanceMatrix.needsUpdate = true;
-			mesh.instanceColor!.needsUpdate = true;
-			objects.push(mesh);
-		}
-		const linkThickness = 0.6 * thickness;
-		{ // links
-			const geometry = new BoxGeometry(0.15, linkThickness, 1.0);
-			const mesh = new InstancedMesh(geometry, material, belts.length);
-			let numLinks = 0;
-			const offset = new Matrix4().makeTranslation(0, linkThickness / 2, -0.5);
-			const pos1 = new Vector3();
-			const pos2 = new Vector3();
-			const dir = new Vector3();
-			const temp = new Matrix4();
-			const trans = new Matrix4();
-			for (let i = 0; i < belts.length; i++) {
-				const b1 = belts[i];
-				if (b1.outputObjIdx < 0)
-					continue;
-				pos1.setFromMatrixPosition(transforms[b1.index][0]);
-				pos2.setFromMatrixPosition(transforms[b1.outputObjIdx][0]);
-				const len = dir.subVectors(pos1, pos2).length();
-				trans.identity();
-				trans.lookAt(pos1, pos2, pos1);
-				trans.premultiply(temp.makeTranslation(pos1.x, pos1.y, pos1.z));
-
-				const color = buildingMeta.get(b1.modelIndex)!.color;
-				addCargo(trans, color, len);
-
-				trans.multiply(temp.makeScale(1., 1., len));
-				trans.multiply(offset);
-				mesh.setMatrixAt(numLinks, trans);
-				mesh.setColorAt(numLinks, color);
-				numLinks++;
-			}
-			if (numLinks) {
-				mesh.count = numLinks;
-				mesh.instanceMatrix.needsUpdate = true;
-				mesh.instanceColor!.needsUpdate = true;
-				objects.push(mesh);
-			}
-		}
-		return objects;
-	}
-	const buildInserters = (inserters: BlueprintBuilding[]) => {
-		const inserterThickness = 0.06;
-		const geometry = new BoxGeometry(0.15, inserterThickness, 1.0);
-		const material = new MeshLambertMaterial();
-		const mesh = new InstancedMesh(geometry, material, inserters.length);
-		const offset = new Matrix4().makeTranslation(0, 0, -0.5);
-		const temp = new Matrix4();
-		const trans = new Matrix4();
-		for (let i = 0; i < inserters.length; i++) {
-			const b = inserters[i];
-
-			const len = inserterTrans(transforms[b.index], trans);
-			const color = buildingMeta.get(b.modelIndex)!.color;
-			addCargo(trans, color, len);
-
-			trans.multiply(temp.makeScale(1., 1., len));
-			trans.multiply(offset);
-			mesh.setMatrixAt(i, trans);
-			mesh.setColorAt(i, color);
-			modelRef[b.index] = { mesh, instance: i };
-		}
-		mesh.instanceMatrix.needsUpdate = true;
-		mesh.instanceColor!.needsUpdate = true;
-		return [mesh];
-	}
-	const buildBoxes = (boxes: BlueprintBuilding[]) => {
-		const objects: Object3D[] = [];
-
-		// 1) 解析每个建筑的模型来源：已加载的外部 GLB 优先，其余回退元数据表
-		const resolved: (ResolvedBuildingModel | null)[] = boxes.map(b => {
-			try {
-				return resolveBuildingModel(b.modelIndex);
-			} catch {
-				return null;  // resolver 内部已兜底，这里只是双保险
-			}
-		});
-
-		// 同一模型的实例数过多时整组回退（高模 × 上千实例会明显掉帧）
-		const glbInstanceCounts = new Map<number, number>();
-		if (settings.showRealModels) {
-			for (const r of resolved) {
-				if (r !== null && r.glb !== null && r.meta !== undefined)
-					glbInstanceCounts.set(r.modelIndex, (glbInstanceCounts.get(r.modelIndex) ?? 0) + 1);
-			}
-		}
-
-		// 2) 分组：外部 GLB 组 / 元数据盒回退组
-		const glbGroups = new Map<number, { model: LoadedGlbModel; placement: Matrix4; buildings: BlueprintBuilding[] }>();
-		const fallback: BlueprintBuilding[] = [];
-		for (let i = 0; i < boxes.length; i++) {
-			const b = boxes[i];
-			const r = resolved[i];
-			if (settings.showRealModels && r !== null && r.glb !== null && r.meta !== undefined
-				&& (glbInstanceCounts.get(r.modelIndex) ?? 0) <= settings.maxInstancesPerModel) {
-				let group = glbGroups.get(r.modelIndex);
-				if (group === undefined) {
-					group = { model: r.glb, placement: r.placement, buildings: [] };
-					glbGroups.set(r.modelIndex, group);
-				}
-				group.buildings.push(b);
-				continue;
-			}
-			fallback.push(b);
-			// 有外部模型但还没加载 → 按需触发懒加载（加载器内部并发去重 + 缓存 + 超时）
-			// 没有元数据就既定位不了也画不了，因此不为它下载 GLB
-			if (r !== null && r.glbName !== null && r.glb === null && r.meta !== undefined)
-				requestBuildingModel(b.modelIndex);
-		}
-
-		// 3) GLB 实例化渲染；任一环节出错都整组退回元数据盒，不影响其余建筑
-		const anchor = new Matrix4();
-		const anchorPos = new Vector3();
-		const anchorTrans = new Matrix4();
-		for (const group of glbGroups.values()) {
-			let instances: GlbModelInstances | null = null;
-			try {
-				instances = new GlbModelInstances(
-					group.model,
-					group.placement,
-					group.buildings.map(b => transforms[b.index][0]),
-				);
-			} catch (e) {
-				console.warn('[glb] 实例化渲染失败，该模型组回退元数据表', e);
-				instances = null;
-			}
-			if (instances === null || instances.meshes.length === 0) {
-				fallback.push(...group.buildings);
-				continue;
-			}
-			objects.push(instances);
-			for (const b of group.buildings) {
-				// modelRef 沿用旧语义：建筑中心的世界矩阵（供 SpitterInfo 等做投影）
-				anchor.copy(transforms[b.index][0]);
-				const meta = buildingMeta.get(b.modelIndex);
-				if (meta !== undefined) {
-					anchorPos.setFromMatrixPosition(meta.selectUnitBoxTrans);
-					anchor.multiply(anchorTrans.makeTranslation(anchorPos.x, anchorPos.y, anchorPos.z));
-				}
-				modelRef[b.index] = { matrix: anchor.clone() };
-			}
-		}
-
-		// 4) 元数据盒回退：与改动前完全一致的渲染方式
-		if (fallback.length) {
-			const geometry = new BoxGeometry(1.0, 1.0, 1.0);
-			const material = new MeshLambertMaterial();
-			const mesh = new InstancedMesh(geometry, material, fallback.length);
-			const trans = new Matrix4();
-			const hidden = new Matrix4().makeScale(0, 0, 0);
-			const defaultColor = new Color(0xdddddd);
-			for (let i = 0; i < fallback.length; i++) {
-				const b = fallback[i];
-				const meta = buildingMeta.get(b.modelIndex);
-				if (meta === undefined) {
-					// 未知建筑：放退化矩阵占位（不可见），保持“不抛错、不白屏”的旧行为
-					mesh.setMatrixAt(i, hidden);
-					mesh.setColorAt(i, defaultColor);
-					continue;
-				}
-				trans.multiplyMatrices(transforms[b.index][0], meta.unitBoxTrans);
-				mesh.setMatrixAt(i, trans);
-				mesh.setColorAt(i, meta.color);
-				modelRef[b.index] = { mesh, instance: i };
-			}
-			mesh.instanceMatrix.needsUpdate = true;
-			mesh.instanceColor!.needsUpdate = true;
-			objects.push(mesh);
-		}
-
-		return objects;
-	}
-	const buildIcons = (iconBuildings: BlueprintBuilding[], iconBelts: BlueprintBuilding[], iconInsterters: BlueprintBuilding[]) => {
-		const subscripts = new Map<BlueprintBuilding, string>();
-		for (const b of iconBelts) {
-			if (b.parameters === null)
-				continue;
-			const p = b.parameters as BeltParameters;
-			if (p.count === 0)
-				continue;
-			let s;
-			if (p.count >= 100000)
-				s = Math.floor(p.count / 1000).toFixed(0) + 'k';
-			else
-				s = p.count.toFixed(0);
-			subscripts.set(b, s);
-		}
-
-		const count = iconBuildings.length + iconBelts.length + iconInsterters.length;
-		const icons = new IconGeometry(count);
-
-		let subscriptsMesh: null | IconSubscript = null;
-		const subscriptMap = new Map<BlueprintBuilding, { startIdx: number; length: number }>();
-		if (subscripts.size > 0) {
-			let numChars = 0;
-			for (const s of subscripts.values()) {
-				numChars += s.length;
-			}
-			subscriptsMesh = new IconSubscript(numChars);
-		}
-		const pos = new Vector3();
-
-		let subscriptIdx = 0;
-		for (let i = 0; i < iconBelts.length; i++) {
-            const b = iconBelts[i];
-            beltIconPos(b, transforms[b.index][0], pos);
-			const iconId = iconTexture.requestIcon((b.parameters as BeltParameters).iconId);
-			icons.addIcon(b, iconId, pos, beltIconScale);
-
-			const sub = subscripts.get(b);
-			if (sub !== undefined) {
-				subscriptsMesh!.setText(subscriptIdx, pos, beltIconScale, sub);
-				subscriptMap.set(b, { startIdx: subscriptIdx, length: sub.length });
-				subscriptIdx += sub.length;
-			}
-		}
-
-		for (let i = 0; i < iconInsterters.length; i++) {
-			const b = iconInsterters[i];
-            sorterIconPos(b, transforms[b.index][0], pos);
-            const iconId = iconTexture.requestIcon(itemIconId(b.filterId));
-			icons.addIcon(b, iconId, pos, sorterIconScale);
-		}
-
-		const buildingIconScale = new Vector2();
-		for (let i = 0; i < iconBuildings.length; i++) {
-            const b = iconBuildings[i];
-			if (!buildingIconPos(b, transforms[b.index][0], pos, buildingIconScale))
-				continue
-			const iconId = iconTexture.requestIcon(buildingIconId(b));
-			icons.addIcon(b, iconId, pos, buildingIconScale);
-		}
-
-		if (subscriptsMesh !== null) {
-			subscriptsMesh.needsUpdate();
-		}
-		return [icons, subscriptsMesh, subscriptMap] as const;
-	}
-
-	const belts = buildings.filter(b => isBelt(b.itemId));
-    const inserters = buildings.filter(b => isInserter(b.itemId));
-
-	const boxes = buildings.filter(b => !isInserter(b.itemId) && !isBelt(b.itemId));
-
-    const iconBuildings = boxes.filter(b => !noIconBuildings.has(b.itemId));
-	const iconBelts = belts.filter(b => b.parameters && (b.parameters as BeltParameters).iconId > 0);
-	const iconInsterters = inserters.filter(b => b.filterId > 0);
-
-	const modelRef = new Array<BuildingModelRef>(buildings.length);
-	const cargosMesh = new Cargos(belts.length + inserters.length);
-	let numCargos = 0;
-	const addCargo = (trans: Matrix4, color: Color, distance: number) => {
-		cargosMesh.setMatrixAt(numCargos, trans);
-		cargosMesh.setColorAt(numCargos, color);
-		cargosMesh.setCargoDistanceAt(numCargos, distance);
-		numCargos++;
-	}
-
-    const meshes: Object3D[] = [];
-	if (belts.length)
-		meshes.push(...buildBelts(belts));
-
-	if (inserters.length)
-		meshes.push(...buildInserters(inserters));
-
-	if (numCargos) {
-		cargosMesh.count = numCargos;
-		cargosMesh.instanceMatrix.needsUpdate = true;
-		cargosMesh.instanceColor!.needsUpdate = true;
-		cargosMesh.geometry.cargoDistance.needsUpdate = true;
-	}
-
-	if (boxes.length)
-		meshes.push(...buildBoxes(boxes));
-
-    const iconTexture = new IconTexture(renderer);
-	const [icons, subscriptsMesh, subscriptMap] = buildIcons(iconBuildings, iconBelts, iconInsterters)
-    if (subscriptsMesh) {
-        subscriptsMesh.renderOrder = 11;
-    }
-
-    const iconMesh = new Icons(iconTexture.texture, icons);
-    iconMesh.renderOrder = 10;
-
-	return new AllBuildings(meshes, iconMesh, iconTexture, cargosMesh, modelRef, subscriptsMesh, subscriptMap);
-}
-
-function buildBVH(transforms: Matrix4[][], buildings: BlueprintBuilding[]) {
-	const temp = new Matrix4();
-	const inserterOffset = new Matrix4().makeTranslation(0, 0, -0.5);
-
-	const selectBoxes = buildings.map((b, i) => {
-		const meta = buildingMeta.get(b.modelIndex)!;
-		const box = new Matrix4();
-		if (isInserter(b.itemId)) {
-			const len = inserterTrans(transforms[i], box);
-			box.multiply(temp.makeScale(0.5, 0.5, len));
-			box.multiply(inserterOffset);
-		} else {
-			box.multiplyMatrices(transforms[i][0], meta.selectUnitBoxTrans);
-		}
-		return box;
-	});
-	return new BVH(selectBoxes);
-}
-
+/**
+ * 注册编辑器的增量刷新回调（图标 / 下标局部更新）。
+ *
+ * **留在 Vue 层**（方案 §5 第 7 行）：它依赖 `Updater`（`@/command`，import vue），
+ * 放进 `lib/core` 会破坏「core 不依赖 Vue」的约束。core 只提供 `AllBuildings`
+ * 的公开面（`icons` / `iconTexture` / `subscriptMesh` / `subscriptMap`）。
+ */
 function registerUpdater(updater: Updater, buildings: AllBuildings, posBP: PositionedBlueprint) {
     // 先清空所有旧回调，防止场景重建时重复注册导致陈旧回调引用已销毁的 AllBuildings
     updater.clearAll();
@@ -516,7 +55,7 @@ function registerUpdater(updater: Updater, buildings: AllBuildings, posBP: Posit
         } else if (iconId !== 0) {
             // 之前无图标，现在有了 → 动态添加
             const pos = new Vector3();
-            const trans = calcBuildingTrans(R, posBP, b);
+            const trans = calcBuildingTrans(PLANET_RADIUS, posBP, b);
             beltIconPos(b, trans[0], pos);
             icons.addIcon(b, iconId, pos, beltIconScale, true);
         }
@@ -540,7 +79,7 @@ function registerUpdater(updater: Updater, buildings: AllBuildings, posBP: Posit
         if (s.length !== subEntry.length)
             return;
         const pos = new Vector3();
-        const trans = calcBuildingTrans(R, posBP, b);
+        const trans = calcBuildingTrans(PLANET_RADIUS, posBP, b);
         beltIconPos(b, trans[0], pos);
         buildings.subscriptMesh.setText(subEntry.startIdx, pos, beltIconScale, s);
         buildings.subscriptMesh.needsUpdate();
@@ -556,7 +95,7 @@ function registerUpdater(updater: Updater, buildings: AllBuildings, posBP: Posit
         } else if (iconId !== 0) {
             // 之前无图标，现在有了 → 动态添加
             const pos = new Vector3();
-            const trans = calcBuildingTrans(R, posBP, b);
+            const trans = calcBuildingTrans(PLANET_RADIUS, posBP, b);
             sorterIconPos(b, trans[0], pos);
             icons.addIcon(b, iconId, pos, sorterIconScale, true);
         }
@@ -565,20 +104,37 @@ function registerUpdater(updater: Updater, buildings: AllBuildings, posBP: Posit
     // updateStationInfo：当前物流塔面板自己响应式刷新即可；
     // 若未来要按库存首物品染色，在这里改颜色 attribute。
 }
-
-const R = 200.2;
-const SEGMENT = 200;
-
 </script>
 
 <script setup lang="ts">
 import { ref, onMounted, Ref, onUnmounted, watchEffect, computed, inject } from 'vue'
-import { Scene, PerspectiveCamera, SphereGeometry, AmbientLight } from 'three';
+import {
+	Scene, PerspectiveCamera, WebGLRenderer, Matrix4, Ray, Sphere, Mesh,
+	BoxGeometry, MeshStandardMaterial,
+} from 'three';
+import { RemoveBuildingCommand } from '@/blueprint/removeBuilding';
+import { commandQueueKey } from '@/define';
+import { findPosForAreas } from '@/blueprint/planet';
+import { buildReforms } from '@/blueprint/reform';
+import { onBuildingModelsChanged } from '@/models/buildingModel';
 import { PlanetMapControls } from '@/PlanetMapControls';
 import { createSkyGradient } from '@/skyGradient';
 import { attachCamera, attachRenderer } from '@/utils';
 import { createNeutralEnvironment, setBuildingEnvironment } from '@/models/envMap';
 import { setTextureMaxAnisotropy } from '@/models/textureMaps';
+import { getAppliedRenderSettings } from '@/renderSettings';
+import { setSettingsProvider } from '@/models/glbLoader';
+import { IconTexture } from '@/iconTexture';
+import { PLANET_SEGMENT } from '@/planetConstants';
+import { buildBuildings } from '@/lib/core/buildBuildings';
+import { buildBVH } from '@/lib/core/buildBVH';
+import { createPlanetScene } from '@/lib/core/planetScene';
+import type { BuildBuildingsResult } from '@/lib/core/buildBuildings';
+import type { BuildingModelRef } from '@/lib/core/types';
+
+// 加载器需要在「GLB 到达」与「设置变更重挂贴图」时读取当前贴图设置。
+// 注入 reactive 单例的读取函数，保持设置面板的响应式驱动（方案 D2）。
+setSettingsProvider(() => getAppliedRenderSettings());
 
 const props = defineProps<{
   selectedBuildingIndex: number | null,
@@ -589,16 +145,9 @@ const emit = defineEmits<{
 }>()
 
 const scene = new Scene();
-scene.add(new AmbientLight(0xffffff, 0.3));
-const dirLight = new DirectionalLight(0xffffff, 2);
-scene.add(dirLight);
-{
-	const geometry = new SphereGeometry(R, SEGMENT, SEGMENT / 2);
-	const material = new MeshStandardMaterial( { color: 0xb0b0b0 } );
-	const planet = new Mesh(geometry, material);
-	scene.add(planet);
-}
-scene.add(buildPlanetGrid(R * 1.0001, SEGMENT));
+const planetScene = createPlanetScene(PLANET_RADIUS, PLANET_SEGMENT);
+const dirLight = planetScene.dirLight;
+scene.add(planetScene.root);
 
 const root: Ref<HTMLDivElement | null> = ref(null);
 const renderer = new WebGLRenderer({ antialias: true });
@@ -615,11 +164,11 @@ const camera = new PerspectiveCamera(50);
 // 再往小会让 24 位深度缓冲在 z≈200 处的精度掉到 0.015 的地基抬升量以下，地基会闪
 camera.near = 0.5;
 camera.far = 3000;
-camera.position.z = 2 * R;
+camera.position.z = 2 * PLANET_RADIUS;
 attachCamera(root, camera);
 
 // 天光/星空背景：平视时地平线上一条大气雾带 + 头顶星空；拉远时星球带一圈大气边缘光
-const sky = createSkyGradient({ planetRadius: R });
+const sky = createSkyGradient({ planetRadius: PLANET_RADIUS });
 scene.add(sky.mesh);
 onUnmounted(() => {
 	scene.remove(sky.mesh);
@@ -633,6 +182,13 @@ let controls: PlanetMapControls | null = null;
 /** 外部 GLB 模型到达时自增，触发场景按“GLB 优先”重建 */
 const modelVersion = ref(0);
 
+/**
+ * 图标图集跨重建复用：每次重建都 new 一个会重新分配 1920×1920 纹理，
+ * 并重发全部图标请求（方案 §5 第 9 行的配套修正）。
+ */
+const editorIconTexture = new IconTexture(renderer);
+onUnmounted(() => editorIconTexture.dispose());
+
 const b = computed(() => {
 	// 任意命令（剔除建筑 / 撤销 / 重做）后整体重建场景
 	commandQueue.value?.execVersion.value;
@@ -641,13 +197,19 @@ const b = computed(() => {
 	if (!commandQueue.value)
 		return null;
     const d = commandQueue.value.data;
-	const pos = findPosForAreas(d.areas, SEGMENT);
-	const transforms = d.buildings.map(b => calcBuildingTrans(R, pos, b));
-	const buildings = buildBuildings(transforms, d.buildings, renderer)
-    const bvh = buildBVH(transforms, d.buildings);
-    const reforms = buildReforms(R, pos, d.reformData);
-    registerUpdater(commandQueue.value.updater, buildings, pos);
-	return { buildings, bvh, reforms };
+	const pos = findPosForAreas(d.areas, PLANET_SEGMENT);
+	const transforms = d.buildings.map(building => calcBuildingTrans(PLANET_RADIUS, pos, building));
+	const applied = getAppliedRenderSettings();
+	const built: BuildBuildingsResult = buildBuildings(transforms, d.buildings, {
+		settings: applied,
+		textureSink: renderer,
+		iconTexture: editorIconTexture,
+		textureSettings: applied,
+	});
+	const { bvh } = buildBVH(transforms, d.buildings);
+    const reforms = buildReforms(PLANET_RADIUS, pos, d.reformData);
+    registerUpdater(commandQueue.value.updater, built.buildings, pos);
+	return { buildings: built.buildings, bvh, reforms };
 });
 
 watchEffect(onCleanUp => {
@@ -761,7 +323,7 @@ onMounted(() => {
 	controls = new PlanetMapControls(camera, renderer.domElement);
 	const c = controls;
 	c.listenToKeyEvents(rootEl);
-	c.planetRadius = R;
+	c.planetRadius = PLANET_RADIUS;
 	c.minDistance = 3;
 	c.maxDistance = 1200;
 	c.minHeight = 1.5;
@@ -775,7 +337,7 @@ onMounted(() => {
 	applyHome();
 
 	const ray = new Ray();
-	const planetSphere = new Sphere(new Vector3(), R);
+	const planetSphere = new Sphere(new Vector3(), PLANET_RADIUS);
 	const v = new Vector3();
 	const pickBuilding = (e: MouseEvent) => {
 		if (b.value === null)

@@ -1,6 +1,12 @@
 import { InstancedBufferAttribute, Matrix4, Mesh, Texture, Vector2, Vector3 } from "three";
 import { IconGeometry, IconsMaterial } from "./icons";
 
+/** 角标文字配色（来自主题；省略时沿用旧版硬编码的白色/深灰描边） */
+export interface TextStyle {
+    fill?: string;
+    stroke?: string;
+}
+
 class FontTexture {
     height;
     cWidth;
@@ -8,7 +14,7 @@ class FontTexture {
     texture;
     static readonly allText = '0123456789k';
 
-    constructor() {
+    constructor(style: TextStyle = {}) {
         const stroke = 3;
         const padding = 1;
         const height = 100;
@@ -28,9 +34,9 @@ class FontTexture {
         canvas.width = this.cStride * FontTexture.allText.length;
 
         ctx.font = font;
-        ctx.strokeStyle = '#4448';
+        ctx.strokeStyle = style.stroke ?? '#4448';
         ctx.lineWidth = 2 * stroke;
-        ctx.fillStyle = 'white';
+        ctx.fillStyle = style.fill ?? 'white';
         for (let i = 0; i < FontTexture.allText.length; i++) {
             const c = FontTexture.allText[i];
             const x = this.cStride * i + stroke + padding
@@ -47,8 +53,8 @@ export class IconSubscript extends Mesh {
     fontTexture;
     cWidth = 0.22;
 
-    constructor(numChars: number) {
-        const fontTexture = new FontTexture();
+    constructor(numChars: number, style?: TextStyle) {
+        const fontTexture = new FontTexture(style);
         const material = new IconsMaterial(fontTexture.texture);
         material.iMapSize.set(FontTexture.allText.length, 1);
         const geometry = new IconGeometry(numChars, false);

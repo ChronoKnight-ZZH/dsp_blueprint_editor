@@ -21,8 +21,22 @@ function fakeModel(): LoadedGlbModel {
     };
 }
 
+import { GRID_HORIZONTAL as CONST_GRID_HORIZONTAL, HEIGHT_GRID_SIZE as CONST_GRID_VERTICAL } from '@/planetConstants';
+
+/**
+ * 下面两个常量**刻意保持硬编码**，不直接引用 `@/planetConstants`：
+ * 它们是「世界坐标换算的当前事实」，一旦有人改动 `planetConstants` 里的半径/段数，
+ * 这条断言会立刻红，从而阻止 GLB 与星球表面错位（见 plan 阶段 A 第 3 行）。
+ */
 const GRID_HORIZONTAL = 2 * Math.PI / 200 / 5 * 200.2;
 const GRID_VERTICAL = 4 / 3;
+
+describe('planetConstants 与既有换算一致', () => {
+    it('水平格 / 垂直格与世界坐标换算必须相等', () => {
+        expect(CONST_GRID_HORIZONTAL).toBeCloseTo(GRID_HORIZONTAL, 10);
+        expect(CONST_GRID_VERTICAL).toBe(GRID_VERTICAL);
+    });
+});
 
 function transform(partial: Partial<ModelTransform>): ModelTransform {
     return { ...ZERO_MODEL_TRANSFORM, ...partial };
@@ -98,16 +112,31 @@ describe('GLB 放置矩阵', () => {
     });
 
     it('没有可用模型时：回退元数据表，且完全忽略表里的偏移/旋转', () => {
-        // jest 环境没有 require.context → 所有建筑都解析不到模型
-        // 69 在表里写着 yaw:180，但没有模型时必须一个都不生效
-        const r = resolveBuildingModel(69);
+        // 改造后「有没有模型」由 @lib/asset-resolver 的清单决定（构建期注入 / 单测注入磁盘真值），
+        // 不再依赖 jest 缺 require.context。这里把解析器换成空清单，显式复现「模型文件缺失」。
+        jest.isolateModules(() => {
+            jest.doMock('@lib/asset-resolver', () => ({
+                assetResolver: {
+                    glbModelNames: () => [],
+                    glbModelUrl: async () => null,
+                    modelTextureUrl: () => null,
+                    itemRecipeIconUrl: async () => '',
+                    techIconUrl: async () => '',
+                    signalIconUrl: async () => '',
+                },
+            }));
 
-        expect(r.glb).toBeNull();
-        expect(r.glbName).toBeNull();
-        expect(r.source).toBe('meta');
-        expect(r.meta).toBeDefined();
-        // 单位矩阵 = 不做任何变换；回退方块走的是 meta.unitBoxTrans，与本表无关
-        expect(r.placement.equals(new Matrix4())).toBe(true);
+            const isolated = require('@/models/buildingModel') as typeof import('@/models/buildingModel');
+            // 69 在表里写着 yaw:180，但没有模型时必须一个都不生效
+            const r = isolated.resolveBuildingModel(69);
+
+            expect(r.glb).toBeNull();
+            expect(r.glbName).toBeNull();
+            expect(r.source).toBe('meta');
+            expect(r.meta).toBeDefined();
+            // 单位矩阵 = 不做任何变换；回退方块走的是 meta.unitBoxTrans，与本表无关
+            expect(r.placement.equals(new Matrix4())).toBe(true);
+        });
     });
 
     it('放置计算不修改元数据表（元数据盒 / 回退渲染不受本表影响）', () => {

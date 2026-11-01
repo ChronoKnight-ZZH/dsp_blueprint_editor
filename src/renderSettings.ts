@@ -9,6 +9,7 @@
  */
 
 import { reactive } from 'vue';
+import type { FullRenderSettings } from '@/renderSettingsTypes';
 
 /** 贴图通道：-a 反照率 / -n 法线 / -s 高光·粗糙 / -e 自发光 / -eff 特效 / -dirt 污渍 / -glass 玻璃 */
 export type TextureChannel =
@@ -24,9 +25,19 @@ export interface RenderSettings {
     /** 同一模型最多用 GLB 渲染的实例数；Infinity = 无限 */
     maxInstancesPerModel: number;
 }
+
+/**
+ * 与 `@/renderSettingsTypes` 的结构对齐断言。
+ *
+ * 该文件是**纯类型**（不 import vue），供 `src/lib/core/**` 与 Viewer 使用；
+ * 这里用可赋值检查锁死两者不会漂移：任一侧字段改名/改类型都会在此报错。
+ */
+const _renderSettingsCompat: FullRenderSettings = null as unknown as RenderSettings;
+void _renderSettingsCompat;
+
 // 渲染设置保存键名
 const STORAGE_KEY = 'dsp-blueprint-editor:render-settings';
-// 渲染设置保存键名
+
 const CHANNEL_KEYS: readonly TextureChannel[] = [
     'albedo', 'normal', 'spec', 'emissive', 'effect', 'dirt', 'glass',
 ];

@@ -1,5 +1,6 @@
 import { Euler, Matrix4 } from "three";
 import { BlueprintArea, BlueprintBuilding } from "./parser";
+import { GRID_PER_SEGMENT, HEIGHT_GRID_SIZE } from "@/planetConstants";
 
 const segmentArr: [number, number][] = [
 	[0, 1],
@@ -23,8 +24,6 @@ const segmentMap = new Map<number, number>();
 for (let i = 0; i < segmentArr.length - 1; i++) {
     segmentMap.set(segmentArr[i][1], i);
 }
-
-const GRID_PER_SEGMENT = 5;
 
 function calcLatitudeSeg(seg: number, maxSegment = 200) {
 	const latitude = Math.acos(seg / maxSegment);
@@ -183,8 +182,6 @@ export function findPosForAreas(areas: BlueprintArea[], segment = 200): Position
 
     return pos;
 }
-
-const HEIGHT_GRID_SIZE = 4 / 3;
 
 const temp = new Matrix4();
 const rotation = new Euler();

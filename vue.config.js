@@ -1,10 +1,24 @@
 const { defineConfig } = require('@vue/cli-service')
 const webpack = require('webpack')
+const path = require('path')
 const { execSync } = require('child_process')
 
 module.exports = defineConfig({
     publicPath: '/dsp_blueprint_editor/',
     transpileDependencies: false,
+    // BlueprintViewer demo 页（开发验证用）：http://localhost:8080/dsp_blueprint_editor/demo.html
+    pages: {
+        index: {
+            entry: 'src/main.ts',
+            template: 'public/index.html',
+            filename: 'index.html',
+        },
+        demo: {
+            entry: 'demo/main.ts',
+            template: 'demo/index.html',
+            filename: 'demo.html',
+        },
+    },
     configureWebpack: {
         module: {
             rules: [
@@ -12,7 +26,15 @@ module.exports = defineConfig({
                     test: /\/assets\//,
                     type: 'asset',
                 }, {
-                    test: /\/assets\/icons\/(item_recipe|signal|tech)\//,
+                    // 物品/配方图标：独立成文件并归入 img/item_recipe/。
+                    // 该目录是扁平结构，无需保留子路径；正则兼容 Windows 反斜杠。
+                    test: /assets[\\/]icons[\\/]item_recipe[\\/]/,
+                    type: 'asset/resource',
+                    generator: {
+                        filename: 'img/item_recipe/[name].[contenthash:8][ext]',
+                    },
+                }, {
+                    test: /\/assets\/icons\/(signal|tech)\//,
                     type: 'asset/resource',
                 }, {
                     // 建筑 GLB 模型：强制输出独立文件（不走 <8KB 内联），
@@ -24,16 +46,24 @@ module.exports = defineConfig({
                         filename: 'models/[name].[contenthash:8][ext]',
                     },
                 }, {
-                    // 建筑通道贴图（法线 / 自发光 / spec-gloss）：独立成文件 + 保留目录结构。
+                    // 建筑通道贴图（法线 / 自发光 / spec-gloss）：独立成文件，输出到 img/models/。
                     // 这些图多为 1~4 MB，内联成 base64 会把 JS 撑爆；
                     // 另外不同建筑目录里有同名贴图（如 color-palette-256.png），
-                    // 用 [path] 保留相对路径才不会互相覆盖。
+                    // 必须保留建筑子目录才不会互相覆盖 —— 但 [path] 会把 src/assets/icons/models
+                    // 前缀一起带进输出路径，所以用函数形式只截取 models/ 之后的相对部分。
                     // 正则要同时兼容 `/` 与 `\`：webpack 在 Windows 上给出的是反斜杠路径，
                     // 只写 `/` 会让规则静默失配、图落到默认的 img/ 目录。
                     test: /assets[\\/]icons[\\/]models[\\/].+\.png$/i,
                     type: 'asset/resource',
                     generator: {
-                        filename: 'textures/[path][name].[contenthash:8][ext]',
+                        filename: (pathData) => {
+                            const rel = pathData.filename
+                                .replace(/\\/g, '/')
+                                .replace(/^.*assets\/icons\/models\//i, '');
+                            const idx = rel.lastIndexOf('/');
+                            const dir = idx >= 0 ? rel.slice(0, idx + 1) : '';
+                            return `img/models/${dir}[name].[contenthash:8][ext]`;
+                        },
                     },
                 },
             ],
@@ -41,6 +71,10 @@ module.exports = defineConfig({
         resolve: {
             alias: {
                 three$: 'three/src/Three.js',
+                // 资产解析层：编辑器构建固定用 webpack 实现（require.context / require /
+                // 模板字符串 import），产物与改造前逐字节一致；库构建（yarn build:lib）
+                // 通过同一别名的 $ 精确匹配切到 runtime 实现（纯字符串拼接 + 外置资产）。
+                '@lib/asset-resolver$': path.resolve(__dirname, 'src/lib/assets/assetResolver.webpack.ts'),
             }
         },
         plugins: [

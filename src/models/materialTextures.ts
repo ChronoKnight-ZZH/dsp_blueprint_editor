@@ -16,13 +16,22 @@
  */
 
 import type { Object3D, Texture } from 'three';
-import { getAppliedRenderSettings } from '@/renderSettings';
 import { getBuildingEnvironment } from './envMap';
 import type { LoadedGlbModel } from './glbLoader';
 import { METALNESS_WITHOUT_SPEC_MAP, resolveModelMaterialTuning } from './modelMaterialTuning';
 import { materialMapUrls } from './textureManifest';
 import type { MaterialTextureSet } from './textureMaps';
 import { loadMaterialTextureSet } from './textureMaps';
+import type { TextureSettings } from '@/renderSettingsTypes';
+
+/**
+ * 设置不再从 `@/renderSettings` 全局读取（那会 import vue，见方案 D1），
+ * 改为**由调用方传入**：
+ *   - 编辑器：`BlueprintEditor.vue` 通过 `glbLoader.setSettingsProvider()` 注入
+ *     「已生效」设置快照 `getAppliedRenderSettings()`（导入蓝图时固化，见 renderSettings.ts）
+ *   - 库模式：`RenderCore` 注入自身的 textureSettingsProvider
+ */
+export type { TextureSettings };
 
 /**
  * 法线强度。
@@ -113,12 +122,12 @@ function applyToMaterial(
     material: StandardMaterialLike,
     tuning: { emissiveIntensity: number; envMapIntensity: number; metalness: number },
     textures: MaterialTextureSet | null,
+    settings: TextureSettings,
 ): void {
     const base = snapshotOf(material);
-    // 读「已生效」设置快照：仅在导入蓝图时更新；普通对象、不被依赖跟踪 ——
-    // 本函数会随建场景在 Vue computed 里执行（reapplyLoadedModelMaterials），
-    // 若直接读响应式设置，改设置会立即重建场景
-    const settings = getAppliedRenderSettings();
+    // settings 由调用方传入（编辑器注入的是「已生效」快照）：本函数随建场景在 Vue
+    // computed 里执行（reapplyLoadedModelMaterials），若直接读响应式 renderSettings，
+    // 改设置会立即重建整个场景
     const useTextures = settings.texturesEnabled;
 
     // 0) -a 反照率：关闭后只保留材质基础色（GLB 内嵌的底色图）
@@ -171,8 +180,10 @@ function applyToMaterial(
 /**
  * 给一个已加载的 GLB 模型套用通道贴图与调参。
  * **永不 reject**；返回真正挂上了通道贴图的材质数量（便于日志/测试）。
+ *
+ * @param settings 贴图设置。调用方必须显式传入（见 `TextureSettings` 的解耦说明）。
  */
-export async function applyModelMaterialTextures(model: LoadedGlbModel): Promise<number> {
+export async function applyModelMaterialTextures(model: LoadedGlbModel, settings: TextureSettings): Promise<number> {
     const tuning = resolveModelMaterialTuning(model.name);
     const materials = collectStandardMaterials(model.scene);
     if (materials.length === 0)
@@ -183,18 +194,18 @@ export async function applyModelMaterialTextures(model: LoadedGlbModel): Promise
         const urls = materialMapUrls[`${model.name}::${material.name}`];
         if (urls === undefined) {
             // 没有通道图（特效/玻璃材质，或该模型本身没导出通道图）：只套参数
-            applyToMaterial(material, tuning, null);
+            applyToMaterial(material, tuning, null, settings);
             return;
         }
         try {
             const textures = await loadMaterialTextureSet(urls);
-            applyToMaterial(material, tuning, textures);
+            applyToMaterial(material, tuning, textures, settings);
             if (textures.normal !== null || textures.emissive !== null || textures.orm !== null)
                 textured++;
         }
         catch (e) {
             console.warn(`[tex] 材质 ${model.name}::${material.name} 贴图接入失败（保留底色）`, e);
-            applyToMaterial(material, tuning, null);
+            applyToMaterial(material, tuning, null, settings);
         }
     }));
     return textured;
