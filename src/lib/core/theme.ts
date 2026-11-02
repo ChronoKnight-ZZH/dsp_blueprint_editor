@@ -1,12 +1,21 @@
 import type { ThemeColors, ThemeName } from "../types";
 
 /**
- * 主题色板与解析（对齐 v1 的 `Pu` / `resolveTheme`）。
+ * 主题色板与解析（dark / light 对齐 v1 的 `Pu` / `resolveTheme`）。
  *
- * 色值直接从 v1 打包产物读出（`灰灰-简单版本/dsp-blueprint-editor.js` @ 688101），
- * 因此两版切换主题后的观感一致。
+ * dark / light 色值直接从 v1 打包产物读出（`灰灰-简单版本/dsp-blueprint-editor.js` @ 688101），
+ * 因此两版切换主题后的观感一致；`editor` 则是把编辑器当前场景观感搬进 lib。
  */
-export const THEME_PALETTE: Record<"dark" | "light", ThemeColors> = {
+export const THEME_PALETTE: Record<"dark" | "light" | "editor", ThemeColors> = {
+    // 复刻编辑器当前观感：星球/网格取自 editor 未套主题时的材质默认色，
+    // 背景纯黑由天光/星空（createSkyGradient）覆盖，文字沿用 editor 的默认白字深灰描边。
+    editor: {
+        sceneBackground: 0x000000,
+        planet: 0xb0b0b0,
+        grid: 0xf0f0f0,
+        textFill: "#ffffff",
+        textStroke: "#44444488",
+    },
     dark: {
         sceneBackground: 0x0d1117,
         planet: 0x1c2128,

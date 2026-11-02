@@ -14,6 +14,7 @@ import type {
     BlueprintLoadResult,
     BuildingInfoPayload,
     BuildingLocateResult,
+    BuildingsLocateResult,
     FocusOptions,
     SettingsPort,
     ThemeColors,
@@ -192,8 +193,8 @@ export class BlueprintViewer {
                     options.height ?? rect.height
                 );
             }
-            // 对齐 v1 构造参数 theme：默认 dark
-            this.core.setTheme(options.theme ?? "dark");
+            // 默认 editor 主题（复刻编辑器当前观感）；显式传入时按传入值切换
+            this.core.setTheme(options.theme ?? "editor");
         } catch (e) {
             // 例如 WebGL 不可用
             this.initError = {
@@ -268,7 +269,7 @@ export class BlueprintViewer {
         this.core.resetCamera();
     }
 
-    // ------------------------------------------------------------ 选中 / 定位 / 查询
+    // ------------------------------------------------------------ 选中 / 定位 / 查询 / 多选
 
     /**
      * 选中建筑（只点亮高亮盒，**不动相机**；对齐 v1 `selectBuilding`）。
@@ -302,6 +303,50 @@ export class BlueprintViewer {
 
         core.setSelectedIndex(resolved);
         return { ok: true, index: resolved };
+    }
+
+    /**
+     * 批量选中建筑（**新增能力**，v1 没有）。
+     *
+     * - 传 `null` 或空数组：清除选中；
+     * - 每个元素按 `selectBuilding` 的同一规则解析（数组下标优先，越界按建筑ID兜底）；
+     * - 先整体校验再提交：任一建筑找不到时**整次调用失败，原选中不变**；
+     * - 返回命中的数组下标（去重、保持传入顺序）。
+     *
+     * 失败：`not-loaded`（未加载）、`building-not-found`（找不到）、`already-disposed`。
+     */
+    selectedBuildings(indexes: number[] | null): BuildingsLocateResult {
+        const guard = this.guard();
+        if (guard !== null) return guard;
+        const core = this.core;
+        if (core === null)
+            return this.failLocate("no-webgl", "渲染内核未初始化");
+
+        if (indexes === null || indexes.length === 0) {
+            core.clearSelection();
+            return { ok: true, indexes: [] };
+        }
+
+        if (this.data === null)
+            return this.failLocate("not-loaded", "尚未加载蓝图");
+
+        const resolved: number[] = [];
+        const seen = new Set<number>();
+        for (const index of indexes) {
+            const i = this.resolveIndex(index);
+            if (i === null)
+                return this.failLocate(
+                    "building-not-found",
+                    `找不到建筑：${index}`
+                );
+            if (!seen.has(i)) {
+                seen.add(i);
+                resolved.push(i);
+            }
+        }
+
+        core.setSelectedIndexes(resolved);
+        return { ok: true, indexes: resolved };
     }
 
     /**
@@ -354,9 +399,14 @@ export class BlueprintViewer {
             : this.failLocate("building-not-found", `定位失败：${index}`);
     }
 
-    /** 当前选中建筑的数组下标；无选中或未加载返回 `null` */
+    /** 当前选中建筑的数组下标；多选时返回第一项，无选中或未加载返回 `null` */
     getSelectedIndex(): number | null {
         return this.core?.selectedIndex ?? null;
+    }
+
+    /** 当前选中的全部建筑数组下标（空数组表示无选中） */
+    getSelectedIndexes(): number[] {
+        return this.core?.selectedIndexes ?? [];
     }
 
     /**

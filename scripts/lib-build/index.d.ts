@@ -42,8 +42,11 @@ export interface SettingsPort {
 
 // ---------------------------------------------------------------- 构造参数 / 回调
 
-/** 3D 主题名 */
-export type ThemeName = 'dark' | 'light' | 'auto';
+/**
+ * 3D 主题名。
+ * `'editor'` 复刻编辑器当前观感（默认）；`'auto'` 跟随系统在 dark / light 间切换。
+ */
+export type ThemeName = 'dark' | 'light' | 'editor' | 'auto';
 
 /** 3D 场景主题色 */
 export interface ThemeColors {
@@ -80,7 +83,7 @@ export interface ViewerOptions {
     width?: number;
     /** 显式渲染高度 */
     height?: number;
-    /** 初始主题。default 'dark' */
+    /** 初始主题。default 'editor' */
     theme?: ThemeName;
     /** 设置读写端口；缺省用进程内存里的一份投影 */
     settingsPort?: SettingsPort;
@@ -244,6 +247,11 @@ export type BuildingLocateResult =
     | { ok: true; index: number }
     | { ok: false; error: ViewerError };
 
+/** 多选建筑的结果：`indexes` 是命中的数组下标（已去重、保持传入顺序） */
+export type BuildingsLocateResult =
+    | { ok: true; indexes: number[] }
+    | { ok: false; error: ViewerError };
+
 /** 通用查询结果：与 `BlueprintLoadOutcome` 同构，便于宿主统一按 `ok` 收窄 */
 export type ViewerQueryResult<T> =
     | { ok: true; value: T }
@@ -294,10 +302,17 @@ export class BlueprintViewer {
 
     /** 选中建筑（只点亮高亮盒，不动相机）；`null` 取消选中 */
     selectBuilding(index: number | null): BuildingLocateResult;
+    /**
+     * 批量选中建筑（多选高亮）；`null` 或空数组取消选中。
+     * 任一建筑找不到时整次调用失败、原选中不变；返回去重后的命中下标。
+     */
+    selectedBuildings(indexes: number[] | null): BuildingsLocateResult;
     /** 镜头居中对齐到该建筑（不锁镜头）；`null` 等价 `resetCamera()` */
     focusBuilding(index: number | null, options?: FocusOptions): BuildingLocateResult;
-    /** 当前选中建筑的数组下标 */
+    /** 当前选中建筑的数组下标（多选时返回第一项） */
     getSelectedIndex(): number | null;
+    /** 当前选中的全部建筑数组下标 */
+    getSelectedIndexes(): number[];
     /** 建筑信息（世界矩阵） */
     getBuildingInfo(index: number): ViewerQueryResult<BuildingInfoPayload>;
 

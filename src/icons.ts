@@ -234,5 +234,9 @@ export class Icons extends Mesh<IconGeometry, IconsMaterial> {
     constructor(map: Texture, geometry: IconGeometry) {
         const material = new IconsMaterial(map);
         super(geometry, material);
+        // 图标通过实例化属性 iconPos 散布在球面上，几何自身的 position 只是单位四边形，
+        // 其包围球（原点附近半径 ~0.7）无法反映真实分布，必须关闭视锥剔除，
+        // 否则俯仰角低于 ~45° 时球心落出视锥会导致全部图标被一次性剔除。
+        this.frustumCulled = false;
     }
 }

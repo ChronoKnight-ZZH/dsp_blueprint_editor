@@ -39,6 +39,7 @@ export type {
     BuildingPickPayload,
     BuildingInfoPayload,
     BuildingLocateResult,
+    BuildingsLocateResult,
     ViewerQueryResult,
     FocusOptions,
     // 主题

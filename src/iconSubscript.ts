@@ -90,6 +90,9 @@ export class IconSubscript extends Mesh {
             "offset",
             new InstancedBufferAttribute(new Float32Array(numChars * 2), 2)
         );
+        // 与 Icons 同理：字符位置通过 iconPos 散布在球面上，几何包围球无效，
+        // 关闭视锥剔除避免低俯仰角时角标被整体剔除。
+        this.frustumCulled = false;
     }
 
     setText(index: number, pos: Vector3, scale: Vector2, text: string) {

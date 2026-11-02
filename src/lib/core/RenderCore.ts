@@ -10,6 +10,7 @@ import {
     Mesh,
     MeshStandardMaterial,
     Color,
+    Group,
 } from "three";
 import { PlanetMapControls } from "@/PlanetMapControls";
 import { findPosForAreas, calcBuildingTrans } from "@/blueprint/planet";
@@ -21,6 +22,8 @@ import {
 } from "@/models/glbLoader";
 import { IconTexture } from "@/iconTexture";
 import type { TextureSink } from "@/iconTexture";
+import { createSkyGradient } from "@/skyGradient";
+import type { SkyGradient } from "@/skyGradient";
 import type {
     TextureSettings,
     ViewerRenderSettings,
@@ -131,6 +134,8 @@ export class RenderCore {
     private readonly renderer: WebGLRendererLike;
     private readonly controls: PlanetMapControls;
     private readonly planet: PlanetSceneParts;
+    /** 天光/星空背景；仅 `editor` 主题显示（与编辑器当前观感一致） */
+    private readonly sky: SkyGradient;
     private readonly iconTexture: IconTexture;
     private resizeObserver: ResizeObserver | null = null;
     private readonly pixelRatio: number;
@@ -147,8 +152,10 @@ export class RenderCore {
 
     private settings: ViewerRenderSettings;
     private callbacks: NonNullable<RenderCoreOptions["callbacks"]>;
-    /** 当前主题色（默认 dark，与 v1 一致） */
-    private theme: ThemeColors = { ...THEME_PALETTE.dark };
+    /** 当前主题色（默认 editor，复刻编辑器当前观感） */
+    private theme: ThemeColors = { ...THEME_PALETTE.editor };
+    /** 是否显示天光/星空背景（只属于 `editor` 主题） */
+    private skyEnabled = true;
     /** 模型到达 → 150ms 合并重建 */
     private modelTimer: number | null = null;
     private offModelsChanged: (() => void) | null = null;
@@ -166,10 +173,18 @@ export class RenderCore {
     private readonly ownsIconTexture: boolean;
     /** 是否由本实例注册了全局 settingsProvider（dispose 时需要撤销） */
     private readonly ownsSettingsProvider: boolean;
-    /** 选中高亮盒；`null` 表示当前无选中 */
-    private readonly selectBox: Mesh;
-    /** 选中下标（-1 = 无选中），与 `selectBox` 是否在场景中保持同步 */
-    private selectBoxIndex = -1;
+    /** 选中高亮：共用几何体/材质的 Mesh 池，按选中数量动态扩容（支持多选） */
+    private readonly selectGroup = new Group();
+    private readonly selectBoxGeometry = new BoxGeometry(1, 1, 1);
+    private readonly selectBoxMaterial = new MeshStandardMaterial({
+        color: 0x0074e8,
+        opacity: 0.5,
+        transparent: true,
+        depthWrite: false,
+    });
+    private readonly selectPool: Mesh[] = [];
+    /** 当前选中的建筑数组下标（去重，保持调用方顺序） */
+    private selectedIndexesState: number[] = [];
 
     constructor(options: RenderCoreOptions) {
         this.container = options.container;
@@ -217,7 +232,10 @@ export class RenderCore {
         this.scene = new Scene();
         this.planet = createPlanetScene(PLANET_RADIUS, PLANET_SEGMENT);
         this.scene.add(this.planet.root);
-        // 默认套用 dark 主题（与 v1 一致：v1 构造时 `currentTheme = resolveTheme(theme || 'dark')`）
+        // 天光/星空背景：复刻编辑器当前观感（平视时地平线雾带 + 星空，拉远时星球大气边缘光）
+        this.sky = createSkyGradient({ planetRadius: PLANET_RADIUS });
+        this.scene.add(this.sky.mesh);
+        // 默认套用 editor 主题（编辑器实际生效的观感）
         this.applyTheme();
 
         // 相机
@@ -263,18 +281,10 @@ export class RenderCore {
             this.resizeObserver.observe(this.container);
         }
 
-        // 选中高亮盒：与编辑器同款外观（半透明蓝、关深度写入，避免遮挡建筑本体）
-        this.selectBox = new Mesh(
-            new BoxGeometry(1, 1, 1),
-            new MeshStandardMaterial({
-                color: 0x0074e8,
-                opacity: 0.5,
-                transparent: true,
-                depthWrite: false,
-            })
-        );
-        this.selectBox.matrixAutoUpdate = false;
-        this.selectBox.visible = false;
+        // 选中高亮：与编辑器同款外观（半透明蓝、关深度写入，避免遮挡建筑本体），
+        // 用 Mesh 池承载多选，几何体与材质在池内共享
+        this.selectGroup.visible = false;
+        this.scene.add(this.selectGroup);
 
         // 交互
         this.onClick = (e: MouseEvent) => {
@@ -393,6 +403,7 @@ export class RenderCore {
     setTheme(theme: ThemeName): void {
         if (this.disposed) return;
         this.theme = resolveTheme(theme);
+        this.skyEnabled = theme === "editor";
         this.applyTheme();
     }
 
@@ -409,6 +420,8 @@ export class RenderCore {
     }
 
     private applyTheme(): void {
+        // 天光/星空只属于 editor 主题；dark/light 保持 v1 的纯色背景
+        this.sky.mesh.visible = this.skyEnabled;
         this.scene.background = new Color(this.theme.sceneBackground);
         this.planet.sphereMaterial.color.setHex(this.theme.planet);
         this.planet.gridMaterial.color.setHex(this.theme.grid);
@@ -476,28 +489,61 @@ export class RenderCore {
      * 在宿主侧形成回调环路）。越界或未加载时静默清零。
      */
     setSelectedIndex(index: number | null): void {
-        if (this.disposed) return;
-        const boxes = this.bundle?.bvh.boxes;
-        const valid =
-            index !== null && boxes !== undefined && boxes[index] !== undefined;
-        if (!valid) {
-            if (this.selectBoxIndex !== -1) {
-                this.selectBoxIndex = -1;
-                this.selectBox.visible = false;
-                this.scene.remove(this.selectBox);
-            }
-            return;
-        }
-        const i = index as number;
-        this.selectBox.matrix.copy(boxes[i]);
-        this.selectBox.visible = true;
-        if (this.selectBoxIndex === -1 || this.selectBox.parent === null)
-            this.scene.add(this.selectBox);
-        this.selectBoxIndex = i;
+        this.setSelectedIndexes(index === null ? [] : [index]);
     }
 
+    /**
+     * 设置多选高亮。
+     *
+     * - 越界、未加载或重复的下标会被静默忽略，不会影响其余选中项；
+     * - 传入空数组等价于清除选中；
+     * - 只影响视觉，不触发 `onBuildingSelect`。
+     */
+    setSelectedIndexes(indexes: readonly number[]): void {
+        if (this.disposed) return;
+        const boxes = this.bundle?.bvh.boxes;
+        const next: number[] = [];
+        if (boxes !== undefined) {
+            const seen = new Set<number>();
+            for (const index of indexes) {
+                if (boxes[index] === undefined || seen.has(index)) continue;
+                seen.add(index);
+                next.push(index);
+            }
+        }
+
+        this.selectedIndexesState = next;
+        this.selectGroup.visible = next.length > 0;
+
+        // 按需扩容 Mesh 池；未使用的实例隐藏而不是移除，避免反复增删场景
+        while (this.selectPool.length < next.length) {
+            const mesh = new Mesh(this.selectBoxGeometry, this.selectBoxMaterial);
+            mesh.matrixAutoUpdate = false;
+            mesh.visible = false;
+            this.selectPool.push(mesh);
+            this.selectGroup.add(mesh);
+        }
+        for (let i = 0; i < this.selectPool.length; i += 1) {
+            const mesh = this.selectPool[i];
+            const selected = next[i];
+            if (selected === undefined) {
+                mesh.visible = false;
+                continue;
+            }
+            mesh.matrix.copy(boxes![selected]);
+            mesh.matrixWorldNeedsUpdate = true;
+            mesh.visible = true;
+        }
+    }
+
+    /** 当前选中建筑的数组下标；多选时返回第一项，无选中返回 `null` */
     get selectedIndex(): number | null {
-        return this.selectBoxIndex === -1 ? null : this.selectBoxIndex;
+        return this.selectedIndexesState[0] ?? null;
+    }
+
+    /** 当前选中的全部建筑数组下标（副本，外部修改不会影响内部状态） */
+    get selectedIndexes(): number[] {
+        return [...this.selectedIndexesState];
     }
 
     /**
@@ -674,10 +720,12 @@ export class RenderCore {
         }
         // 只释放自己创建的图集；宿主注入的由宿主负责（避免误销毁他人资源）
         if (this.ownsIconTexture) this.iconTexture.dispose();
-        // 选中高亮盒用的是本实例自建的几何体与材质
-        this.selectBox.removeFromParent();
-        (this.selectBox.geometry as BoxGeometry).dispose();
-        (this.selectBox.material as MeshStandardMaterial).dispose();
+        // 选中高亮用的是本实例自建的几何体与材质（池内 Mesh 只是共享引用）
+        this.selectGroup.removeFromParent();
+        this.selectPool.length = 0;
+        this.selectBoxGeometry.dispose();
+        this.selectBoxMaterial.dispose();
+        this.sky.dispose();
         this.planet.dispose();
         this.scene.clear();
 
@@ -785,9 +833,9 @@ export class RenderCore {
             previous.buildings.dispose();
         }
         // 选择盒不在 bundle 内，重建后包围盒来源已换；按当前下标重新套用，
-        // 越界则自动清除（避免高亮贴到错误的建筑上）
-        if (this.selectBoxIndex !== -1)
-            this.setSelectedIndex(this.selectBoxIndex);
+        // 越界项自动清除（避免高亮贴到错误的建筑上）
+        if (this.selectedIndexesState.length > 0)
+            this.setSelectedIndexes(this.selectedIndexesState);
     }
 
     private applySize(width: number, height: number): void {

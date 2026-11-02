@@ -89,7 +89,7 @@ export const modelTransform: Readonly<Record<number, ModelTransform>> = {
     40: { x: 0, y: 0, z: -0.4, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 四向分流器 c · splitter-c.glb
 
     // ── 物流设备 ──────────────────────────────────────────────────────
-    257: { x: 0, y: 0, z: -0.5, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 自动集装机 · piler.glb
+    257: { x: 0, y: 0, z: -0.5, pitch: 0, yaw: 0, roll: 0, scale: 1.4 }, // 自动集装机 · piler.glb
     208: { x: 0, y: 0, z: -0.1, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 流速监测器 · monitor.glb
     120: { x: -0, y: -0.3, z: -0.4, pitch: 0, yaw: -180, roll: 0, scale: 1 }, // 喷涂机 · spray-coater.glb
     371: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 物流配送器 · delivery-machine.glb
@@ -97,8 +97,8 @@ export const modelTransform: Readonly<Record<number, ModelTransform>> = {
     50: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 星际物流运输站 · interstellar-logistic-station.glb
 
     // ── 仓储 ─────────────────────────────────────────────────────────
-    51: { x: 0, y: 0, z: -1, pitch: 0, yaw: 0, roll: 0, scale: 1.1 }, // 小型储物仓 · storage-1.glb
-    52: { x: 0, y: 0, z: -1, pitch: 0, yaw: 0, roll: 0, scale: 1.1 }, // 大型储物仓 · storage-2.glb
+    51: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1.2 }, // 小型储物仓 · storage-1.glb
+    52: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1.2 }, // 大型储物仓 · storage-2.glb
     121: { x: 0, y: 0, z: -0.5, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 储液罐 · storage-tank.glb
 
     // ── 制造台 ───────────────────────────────────────────────────────
@@ -110,14 +110,14 @@ export const modelTransform: Readonly<Record<number, ModelTransform>> = {
     // ── 电力 ─────────────────────────────────────────────────────────
     44: { x: 0, y: 0, z: -0.1, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 电力感应塔 · tesla-coil.glb
     71: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 无线输电塔 · charging-pole.glb
-    68: { x: 0, y: 0, z: -8, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 卫星配电站 · orbital-substation.glb
+    68: { x: 0, y: 0, z: -8, pitch: 0, yaw: 0, roll: 0, scale: 2 }, // 卫星配电站 · orbital-substation.glb
     53: { x: 0, y: 0, z: -3, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 风力涡轮机 · wind-turbine.glb
     54: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 火力发电厂 · fuel-plant.glb
     118: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 微型聚变发电站 · fusion-power-station.glb
-    255: { x: 0, y: 0, z: -8, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 地热发电站 · geothermal-power-station.glb
+    255: { x: 0, y: 0, z: -8, pitch: 0, yaw: 0, roll: 0, scale: 2 }, // 地热发电站 · geothermal-power-station.glb
     45: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 能量枢纽 · energy-exchanger.glb
     46: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 蓄电器 · accumulator.glb
-    55: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 太阳能板 · solar-panel.glb
+    55: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 0.5 }, // 太阳能板 · solar-panel.glb
     72: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 电磁轨道弹射器 · em-rail-ejector.glb
     73: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 射线接收站 · ray-receiver.glb
     74: { x: 0, y: 0, z: -4, pitch: 0, yaw: 0, roll: 0, scale: 2 }, // 垂直发射井 · vertical-launching-silo.glb
@@ -126,9 +126,9 @@ export const modelTransform: Readonly<Record<number, ModelTransform>> = {
     // ── 采集 / 冶炼 / 化工 ─────────────────────────────────────────────
     57: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 采矿机 · mining-drill.glb
     256: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 大型采矿机 · mining-drill-mk2.glb
-    60: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 抽水站 · water-pump.glb
+    60: { x: 0, y: 0, z: -1, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 抽水站 · water-pump.glb
     61: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1.2 }, // 原油萃取站 · oil-extractor.glb
-    63: { x: 0, y: 0, z: 0, pitch: 0, yaw: -180, roll: 0, scale: 1 }, // 原油精炼厂 · oil-refinery.glb
+    63: { x: 0, y: 0, z: 0, pitch: 0, yaw: -180, roll: 0, scale: 1.2 }, // 原油精炼厂 · oil-refinery.glb
     62: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 电弧熔炉 · smelter.glb
     194: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 位面熔炉 · smelter-2.glb
     457: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 熔炉 Mk.III · smelter-3.glb
@@ -147,14 +147,14 @@ export const modelTransform: Readonly<Record<number, ModelTransform>> = {
     375: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 聚爆加农炮 · turret-cannon.glb
     408: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 磁化电浆炮 · turret-plasma.glb
     407: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 导弹防御塔 · turret-missile.glb
-    403: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 信标 · turret-signal.glb
+    403: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 2 }, // 信标 · turret-signal.glb
     402: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 护盾发生器 · turret-shield.glb
     482: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 地面电浆炮 · turret-plasma-ground.glb
-    422: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 干扰塔 · turret-disturb.glb
+    422: { x: 0, y: 0, z: -2, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 干扰塔 · turret-disturb.glb
 
     // ── 战场 / 其他 ───────────────────────────────────────────────────
     453: { x: 0, y: 0, z: 2, pitch: 0, yaw: -180, roll: 0, scale: 1.5 }, // 战场分析基站 · battle-base.glb
-    664: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 全息信标 · lighthouse.glb
+    664: { x: 0, y: 0, z: -2, pitch: 0, yaw: 0, roll: 0, scale: 2 }, // 全息信标 · lighthouse.glb
 };
 
 /** 取某个建筑模型的变换；未登记时返回全 0（不抛错） */

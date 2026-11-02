@@ -44,9 +44,11 @@ export interface ViewerOptions {
     width?: number;
     height?: number;
     /**
-     * 初始 3D 主题（对齐 v1 的 `theme` 构造参数）。
+     * 初始 3D 主题。
      *
-     * `'auto'` 跟随系统 `prefers-color-scheme`。default `'dark'`。
+     * `'editor'` 复刻编辑器当前观感（灰白星球 + 天光/星空背景），是默认主题；
+     * `'auto'` 跟随系统 `prefers-color-scheme` 在 `'dark'` / `'light'` 之间切换。
+     * default `'editor'`。
      */
     theme?: ThemeName;
     /**
@@ -91,8 +93,14 @@ export interface BuildingInfoPayload {
     matrix: Matrix4;
 }
 
-/** 3D 场景主题名（对齐 v1） */
-export type ThemeName = "dark" | "light" | "auto";
+/**
+ * 3D 场景主题名。
+ *
+ * - `'editor'`：复刻编辑器当前观感（灰白星球、白色经纬网格、黑底 + 天光/星空），默认主题
+ * - `'dark'` / `'light'`：对齐 v1 的两套纯色板主题
+ * - `'auto'`：跟随系统在 `'dark'` / `'light'` 之间切换
+ */
+export type ThemeName = "dark" | "light" | "editor" | "auto";
 
 /** 3D 场景主题色（对齐 v1 的 `ThemeColors`） */
 export interface ThemeColors {
@@ -181,6 +189,16 @@ export type ViewerErrorCode =
  */
 export type BuildingLocateResult =
     | { ok: true; index: number }
+    | { ok: false; error: ViewerError };
+
+/**
+ * 多选建筑的定位结果。
+ *
+ * 成功时 `indexes` 是命中的**数组下标**（已去重、保持传入顺序）；
+ * 传 `null` 或空数组清除选中时返回 `indexes: []`。
+ */
+export type BuildingsLocateResult =
+    | { ok: true; indexes: number[] }
     | { ok: false; error: ViewerError };
 
 /** 通用查询结果：与 `BlueprintLoadOutcome` 同构，便于宿主统一按 `ok` 收窄 */

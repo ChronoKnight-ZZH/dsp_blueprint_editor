@@ -26,6 +26,7 @@ class CargoMaterial extends MeshLambertMaterial {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     onBeforeCompile(
         parameters: WebGLProgramParametersWithUniforms,
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         renderer: WebGLRenderer
     ) {
         parameters.vertexShader = parameters.vertexShader

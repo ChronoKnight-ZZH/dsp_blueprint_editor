@@ -22,6 +22,7 @@ interface CoreHandle {
         dispose: number;
         setRenderSettings: unknown[];
         setSelectedIndex: (number | null)[];
+        setSelectedIndexes: number[][];
         clearSelection: number;
         focusBuilding: { index: number; distance?: number }[];
         setSize: { w: number; h: number }[];
@@ -65,6 +66,7 @@ jest.mock('@/lib/core/RenderCore', () => {
             dispose: 0,
             setRenderSettings: [],
             setSelectedIndex: [],
+            setSelectedIndexes: [],
             clearSelection: 0,
             focusBuilding: [],
             setSize: [],
@@ -73,11 +75,12 @@ jest.mock('@/lib/core/RenderCore', () => {
             setCustomTheme: [],
         };
         private theme = {
-            sceneBackground: 0x0D1117, planet: 0x1C2128, grid: 0x6E7681,
+            sceneBackground: 0x000000, planet: 0xB0B0B0, grid: 0xF0F0F0,
             textFill: '#ffffff', textStroke: '#44444488',
         };
         coreCallbacks: CoreHandle['coreCallbacks'] = null;
         selectedIndex: number | null = null;
+        private selectedIndexesValue: number[] = [];
         camera = { position: { z: 400.4 } };
         cameraVersion = 7;
         rendererRef = { domElement: { tagName: 'CANVAS' } };
@@ -121,11 +124,21 @@ jest.mock('@/lib/core/RenderCore', () => {
 
         setSelectedIndex(i: number | null) {
             this.selectedIndex = i;
+            this.selectedIndexesValue = i === null ? [] : [i];
             this.calls.setSelectedIndex.push(i);
         }
 
+        setSelectedIndexes(indexes: readonly number[]) {
+            this.selectedIndexesValue = [...indexes];
+            this.selectedIndex = indexes[0] ?? null;
+            this.calls.setSelectedIndexes.push([...indexes]);
+        }
+
+        get selectedIndexes() { return [...this.selectedIndexesValue]; }
+
         clearSelection() {
             this.selectedIndex = null;
+            this.selectedIndexesValue = [];
             this.calls.clearSelection++;
         }
 
@@ -419,6 +432,46 @@ describe('selectBuilding', () => {
     });
 });
 
+describe('selectedBuildings（多选）', () => {
+    it('批量选中并去重，返回命中的数组下标', () => {
+        const { viewer, core } = createViewer();
+        viewer.loadBlueprintData(makeData(3));
+
+        const out = viewer.selectedBuildings([0, 2, 2]);
+        expect(out).toEqual({ ok: true, indexes: [0, 2] });
+        expect(core.calls.setSelectedIndexes).toEqual([[0, 2]]);
+        expect(viewer.getSelectedIndexes()).toEqual([0, 2]);
+        expect(viewer.getSelectedIndex()).toBe(0);
+        viewer.dispose();
+    });
+
+    it('任一建筑找不到时整次失败，且不改动原选中', () => {
+        const { viewer, core } = createViewer();
+        viewer.loadBlueprintData(makeData(2));
+
+        const out = viewer.selectedBuildings([0, 99]);
+        expect(out.ok).toBe(false);
+        if (out.ok)
+            throw new Error('unreachable');
+        expect(out.error.code).toBe('building-not-found');
+        expect(core.calls.setSelectedIndexes).toEqual([]);
+        expect(core.calls.clearSelection).toBe(0);
+        viewer.dispose();
+    });
+
+    it('null 或空数组清除选中', () => {
+        const { viewer, core } = createViewer();
+        viewer.loadBlueprintData(makeData(3));
+        viewer.selectedBuildings([1]);
+
+        expect(viewer.selectedBuildings(null)).toEqual({ ok: true, indexes: [] });
+        expect(viewer.selectedBuildings([])).toEqual({ ok: true, indexes: [] });
+        expect(core.calls.clearSelection).toBe(2);
+        expect(viewer.getSelectedIndexes()).toEqual([]);
+        viewer.dispose();
+    });
+});
+
 describe('focusBuilding（镜头居中对齐）', () => {
     it('默认同时选中，并按默认距离交给内核', () => {
         const { viewer, core } = createViewer();
@@ -572,9 +625,9 @@ describe('只读透出与尺寸', () => {
 });
 
 describe('主题与导出', () => {
-    it('构造时默认套用 dark 主题', () => {
+    it('构造时默认套用 editor 主题', () => {
         const { core } = createViewer();
-        expect(core.calls.setTheme).toEqual(['dark']);
+        expect(core.calls.setTheme).toEqual(['editor']);
     });
 
     it('构造参数 theme 透传', () => {
@@ -585,12 +638,12 @@ describe('主题与导出', () => {
     it('setTheme / setCustomTheme / getTheme 透传内核', () => {
         const { viewer, core } = createViewer();
         viewer.setTheme('auto');
-        expect(core.calls.setTheme).toEqual(['dark', 'auto']);
+        expect(core.calls.setTheme).toEqual(['editor', 'auto']);
 
         viewer.setCustomTheme({ grid: 0xFF0000 });
         expect(core.calls.setCustomTheme).toEqual([{ grid: 0xFF0000 }]);
 
-        expect(viewer.getTheme()?.sceneBackground).toBe(0x0D1117);
+        expect(viewer.getTheme()?.sceneBackground).toBe(0x000000);
         viewer.dispose();
     });
 
