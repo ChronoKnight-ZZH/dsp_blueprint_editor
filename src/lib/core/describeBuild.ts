@@ -1,10 +1,10 @@
-import type { Matrix4 } from 'three';
-import type { BlueprintBuilding } from '@/blueprint/parser';
-import type { BVH } from '@/bvh/bvh';
-import { buildingMeta } from '@/data/building';
-import { isBelt, isInserter } from '@/data/items';
-import type { ViewerRenderSettings } from '@/renderSettingsTypes';
-import type { BuildStats } from './types';
+import type { Matrix4 } from "three";
+import type { BlueprintBuilding } from "@/blueprint/parser";
+import type { BVH } from "@/bvh/bvh";
+import { buildingMeta } from "@/data/building";
+import { isBelt, isInserter } from "@/data/items";
+import type { ViewerRenderSettings } from "@/renderSettingsTypes";
+import type { BuildStats } from "./types";
 
 /**
  * 构建结果的可快照诊断对象。
@@ -18,7 +18,10 @@ export interface BuildDescription {
     settings: ViewerRenderSettings;
     buildingCount: number;
     /** 每个 modelIndex 的建筑数与分类计数 */
-    perModelIndex: Record<number, { total: number; glb: number; fallback: number; hidden: number }>;
+    perModelIndex: Record<
+        number,
+        { total: number; glb: number; fallback: number; hidden: number }
+    >;
     /** 走 GLB 的模型组 */
     glbGroups: { modelIndex: number; count: number }[];
     fallbackBoxCount: number;
@@ -32,7 +35,7 @@ export interface BuildDescription {
 const PRECISION = 1e6;
 
 function roundMatrix(m: Matrix4): number[] {
-    return m.elements.map(v => Math.round(v * PRECISION) / PRECISION);
+    return m.elements.map((v) => Math.round(v * PRECISION) / PRECISION);
 }
 
 export interface DescribeBuildInput {
@@ -52,7 +55,7 @@ export interface DescribeBuildInput {
 export function describeBuild(input: DescribeBuildInput): BuildDescription {
     const { settings, buildings, bvh, stats } = input;
 
-    const perModelIndex: BuildDescription['perModelIndex'] = {};
+    const perModelIndex: BuildDescription["perModelIndex"] = {};
     const unknown = new Set(stats.unknownModelIndexes);
 
     for (const b of buildings) {
@@ -66,11 +69,9 @@ export function describeBuild(input: DescribeBuildInput): BuildDescription {
         if (unknown.has(key) || !buildingMeta.has(key)) {
             entry.hidden++;
             entry.fallback++;
-        }
-        else if (isBelt(b.itemId) || isInserter(b.itemId)) {
+        } else if (isBelt(b.itemId) || isInserter(b.itemId)) {
             // 带子与分拣器走程序化几何，不算 fallback 盒
-        }
-        else {
+        } else {
             entry.fallback++;
         }
     }
@@ -78,14 +79,16 @@ export function describeBuild(input: DescribeBuildInput): BuildDescription {
     // 走 GLB 的实例从 fallback 里扣除
     for (const [key, count] of Object.entries(stats.perModelGlbCounts)) {
         const entry = perModelIndex[Number(key)];
-        if (entry === undefined)
-            continue;
+        if (entry === undefined) continue;
         entry.glb = count;
         entry.fallback = Math.max(0, entry.fallback - count);
     }
 
     const glbGroups = Object.entries(stats.perModelGlbCounts)
-        .map(([modelIndex, count]) => ({ modelIndex: Number(modelIndex), count }))
+        .map(([modelIndex, count]) => ({
+            modelIndex: Number(modelIndex),
+            count,
+        }))
         .sort((a, b) => a.modelIndex - b.modelIndex);
 
     return {

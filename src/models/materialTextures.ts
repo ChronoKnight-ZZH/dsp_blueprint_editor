@@ -15,15 +15,18 @@
  *   `modelMaterialTuning.ts`，是唯一的手调入口。
  */
 
-import type { Object3D, Texture } from 'three';
-import { getBuildingEnvironment } from './envMap';
-import { missingAlbedoTexture } from './textureFallback';
-import type { LoadedGlbModel } from './glbLoader';
-import { METALNESS_WITHOUT_SPEC_MAP, resolveModelMaterialTuning } from './modelMaterialTuning';
-import { materialMapUrls } from './textureManifest';
-import type { MaterialTextureSet } from './textureMaps';
-import { loadMaterialTextureSet } from './textureMaps';
-import type { TextureSettings } from '@/renderSettingsTypes';
+import type { Object3D, Texture } from "three";
+import { getBuildingEnvironment } from "./envMap";
+import { missingAlbedoTexture } from "./textureFallback";
+import type { LoadedGlbModel } from "./glbLoader";
+import {
+    METALNESS_WITHOUT_SPEC_MAP,
+    resolveModelMaterialTuning,
+} from "./modelMaterialTuning";
+import { materialMapUrls } from "./textureManifest";
+import type { MaterialTextureSet } from "./textureMaps";
+import { loadMaterialTextureSet } from "./textureMaps";
+import type { TextureSettings } from "@/renderSettingsTypes";
 
 /**
  * 设置不再从 `@/renderSettings` 全局读取（那会 import vue，见方案 D1），
@@ -52,7 +55,12 @@ interface StandardMaterialLike {
     roughness: number;
     normalMap: Texture | null;
     normalScale: { set(x: number, y: number): void };
-    emissive: { r: number; g: number; b: number; setRGB(r: number, g: number, b: number): void };
+    emissive: {
+        r: number;
+        g: number;
+        b: number;
+        setRGB(r: number, g: number, b: number): void;
+    };
     emissiveMap: Texture | null;
     emissiveIntensity: number;
     envMap: Texture | null;
@@ -86,7 +94,11 @@ function snapshotOf(material: StandardMaterialLike): MaterialSnapshot {
             roughness: material.roughness,
             normalMap: material.normalMap,
             emissiveMap: material.emissiveMap,
-            emissive: [material.emissive.r, material.emissive.g, material.emissive.b],
+            emissive: [
+                material.emissive.r,
+                material.emissive.g,
+                material.emissive.b,
+            ],
             emissiveIntensity: material.emissiveIntensity,
             metalnessMap: material.metalnessMap,
             roughnessMap: material.roughnessMap,
@@ -96,24 +108,29 @@ function snapshotOf(material: StandardMaterialLike): MaterialSnapshot {
     return snapshot;
 }
 
-const clamp01 = (value: number): number => (value < 0 ? 0 : value > 1 ? 1 : value);
+const clamp01 = (value: number): number =>
+    value < 0 ? 0 : value > 1 ? 1 : value;
 
 function collectStandardMaterials(root: Object3D): StandardMaterialLike[] {
     const found = new Map<string, StandardMaterialLike>();
-    root.traverse(object => {
+    root.traverse((object) => {
         const mesh = object as unknown as {
             isMesh?: boolean;
             material?: unknown;
         };
-        if (mesh.isMesh !== true || mesh.material === undefined)
-            return;
-        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        if (mesh.isMesh !== true || mesh.material === undefined) return;
+        const materials = Array.isArray(mesh.material)
+            ? mesh.material
+            : [mesh.material];
         for (const raw of materials) {
             const material = raw as StandardMaterialLike | null | undefined;
-            if (material === null || material === undefined || material.isMeshStandardMaterial !== true)
+            if (
+                material === null ||
+                material === undefined ||
+                material.isMeshStandardMaterial !== true
+            )
                 continue;
-            if (!found.has(material.uuid))
-                found.set(material.uuid, material);
+            if (!found.has(material.uuid)) found.set(material.uuid, material);
         }
     });
     return [...found.values()];
@@ -121,10 +138,14 @@ function collectStandardMaterials(root: Object3D): StandardMaterialLike[] {
 
 function applyToMaterial(
     material: StandardMaterialLike,
-    tuning: { emissiveIntensity: number; envMapIntensity: number; metalness: number },
+    tuning: {
+        emissiveIntensity: number;
+        envMapIntensity: number;
+        metalness: number;
+    },
     textures: MaterialTextureSet | null,
     settings: TextureSettings,
-    fallbackAlbedo: Texture | null,
+    fallbackAlbedo: Texture | null
 ): void {
     const base = snapshotOf(material);
     // settings 由调用方传入（编辑器注入的是「已生效」快照）：本函数随建场景在 Vue
@@ -134,46 +155,67 @@ function applyToMaterial(
 
     // 0) -a 反照率：关闭后只保留材质基础色（GLB 内嵌的底色图）；
     //    GLB 里压根没有底色图的材质（*-black / DefaultMaterial / 无材质网格）用纯色兜底
-    material.map = useTextures && settings.textures.albedo ? (base.map ?? fallbackAlbedo) : null;
+    material.map =
+        useTextures && settings.textures.albedo
+            ? base.map ?? fallbackAlbedo
+            : null;
 
     // 1) 环境反射强度：给所有标准材质都设，金属/玻璃都有反射可吃，避免发黑
     material.envMap = getBuildingEnvironment();
     material.envMapIntensity = tuning.envMapIntensity;
 
     // 2) -s 高光/粗糙：金属度 / 粗糙度
-    if (useTextures && settings.textures.spec && textures !== null && textures.orm !== null) {
+    if (
+        useTextures &&
+        settings.textures.spec &&
+        textures !== null &&
+        textures.orm !== null
+    ) {
         // 有 -s 图：完全交给贴图（G=粗糙度、B=金属度），tuning.metalness 作为乘数
         material.metalness = clamp01(tuning.metalness);
         material.metalnessMap = textures.orm;
         material.roughness = 1;
         material.roughnessMap = textures.orm;
-    }
-    else {
+    } else {
         // 关闭或没有 -s 图：恢复 GLB 原始值，并按基准给个偏绝缘体的金属度
-        material.metalness = clamp01(tuning.metalness * METALNESS_WITHOUT_SPEC_MAP);
+        material.metalness = clamp01(
+            tuning.metalness * METALNESS_WITHOUT_SPEC_MAP
+        );
         material.roughness = base.roughness;
         material.metalnessMap = base.metalnessMap;
         material.roughnessMap = base.roughnessMap;
     }
 
     // 3) -e 自发光：emissive 必须是白色，emissiveMap 才会按图发光
-    if (useTextures && settings.textures.emissive && textures !== null && textures.emissive !== null) {
+    if (
+        useTextures &&
+        settings.textures.emissive &&
+        textures !== null &&
+        textures.emissive !== null
+    ) {
         material.emissive.setRGB(1, 1, 1);
         material.emissiveMap = textures.emissive;
         material.emissiveIntensity = tuning.emissiveIntensity;
-    }
-    else {
+    } else {
         material.emissiveMap = base.emissiveMap;
-        material.emissive.setRGB(base.emissive[0], base.emissive[1], base.emissive[2]);
+        material.emissive.setRGB(
+            base.emissive[0],
+            base.emissive[1],
+            base.emissive[2]
+        );
         material.emissiveIntensity = base.emissiveIntensity;
     }
 
     // 4) -n 法线
-    if (useTextures && settings.textures.normal && textures !== null && textures.normal !== null) {
+    if (
+        useTextures &&
+        settings.textures.normal &&
+        textures !== null &&
+        textures.normal !== null
+    ) {
         material.normalMap = textures.normal;
         material.normalScale.set(NORMAL_SCALE_X, NORMAL_SCALE_Y);
-    }
-    else {
+    } else {
         material.normalMap = base.normalMap;
     }
 
@@ -189,45 +231,84 @@ const fallbackLogged = new WeakSet<StandardMaterialLike>();
  *
  * @param settings 贴图设置。调用方必须显式传入（见 `TextureSettings` 的解耦说明）。
  */
-export async function applyModelMaterialTextures(model: LoadedGlbModel, settings: TextureSettings): Promise<number> {
+export async function applyModelMaterialTextures(
+    model: LoadedGlbModel,
+    settings: TextureSettings
+): Promise<number> {
     const tuning = resolveModelMaterialTuning(model.name);
     const materials = collectStandardMaterials(model.scene);
-    if (materials.length === 0)
-        return 0;
+    if (materials.length === 0) return 0;
 
     let textured = 0;
-    await Promise.all(materials.map(async material => {
-        // GLB 里没有内嵌底色图的材质 → 按材质名解析纯色兜底。
-        // 注意用快照里的原始 map 判断：重跑时 material.map 可能已被上次改成兜底贴图
-        const originalMap = snapshotOf(material).map;
-        const fallbackAlbedo = originalMap === null
-            ? missingAlbedoTexture(model.name, material.name)
-            : null;
-        if (fallbackAlbedo !== null && !fallbackLogged.has(material)) {
-            fallbackLogged.add(material);
-            console.info(`[tex] 材质 ${model.name}::${material.name} 缺少底色贴图，使用纯色兜底 #${fallbackAlbedo.name.replace('fallback-albedo-', '')}`);
-        }
-        const urls = materialMapUrls[`${model.name}::${material.name}`];
-        if (urls === undefined) {
-            // 没有通道图（特效/玻璃材质，或该模型本身没导出通道图）：只套参数
-            applyToMaterial(material, tuning, null, settings, fallbackAlbedo);
-            return;
-        }
-        try {
-            const textures = await loadMaterialTextureSet(urls);
-            applyToMaterial(material, tuning, textures, settings, fallbackAlbedo);
-            if (textures.normal !== null || textures.emissive !== null || textures.orm !== null)
-                textured++;
-        }
-        catch (e) {
-            console.warn(`[tex] 材质 ${model.name}::${material.name} 贴图接入失败（保留底色）`, e);
-            applyToMaterial(material, tuning, null, settings, fallbackAlbedo);
-        }
-    }));
+    await Promise.all(
+        materials.map(async (material) => {
+            // GLB 里没有内嵌底色图的材质 → 按材质名解析纯色兜底。
+            // 注意用快照里的原始 map 判断：重跑时 material.map 可能已被上次改成兜底贴图
+            const originalMap = snapshotOf(material).map;
+            const fallbackAlbedo =
+                originalMap === null
+                    ? missingAlbedoTexture(model.name, material.name)
+                    : null;
+            if (fallbackAlbedo !== null && !fallbackLogged.has(material)) {
+                fallbackLogged.add(material);
+                console.info(
+                    `[tex] 材质 ${model.name}::${
+                        material.name
+                    } 缺少底色贴图，使用纯色兜底 #${fallbackAlbedo.name.replace(
+                        "fallback-albedo-",
+                        ""
+                    )}`
+                );
+            }
+            const urls = materialMapUrls[`${model.name}::${material.name}`];
+            if (urls === undefined) {
+                // 没有通道图（特效/玻璃材质，或该模型本身没导出通道图）：只套参数
+                applyToMaterial(
+                    material,
+                    tuning,
+                    null,
+                    settings,
+                    fallbackAlbedo
+                );
+                return;
+            }
+            try {
+                const textures = await loadMaterialTextureSet(urls);
+                applyToMaterial(
+                    material,
+                    tuning,
+                    textures,
+                    settings,
+                    fallbackAlbedo
+                );
+                if (
+                    textures.normal !== null ||
+                    textures.emissive !== null ||
+                    textures.orm !== null
+                )
+                    textured++;
+            } catch (e) {
+                console.warn(
+                    `[tex] 材质 ${model.name}::${material.name} 贴图接入失败（保留底色）`,
+                    e
+                );
+                applyToMaterial(
+                    material,
+                    tuning,
+                    null,
+                    settings,
+                    fallbackAlbedo
+                );
+            }
+        })
+    );
     return textured;
 }
 
 /** 供测试/诊断：某个模型是否在清单里有通道贴图 */
-export function hasMaterialTextures(modelName: string, materialName: string): boolean {
+export function hasMaterialTextures(
+    modelName: string,
+    materialName: string
+): boolean {
     return materialMapUrls[`${modelName}::${materialName}`] !== undefined;
 }

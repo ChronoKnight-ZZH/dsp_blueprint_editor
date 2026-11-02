@@ -1,8 +1,8 @@
 import { BlueprintBuilding, BlueprintData } from "./parser";
 import { Command } from "@/command";
 
-type LinkField = 'outputObjIdx' | 'inputObjIdx';
-const LINK_FIELDS: LinkField[] = ['outputObjIdx', 'inputObjIdx'];
+type LinkField = "outputObjIdx" | "inputObjIdx";
+const LINK_FIELDS: LinkField[] = ["outputObjIdx", "inputObjIdx"];
 
 interface RemovedRecord {
     /** 删除前在数组中的原始位置 */
@@ -33,7 +33,10 @@ export class RemoveBuildingsCommand implements Command {
 
     constructor(indices: number[], data: BlueprintData) {
         const unique = [...new Set(indices)].sort((a, b) => a - b);
-        this.removed = unique.map(index => ({ index, building: data.buildings[index] }));
+        this.removed = unique.map((index) => ({
+            index,
+            building: data.buildings[index],
+        }));
         this.removeSet = new Set(unique);
     }
 
@@ -48,8 +51,7 @@ export class RemoveBuildingsCommand implements Command {
         // 先记录幸存建筑指向被删建筑的连接，供撤销时恢复
         this.dangling = [];
         for (const b of data.buildings) {
-            if (this.removeSet.has(b.index))
-                continue;
+            if (this.removeSet.has(b.index)) continue;
             for (const field of LINK_FIELDS) {
                 const ref = b[field];
                 if (ref !== -1 && newIndexOf[ref] === -1)
@@ -58,15 +60,13 @@ export class RemoveBuildingsCommand implements Command {
         }
 
         for (let i = n - 1; i >= 0; i--)
-            if (this.removeSet.has(i))
-                data.buildings.splice(i, 1);
+            if (this.removeSet.has(i)) data.buildings.splice(i, 1);
 
         for (const b of data.buildings) {
             b.index = newIndexOf[b.index];
             for (const field of LINK_FIELDS) {
                 const ref = b[field];
-                if (ref !== -1)
-                    b[field] = newIndexOf[ref];
+                if (ref !== -1) b[field] = newIndexOf[ref];
             }
         }
     }
@@ -74,24 +74,22 @@ export class RemoveBuildingsCommand implements Command {
     undo(data: BlueprintData) {
         for (const r of this.removed)
             data.buildings.splice(r.index, 0, r.building);
-        data.buildings.forEach((b, i) => b.index = i);
+        data.buildings.forEach((b, i) => (b.index = i));
 
         // 新 index -> 旧 index：幸存者按恢复数组中的顺序排列
         const oldIndexOfNew: number[] = [];
         for (let i = 0; i < data.buildings.length; i++)
-            if (!this.removeSet.has(i))
-                oldIndexOfNew.push(i);
+            if (!this.removeSet.has(i)) oldIndexOfNew.push(i);
 
-        const removedObjects = new Set(this.removed.map(r => r.building));
+        const removedObjects = new Set(this.removed.map((r) => r.building));
         const isDangling = (b: BlueprintBuilding, field: LinkField) =>
-            this.dangling.some(d => d.building === b && d.field === field);
+            this.dangling.some((d) => d.building === b && d.field === field);
 
         for (const { building, field, target } of this.dangling)
             building[field] = target;
 
         for (const b of data.buildings) {
-            if (removedObjects.has(b))
-                continue;
+            if (removedObjects.has(b)) continue;
             for (const field of LINK_FIELDS) {
                 const ref = b[field];
                 if (ref !== -1 && !isDangling(b, field))
@@ -100,7 +98,9 @@ export class RemoveBuildingsCommand implements Command {
         }
     }
 
-    merge() { return false; }
+    merge() {
+        return false;
+    }
 }
 
 /** 剔除单个建筑（3D 视图右键） */
@@ -115,8 +115,7 @@ export class RemoveBuildingsByItemCommand extends RemoveBuildingsCommand {
     constructor(itemId: number, data: BlueprintData) {
         const indices: number[] = [];
         data.buildings.forEach((b, i) => {
-            if (b.itemId === itemId)
-                indices.push(i);
+            if (b.itemId === itemId) indices.push(i);
         });
         super(indices, data);
     }

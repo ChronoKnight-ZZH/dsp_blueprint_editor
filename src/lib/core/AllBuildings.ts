@@ -1,12 +1,10 @@
-import {
-    InstancedMesh, Mesh, Object3D,
-} from 'three';
-import { IconTexture } from '@/iconTexture';
-import { Icons } from '@/icons';
-import { IconSubscript } from '@/iconSubscript';
-import { Cargos } from '@/cargos';
-import type { BlueprintBuilding } from '@/blueprint/parser';
-import type { BuildingModelRef } from './types';
+import { InstancedMesh, Mesh, Object3D } from "three";
+import { IconTexture } from "@/iconTexture";
+import { Icons } from "@/icons";
+import { IconSubscript } from "@/iconSubscript";
+import { Cargos } from "@/cargos";
+import type { BlueprintBuilding } from "@/blueprint/parser";
+import type { BuildingModelRef } from "./types";
 
 /**
  * 一栋蓝图对应的全部可渲染内容（建筑网格 + 图标 + 货物动画 + 下标）。
@@ -23,15 +21,16 @@ export class AllBuildings extends Object3D {
         public readonly modelRef: BuildingModelRef[],
         public readonly subscriptMesh: IconSubscript | null = null,
         /** 建筑 → 下标文本在 subscriptMesh 中的起始字符位置与长度；belt count 变化时用于局部刷新 */
-        public readonly subscriptMap: Map<BlueprintBuilding, { startIdx: number; length: number }> = new Map(),
+        public readonly subscriptMap: Map<
+            BlueprintBuilding,
+            { startIdx: number; length: number }
+        > = new Map()
     ) {
         super();
         this.add(...objects);
         this.add(iconsMesh);
-        if (cargos)
-            this.add(cargos);
-        if (subscriptMesh)
-            this.add(subscriptMesh);
+        if (cargos) this.add(cargos);
+        if (subscriptMesh) this.add(subscriptMesh);
     }
 
     public get icons() {
@@ -47,12 +46,11 @@ export class AllBuildings extends Object3D {
      *   这里只释放网格与下标（`IconTexture` 另有 `dispose()`）
      */
     public dispose() {
-        this.traverse(o => {
+        this.traverse((o) => {
             if (o instanceof InstancedMesh) {
                 o.dispose();
                 // GLB 的几何是跨场景复用的缓存对象，这里不能释放
-                if (!o.userData.sharedResource)
-                    o.geometry.dispose();
+                if (!o.userData.sharedResource) o.geometry.dispose();
                 return;
             }
             if (o instanceof Mesh && !o.userData.sharedResource) {

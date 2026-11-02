@@ -1,4 +1,10 @@
-import { AcceleratorMode, AssembleParamerters, BlueprintBuilding, BlueprintData, LabParamerters } from "./parser";
+import {
+    AcceleratorMode,
+    AssembleParamerters,
+    BlueprintBuilding,
+    BlueprintData,
+    LabParamerters,
+} from "./parser";
 import { Command, Updater } from "@/command";
 
 /**
@@ -60,16 +66,19 @@ export class SetAcceleratorCommand implements Command {
     constructor(bp: BlueprintData, params: SetAcceleratorParams) {
         this.targetMode = params.mode;
 
-        const indexSet = params.buildingIndexes ? new Set(params.buildingIndexes) : null;
+        const indexSet = params.buildingIndexes
+            ? new Set(params.buildingIndexes)
+            : null;
         for (const b of bp.buildings) {
-            if (indexSet && !indexSet.has(b.index))
-                continue;
+            if (indexSet && !indexSet.has(b.index)) continue;
             if (params.labOnly && b.itemId !== 2901 && b.itemId !== 2902)
                 continue;
 
-            const p = b.parameters as AssembleParamerters | LabParamerters | null;
-            if (!p || !('acceleratorMode' in p))
-                continue;
+            const p = b.parameters as
+                | AssembleParamerters
+                | LabParamerters
+                | null;
+            if (!p || !("acceleratorMode" in p)) continue;
 
             this.buildings.push(b);
             this.originalModes.push(p.acceleratorMode);
@@ -98,7 +107,10 @@ export class SetAcceleratorCommand implements Command {
      * @param {Updater} updater 增量更新通道
      */
     do(_data: BlueprintData, updater: Updater) {
-        this.apply(this.buildings.map(() => this.targetMode), updater);
+        this.apply(
+            this.buildings.map(() => this.targetMode),
+            updater
+        );
     }
 
     /**
@@ -115,5 +127,7 @@ export class SetAcceleratorCommand implements Command {
      * 不与上一条命令合并。
      * @returns {boolean} 恒为 `false`
      */
-    merge() { return false; }
+    merge() {
+        return false;
+    }
 }

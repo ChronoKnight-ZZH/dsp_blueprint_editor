@@ -1,6 +1,6 @@
 <template>
     <div class="holo-beacon-info">
-        <label class="holo-beacon-label">{{ t('信标文本') }}</label>
+        <label class="holo-beacon-label">{{ t("信标文本") }}</label>
         <textarea
             v-model="draft"
             class="holo-beacon-textarea"
@@ -10,40 +10,40 @@
             @keydown.ctrl.enter="commit"
         />
         <div class="holo-beacon-actions">
-            <span class="holo-beacon-hint">{{ t('信标文本提示') }}</span>
-            <button
-                class="holo-beacon-save"
-                :disabled="!dirty"
-                @click="commit"
-            >{{ t('保存') }}</button>
+            <span class="holo-beacon-hint">{{ t("信标文本提示") }}</span>
+            <button class="holo-beacon-save" :disabled="!dirty" @click="commit">
+                {{ t("保存") }}
+            </button>
         </div>
     </div>
 </template>
 
 <script lang="ts" setup>
-import { computed, inject, ref, watch } from 'vue';
-import { useI18n } from 'vue-i18n';
-import { BlueprintBuilding } from '@/blueprint/parser';
-import { SetBeaconContentCommand } from '@/blueprint/setBeaconContent';
-import { commandQueueKey } from '@/define';
+import { computed, inject, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
+import { BlueprintBuilding } from "@/blueprint/parser";
+import { SetBeaconContentCommand } from "@/blueprint/setBeaconContent";
+import { commandQueueKey } from "@/define";
 
 const { t } = useI18n();
 
 const props = defineProps<{
-    building: BlueprintBuilding,
+    building: BlueprintBuilding;
 }>();
 
 const commandQueue = inject(commandQueueKey)!.value!;
 
 // 初始/重建时同步 content 到 draft
-const draft = ref<string>(props.building.content ?? '');
+const draft = ref<string>(props.building.content ?? "");
 watch(
     () => props.building,
-    (b) => { draft.value = b.content ?? ''; },
-    { deep: false },
+    (b) => {
+        draft.value = b.content ?? "";
+    },
+    { deep: false }
 );
 
-const dirty = computed(() => draft.value !== (props.building.content ?? ''));
+const dirty = computed(() => draft.value !== (props.building.content ?? ""));
 
 function commit() {
     if (!dirty.value) return;

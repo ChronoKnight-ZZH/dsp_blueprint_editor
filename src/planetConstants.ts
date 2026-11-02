@@ -27,4 +27,5 @@ export const HEIGHT_GRID_SIZE = 4 / 3;
  * 一个水平格对应的世界单位。
  * 等于球面一个经度格在赤道处的弧长：2π / SEGMENT / GRID_PER_SEGMENT × R
  */
-export const GRID_HORIZONTAL = 2 * Math.PI / PLANET_SEGMENT / GRID_PER_SEGMENT * PLANET_RADIUS;
+export const GRID_HORIZONTAL =
+    ((2 * Math.PI) / PLANET_SEGMENT / GRID_PER_SEGMENT) * PLANET_RADIUS;

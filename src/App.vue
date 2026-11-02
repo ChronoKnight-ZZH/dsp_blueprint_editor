@@ -1,92 +1,205 @@
 <template>
     <div class="container">
-        <BlueprintEditor ref="renderer" v-model:selectedBuildingIndex="selectedBuildingIndex"
-            @update:selectedBuildingIndex="i => buildingFocused(i !== null)" />
+        <BlueprintEditor
+            ref="renderer"
+            v-model:selectedBuildingIndex="selectedBuildingIndex"
+            @update:selectedBuildingIndex="(i) => buildingFocused(i !== null)"
+        />
         <div class="sidebar" :class="{ expanded: sidebarExpanded }">
             <div>
-                <div class="info-tab tab" :class="{ active: activeTab === 'info' }" @click="activeTab = 'info'"></div>
-                <div class="operations-tab tab" :class="{ active: activeTab === 'operations' }"
-                    @click="activeTab = 'operations'"></div>
-                <div class="stats-tab tab" :class="{ active: activeTab === 'stats' }"
-                    @click="activeTab = 'stats'"></div>
+                <div
+                    class="info-tab tab"
+                    :class="{ active: activeTab === 'info' }"
+                    @click="activeTab = 'info'"
+                ></div>
+                <div
+                    class="operations-tab tab"
+                    :class="{ active: activeTab === 'operations' }"
+                    @click="activeTab = 'operations'"
+                ></div>
+                <div
+                    class="stats-tab tab"
+                    :class="{ active: activeTab === 'stats' }"
+                    @click="activeTab = 'stats'"
+                ></div>
             </div>
             <div v-if="activeTab === 'info'">
-                <section style="display: flex; flex-direction: row; gap: 5px;">
+                <section style="display: flex; flex-direction: row; gap: 5px">
                     <div>
-                        <label for="iconLayout">{{ t('图标布局') }}</label>
-                        <select id="iconLayout" :disabled="!data" v-model="iconLayout">
-                            <option v-for="[id, s] of allIconLayouts" :key="id" :value="id">{{ s }}</option>
+                        <label for="iconLayout">{{ t("图标布局") }}</label>
+                        <select
+                            id="iconLayout"
+                            :disabled="!data"
+                            v-model="iconLayout"
+                        >
+                            <option
+                                v-for="[id, s] of allIconLayouts"
+                                :key="id"
+                                :value="id"
+                            >
+                                {{ s }}
+                            </option>
                         </select>
-                        <label for="shortDesc">{{ t('缩略图文字') }}</label>
-                        <input type="text" id="shortDesc" :disabled="!data" :value="data?.header.shortDesc"
-                            @input="e => data!.header.shortDesc = (e.target as HTMLInputElement).value">
+                        <label for="shortDesc">{{ t("缩略图文字") }}</label>
+                        <input
+                            type="text"
+                            id="shortDesc"
+                            :disabled="!data"
+                            :value="data?.header.shortDesc"
+                            @input="e => data!.header.shortDesc = (e.target as HTMLInputElement).value"
+                        />
                     </div>
-                    <BlueprintIcon style="height: 90px; flex: none;" :layout-id="iconLayout" :icons="data?.header.icons"
-                        editable @edit="editHeaderIcon" />
-                    <IconPickerModal ref="iconPickerModal" @select="setHeaderIcon" />
+                    <BlueprintIcon
+                        style="height: 90px; flex: none"
+                        :layout-id="iconLayout"
+                        :icons="data?.header.icons"
+                        editable
+                        @edit="editHeaderIcon"
+                    />
+                    <IconPickerModal
+                        ref="iconPickerModal"
+                        @select="setHeaderIcon"
+                    />
                 </section>
                 <section v-if="data">
                     <div class="row props-header">
-                        <div style="flex: 1;">
-                            <label for="author">{{ t('作者') }}</label>
-                            <input type="text" id="author" :value="data.header.author"
-                                @input="e => data!.header.author = (e.target as HTMLInputElement).value">
+                        <div style="flex: 1">
+                            <label for="author">{{ t("作者") }}</label>
+                            <input
+                                type="text"
+                                id="author"
+                                :value="data.header.author"
+                                @input="e => data!.header.author = (e.target as HTMLInputElement).value"
+                            />
                         </div>
-                        <div style="flex: 1;">
-                            <label for="bpVersion">{{ t('蓝图版本') }}</label>
-                            <input type="text" id="bpVersion" :value="data.header.blueprintVersion"
-                                @input="e => data!.header.blueprintVersion = (e.target as HTMLInputElement).value">
+                        <div style="flex: 1">
+                            <label for="bpVersion">{{ t("蓝图版本") }}</label>
+                            <input
+                                type="text"
+                                id="bpVersion"
+                                :value="data.header.blueprintVersion"
+                                @input="e => data!.header.blueprintVersion = (e.target as HTMLInputElement).value"
+                            />
                         </div>
-                        <button type="button" class="prop-add" :title="t('新建属性')" @click="addProperty">
-                            {{ t('新建属性') }}
+                        <button
+                            type="button"
+                            class="prop-add"
+                            :title="t('新建属性')"
+                            @click="addProperty"
+                        >
+                            {{ t("新建属性") }}
                         </button>
                     </div>
                     <div class="properties-list">
-                        <div v-for="(p, i) in propertyPairs" :key="i" class="property-item">
+                        <div
+                            v-for="(p, i) in propertyPairs"
+                            :key="i"
+                            class="property-item"
+                        >
                             <div class="property-name-row">
                                 <div class="prop-tag">
-                                    <input type="text" class="prop-name" :value="p.name" :placeholder="t('新属性')"
-                                        @input="e => updateProperty(i, 'name', (e.target as HTMLInputElement).value)">
+                                    <input
+                                        type="text"
+                                        class="prop-name"
+                                        :value="p.name"
+                                        :placeholder="t('新属性')"
+                                        @input="e => updateProperty(i, 'name', (e.target as HTMLInputElement).value)"
+                                    />
                                 </div>
-                                <button type="button" class="prop-del" :title="t('删除属性')"
-                                    @click="removeProperty(i)">×</button>
+                                <button
+                                    type="button"
+                                    class="prop-del"
+                                    :title="t('删除属性')"
+                                    @click="removeProperty(i)"
+                                >
+                                    ×
+                                </button>
                             </div>
-                            <input type="text" class="prop-value" :value="p.value" :placeholder="t('属性内容')"
-                                @input="e => updateProperty(i, 'value', (e.target as HTMLInputElement).value)">
+                            <input
+                                type="text"
+                                class="prop-value"
+                                :value="p.value"
+                                :placeholder="t('属性内容')"
+                                @input="e => updateProperty(i, 'value', (e.target as HTMLInputElement).value)"
+                            />
                         </div>
                     </div>
                 </section>
                 <section>
-                    <label for="desc">{{ t('蓝图介绍') }}</label>
-                    <textarea rows="2" id="desc" :disabled="!data" :value="data?.header.desc"
-                        @input="e => data!.header.desc = (e.target as HTMLInputElement).value"></textarea>
+                    <label for="desc">{{ t("蓝图介绍") }}</label>
+                    <textarea
+                        rows="2"
+                        id="desc"
+                        :disabled="!data"
+                        :value="data?.header.desc"
+                        @input="e => data!.header.desc = (e.target as HTMLInputElement).value"
+                    ></textarea>
                 </section>
                 <section>
                     <div class="row">
-                        <label for="bp-str" style="margin-right: auto;">{{ t('蓝图代码') }}</label>
-                        <button style="margin-left: 4px;" @click="copy" :disabled="working || !bpStr">{{ t('复制')
-                            }}</button>
-                        <button style="margin-left: 4px;" @click="paste" :disabled="working">{{ t('粘贴') }}</button>
+                        <label for="bp-str" style="margin-right: auto">{{
+                            t("蓝图代码")
+                        }}</label>
+                        <button
+                            style="margin-left: 4px"
+                            @click="copy"
+                            :disabled="working || !bpStr"
+                        >
+                            {{ t("复制") }}
+                        </button>
+                        <button
+                            style="margin-left: 4px"
+                            @click="paste"
+                            :disabled="working"
+                        >
+                            {{ t("粘贴") }}
+                        </button>
                     </div>
-                    <textarea class="bp-code" rows="3" id="bp-str" v-model="bpStrInput"
+                    <textarea
+                        class="bp-code"
+                        rows="3"
+                        id="bp-str"
+                        v-model="bpStrInput"
                         :placeholder="isDragOver ? t('拖拽文件到此处打开') : ''"
                         :class="{ 'drag-over': isDragOver }"
-                        @copy="onCopy" @cut="onCut" @paste="onPaste"
-                        @focus="encodeBp" @change="e => parseBp((e.target as HTMLTextAreaElement).value)"
+                        @copy="onCopy"
+                        @cut="onCut"
+                        @paste="onPaste"
+                        @focus="encodeBp"
+                        @change="e => parseBp((e.target as HTMLTextAreaElement).value)"
                         @dragover.prevent="onDragOver"
                         @dragleave.prevent="onDragLeave"
-                        @drop.prevent="onDrop">
+                        @drop.prevent="onDrop"
+                    >
                     </textarea>
-                    <div class="row" style="align-items: stretch; column-gap: 4px;">
-                        <button @click="parseBp('')" :disabled="working"
-                            style="position: relative; flex: auto; width: 50px;">
+                    <div
+                        class="row"
+                        style="align-items: stretch; column-gap: 4px"
+                    >
+                        <button
+                            @click="parseBp('')"
+                            :disabled="working"
+                            style="position: relative; flex: auto; width: 50px"
+                        >
                             {{ bpStr ? t("清空") : t("选择文件") }}
-                            <input v-if="!bpStr" @change="onBpFile" :disabled="working" type="file"
-                                accept=".txt,text/plain" id="blueprint-file"
-                                style="position: absolute; inset: 0; opacity: 0;" />
+                            <input
+                                v-if="!bpStr"
+                                @change="onBpFile"
+                                :disabled="working"
+                                type="file"
+                                accept=".txt,text/plain"
+                                id="blueprint-file"
+                                style="position: absolute; inset: 0; opacity: 0"
+                            />
                         </button>
-                        <a v-if="bpStr && data" class="button" @click="prepareSave" :href="bpUrl"
-                            :download="data.header.shortDesc + '.txt'" style="flex: auto; width: 50px;">
+                        <a
+                            v-if="bpStr && data"
+                            class="button"
+                            @click="prepareSave"
+                            :href="bpUrl"
+                            :download="data.header.shortDesc + '.txt'"
+                            style="flex: auto; width: 50px"
+                        >
                             {{ t("保存文件") }}
                         </a>
                     </div>
@@ -94,151 +207,280 @@
                 </section>
                 <section>
                     <div class="row">
-                        <span style="margin-right: auto;">{{ t('创建版本号') }}</span>
+                        <span style="margin-right: auto">{{
+                            t("创建版本号")
+                        }}</span>
                         <span>{{ data?.header.gameVersion }}</span>
                     </div>
                     <div class="row">
-                        <span style="margin-right: auto;">{{ t('创建时间') }}</span>
-                        <span>{{ data?.header.time.toLocaleString([], { timeZone: 'UTC' }) }}</span>
+                        <span style="margin-right: auto">{{
+                            t("创建时间")
+                        }}</span>
+                        <span>{{
+                            data?.header.time.toLocaleString([], {
+                                timeZone: "UTC",
+                            })
+                        }}</span>
                     </div>
                 </section>
                 <section>
-                    <BuildingInfoPanel v-if="selectedBuilding !== null" :building="selectedBuilding" />
-                    <BuildingOverview v-else-if="data" @remove-by-item="removeBuildingsByItem" />
+                    <BuildingInfoPanel
+                        v-if="selectedBuilding !== null"
+                        :building="selectedBuilding"
+                    />
+                    <BuildingOverview
+                        v-else-if="data"
+                        @remove-by-item="removeBuildingsByItem"
+                    />
                 </section>
             </div>
-            <div class="operations-panel" v-else-if="activeTab === 'operations'">
+            <div
+                class="operations-panel"
+                v-else-if="activeTab === 'operations'"
+            >
                 <ul class="operations">
                     <template v-if="data && commandQueue">
-                    <li>
-                        <button @click="replaceModal!.open()">
-                            <img src="@/assets/icons/find_replace.svg">
-                            {{ t('批量替换') }}
-                        </button>
-                        <ReplaceModal :blueprint="data" ref="replaceModal" />
-                    </li>
-                    <li>
-                        <button @click="commandQueue!.undo()" :disabled="!commandQueue.canUndo()">
-                            <img src="@/assets/icons/undo.svg">
-                            {{ t('撤销') }}
-                        </button>
-                    </li>
-                    <li>
-                        <button @click="commandQueue!.redo()" :disabled="!commandQueue.canRedo()">
-                            <img src="@/assets/icons/redo.svg">
-                            {{ t('重做') }}
-                        </button>
-                    </li>
-                </template>
-                <div v-else class="empty-hint">{{ t('请先打开蓝图') }}</div>
-                <li class="render-settings-li">
-                    <section class="render-settings">
-                        <button type="button" class="advanced-toggle" :class="{ open: advancedOpen }"
-                            @click="advancedOpen = !advancedOpen">
-                            <span>{{ t('高级') }}</span>
-                            <span class="switch-track decorative" :class="{ on: advancedOpen }"></span>
-                        </button>
-                        <div v-show="advancedOpen" class="advanced-body">
-                            <div class="option-row">
-                                <span>{{ t('展示真实模型') }}</span>
-                                <label class="switch">
-                                    <input type="checkbox" v-model="renderSettings.showRealModels" />
-                                    <span class="switch-track"></span>
-                                </label>
-                            </div>
-                            <div class="option-row">
-                                <span>{{ t('开启贴图') }}</span>
-                                <label class="switch">
-                                    <input type="checkbox" v-model="renderSettings.texturesEnabled" />
-                                    <span class="switch-track"></span>
-                                </label>
-                            </div>
-                            <div class="channel-list" :class="{ disabled: !renderSettings.texturesEnabled }">
-                                <div v-for="channel in textureChannels" :key="channel.key" class="channel-row"
-                                    :title="channel.unavailable ? t('当前素材包未提供该通道贴图') : undefined">
-                                    <span class="channel-name">
-                                        {{ t(channel.label) }}<code>{{ channel.suffix }}</code>
-                                    </span>
+                        <li>
+                            <button @click="replaceModal!.open()">
+                                <img src="@/assets/icons/find_replace.svg" />
+                                {{ t("批量替换") }}
+                            </button>
+                            <ReplaceModal
+                                :blueprint="data"
+                                ref="replaceModal"
+                            />
+                        </li>
+                        <li>
+                            <button
+                                @click="commandQueue!.undo()"
+                                :disabled="!commandQueue.canUndo()"
+                            >
+                                <img src="@/assets/icons/undo.svg" />
+                                {{ t("撤销") }}
+                            </button>
+                        </li>
+                        <li>
+                            <button
+                                @click="commandQueue!.redo()"
+                                :disabled="!commandQueue.canRedo()"
+                            >
+                                <img src="@/assets/icons/redo.svg" />
+                                {{ t("重做") }}
+                            </button>
+                        </li>
+                    </template>
+                    <div v-else class="empty-hint">{{ t("请先打开蓝图") }}</div>
+                    <li class="render-settings-li">
+                        <section class="render-settings">
+                            <button
+                                type="button"
+                                class="advanced-toggle"
+                                :class="{ open: advancedOpen }"
+                                @click="advancedOpen = !advancedOpen"
+                            >
+                                <span>{{ t("高级") }}</span>
+                                <span
+                                    class="switch-track decorative"
+                                    :class="{ on: advancedOpen }"
+                                ></span>
+                            </button>
+                            <div v-show="advancedOpen" class="advanced-body">
+                                <div class="option-row">
+                                    <span>{{ t("展示真实模型") }}</span>
                                     <label class="switch">
-                                        <input type="checkbox" v-model="renderSettings.textures[channel.key]"
-                                            :disabled="!renderSettings.texturesEnabled" />
+                                        <input
+                                            type="checkbox"
+                                            v-model="
+                                                renderSettings.showRealModels
+                                            "
+                                        />
                                         <span class="switch-track"></span>
                                     </label>
                                 </div>
-                            </div>
-                            <div class="field-row">
-                                <label for="max-model-instances">{{ t('渲染最大模型') }}</label>
-                                <input id="max-model-instances" type="text" :value="maxModelText"
-                                    @change="commitMaxModel" />
-                            </div>
-                            <div class="slider-row">
-                                <input type="range" min="1" :max="limitSliderMax + 1" step="1" :value="limitSliderValue"
-                                    @input="onLimitSliderInput" />
-                                <div class="slider-ticks">
-                                    <span>1</span>
-                                    <span>{{ t('无限') }}</span>
+                                <div class="option-row">
+                                    <span>{{ t("开启贴图") }}</span>
+                                    <label class="switch">
+                                        <input
+                                            type="checkbox"
+                                            v-model="
+                                                renderSettings.texturesEnabled
+                                            "
+                                        />
+                                        <span class="switch-track"></span>
+                                    </label>
+                                </div>
+                                <div
+                                    class="channel-list"
+                                    :class="{
+                                        disabled:
+                                            !renderSettings.texturesEnabled,
+                                    }"
+                                >
+                                    <div
+                                        v-for="channel in textureChannels"
+                                        :key="channel.key"
+                                        class="channel-row"
+                                        :title="
+                                            channel.unavailable
+                                                ? t(
+                                                      '当前素材包未提供该通道贴图'
+                                                  )
+                                                : undefined
+                                        "
+                                    >
+                                        <span class="channel-name">
+                                            {{ t(channel.label)
+                                            }}<code>{{ channel.suffix }}</code>
+                                        </span>
+                                        <label class="switch">
+                                            <input
+                                                type="checkbox"
+                                                v-model="
+                                                    renderSettings.textures[
+                                                        channel.key
+                                                    ]
+                                                "
+                                                :disabled="
+                                                    !renderSettings.texturesEnabled
+                                                "
+                                            />
+                                            <span class="switch-track"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="field-row">
+                                    <label for="max-model-instances">{{
+                                        t("渲染最大模型")
+                                    }}</label>
+                                    <input
+                                        id="max-model-instances"
+                                        type="text"
+                                        :value="maxModelText"
+                                        @change="commitMaxModel"
+                                    />
+                                </div>
+                                <div class="slider-row">
+                                    <input
+                                        type="range"
+                                        min="1"
+                                        :max="limitSliderMax + 1"
+                                        step="1"
+                                        :value="limitSliderValue"
+                                        @input="onLimitSliderInput"
+                                    />
+                                    <div class="slider-ticks">
+                                        <span>1</span>
+                                        <span>{{ t("无限") }}</span>
+                                    </div>
+                                </div>
+                                <div
+                                    class="settings-hint"
+                                    :class="{ dirty: settingsDirty }"
+                                >
+                                    {{
+                                        settingsDirty
+                                            ? t(
+                                                  "设置已修改，重新导入蓝图后生效"
+                                              )
+                                            : t("修改后需重新导入蓝图才能生效")
+                                    }}
                                 </div>
                             </div>
-                            <div class="settings-hint" :class="{ dirty: settingsDirty }">
-                                {{ settingsDirty ? t('设置已修改，重新导入蓝图后生效') : t('修改后需重新导入蓝图才能生效') }}
-                            </div>
+                        </section>
+                    </li>
+                    <li style="margin-top: auto">
+                        <div class="select-li">
+                            <label for="select-language">
+                                <img src="@/assets/icons/translate.svg" />
+                                Languages
+                            </label>
+                            <select id="select-language" v-model="lang">
+                                <option value="auto">
+                                    {{ t("自动选择语言") }}
+                                </option>
+                                <option value="en">English</option>
+                                <option value="zh">中文</option>
+                            </select>
                         </div>
-                    </section>
-                </li>
-                <li style="margin-top: auto;">
-                    <div class="select-li">
-                        <label for="select-language">
-                            <img src="@/assets/icons/translate.svg">
-                            Languages
-                        </label>
-                        <select id="select-language" v-model="lang">
-                            <option value="auto">{{ t('自动选择语言') }}</option>
-                            <option value="en">English</option>
-                            <option value="zh">中文</option>
-                        </select>
-                    </div>
-                </li>
+                    </li>
                 </ul>
             </div>
             <div v-else-if="activeTab === 'stats'">
                 <ProductionStats v-if="data" />
-                <div v-else class="empty-hint">{{ t('请先打开蓝图') }}</div>
+                <div v-else class="empty-hint">{{ t("请先打开蓝图") }}</div>
             </div>
             <footer>
                 {{ version }}
                 <SWStatus />
             </footer>
         </div>
-        <button class="expand-btn" :class="{ expanded: sidebarExpanded, pinned: pinned }"
-            @click="toggleSidebar"></button>
-        <button class="expand-btn" :class="{ expanded: sidebarExpanded }" @click="toggleSidebar"></button>
-        <button class="pin-btn" :class="{ active: pinned }" :title="pinned ? t('解除固定') : t('固定面板')"
-            @click="togglePin"></button>
+        <button
+            class="expand-btn"
+            :class="{ expanded: sidebarExpanded, pinned: pinned }"
+            @click="toggleSidebar"
+        ></button>
+        <button
+            class="expand-btn"
+            :class="{ expanded: sidebarExpanded }"
+            @click="toggleSidebar"
+        ></button>
+        <button
+            class="pin-btn"
+            :class="{ active: pinned }"
+            :title="pinned ? t('解除固定') : t('固定面板')"
+            @click="togglePin"
+        ></button>
     </div>
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, onUnmounted, provide, reactive, ref, shallowReactive, shallowRef, watch, watchEffect } from 'vue';
-import { useI18n } from 'vue-i18n';
-import { BlueprintData, fromStr, toStr } from '@/blueprint/parser';
-import { version, rendererKey, buildingInfoKey, commandQueueKey } from '@/define';
-import { BuildingInfo } from './blueprint/buildingInfo';
-import { RemoveBuildingsByItemCommand } from './blueprint/removeBuilding';
+import {
+    computed,
+    defineAsyncComponent,
+    onMounted,
+    onUnmounted,
+    provide,
+    reactive,
+    ref,
+    shallowReactive,
+    shallowRef,
+    watch,
+    watchEffect,
+} from "vue";
+import { useI18n } from "vue-i18n";
+import { BlueprintData, fromStr, toStr } from "@/blueprint/parser";
+import {
+    version,
+    rendererKey,
+    buildingInfoKey,
+    commandQueueKey,
+} from "@/define";
+import { BuildingInfo } from "./blueprint/buildingInfo";
+import { RemoveBuildingsByItemCommand } from "./blueprint/removeBuilding";
 
-import BuildingInfoPanel from './components/BuildingInfoPanel.vue';
-import SWStatus from '@/swStatus.vue';
-import BlueprintIcon from './components/BlueprintIcon.vue';
-import IconPickerModal from './components/IconPickerModal.vue';
-import ReplaceModal from './components/ReplaceModal.vue';
-import ProductionStats from './components/ProductionStats.vue';
-import { CommandQueue } from './command';
-import BuildingOverview from './components/BuildingOverview.vue';
-import { useLang } from './i18n';
-import { renderSettings, persistRenderSettings, captureRenderSettings } from '@/renderSettings';
-import type { TextureChannel } from '@/renderSettings';
+import BuildingInfoPanel from "./components/BuildingInfoPanel.vue";
+import SWStatus from "@/swStatus.vue";
+import BlueprintIcon from "./components/BlueprintIcon.vue";
+import IconPickerModal from "./components/IconPickerModal.vue";
+import ReplaceModal from "./components/ReplaceModal.vue";
+import ProductionStats from "./components/ProductionStats.vue";
+import { CommandQueue } from "./command";
+import BuildingOverview from "./components/BuildingOverview.vue";
+import { useLang } from "./i18n";
+import {
+    renderSettings,
+    persistRenderSettings,
+    captureRenderSettings,
+} from "@/renderSettings";
+import type { TextureChannel } from "@/renderSettings";
 // 仅用于类型标注，编译时擦除，不影响 defineAsyncComponent 的异步分包
-import type BlueprintEditorImpl from './components/BlueprintEditor.vue';
-const BlueprintEditor = defineAsyncComponent(() => import(/* webpackChunkName: "renderer" */'./components/BlueprintEditor.vue'));
+import type BlueprintEditorImpl from "./components/BlueprintEditor.vue";
+const BlueprintEditor = defineAsyncComponent(
+    () =>
+        import(
+            /* webpackChunkName: "renderer" */ "./components/BlueprintEditor.vue"
+        )
+);
 
 const { t } = useI18n();
 const lang = useLang();
@@ -248,7 +490,7 @@ const replaceModal = ref<null | InstanceType<typeof ReplaceModal>>(null);
 const iconPickerModal = ref<null | InstanceType<typeof IconPickerModal>>(null);
 provide(rendererKey, renderer);
 
-const bpStr = ref('');
+const bpStr = ref("");
 const data = shallowRef(null as BlueprintData | null);
 const expandSidebar = ref(true);
 const pinned = ref(false);
@@ -262,28 +504,33 @@ const toggleSidebar = () => {
     } else {
         expandSidebar.value = !expandSidebar.value;
     }
-}
+};
 
 const togglePin = () => {
     pinned.value = !pinned.value;
     if (pinned.value) {
         expandSidebar.value = true;
     }
-}
-const activeTab = ref<'info' | 'operations' | 'stats'>('info')
+};
+const activeTab = ref<"info" | "operations" | "stats">("info");
 
 // ---------- 渲染高级设置 ----------
 const advancedOpen = ref(false);
 const settingsDirty = ref(false);
 
-const textureChannels: { key: TextureChannel; suffix: string; label: string; unavailable?: boolean }[] = [
-    { key: 'albedo', suffix: '-a', label: '反照率' },
-    { key: 'normal', suffix: '-n', label: '法线' },
-    { key: 'spec', suffix: '-s', label: '高光/粗糙' },
-    { key: 'emissive', suffix: '-e', label: '自发光' },
-    { key: 'effect', suffix: '-eff', label: '特效', unavailable: true },
-    { key: 'dirt', suffix: '-dirt', label: '污渍', unavailable: true },
-    { key: 'glass', suffix: '-glass', label: '玻璃', unavailable: true },
+const textureChannels: {
+    key: TextureChannel;
+    suffix: string;
+    label: string;
+    unavailable?: boolean;
+}[] = [
+    { key: "albedo", suffix: "-a", label: "反照率" },
+    { key: "normal", suffix: "-n", label: "法线" },
+    { key: "spec", suffix: "-s", label: "高光/粗糙" },
+    { key: "emissive", suffix: "-e", label: "自发光" },
+    { key: "effect", suffix: "-eff", label: "特效", unavailable: true },
+    { key: "dirt", suffix: "-dirt", label: "污渍", unavailable: true },
+    { key: "glass", suffix: "-glass", label: "玻璃", unavailable: true },
 ];
 
 /** 滑动条数值上限；再往右那一档代表「无限」 */
@@ -291,32 +538,37 @@ const limitSliderMax = 2048;
 
 const limitSliderValue = computed(() => {
     const limit = renderSettings.maxInstancesPerModel;
-    if (!Number.isFinite(limit))
-        return limitSliderMax + 1;
+    if (!Number.isFinite(limit)) return limitSliderMax + 1;
     return Math.min(limitSliderMax, Math.max(1, Math.round(limit)));
 });
 
 const maxModelText = computed(() =>
     Number.isFinite(renderSettings.maxInstancesPerModel)
         ? String(renderSettings.maxInstancesPerModel)
-        : t('无限'),
+        : t("无限")
 );
 
 const parseLimitText = (text: string): number => {
     const normalized = text.trim().toLowerCase();
-    if (normalized === '无限' || normalized === '∞' || normalized === 'inf'
-        || normalized === 'infinite' || normalized === 'infinity')
+    if (
+        normalized === "无限" ||
+        normalized === "∞" ||
+        normalized === "inf" ||
+        normalized === "infinite" ||
+        normalized === "infinity"
+    )
         return Infinity;
     const value = Number(normalized);
     // 非法输入：保持原值
-    if (normalized === '' || !Number.isFinite(value))
+    if (normalized === "" || !Number.isFinite(value))
         return renderSettings.maxInstancesPerModel;
     return Math.max(1, Math.floor(value));
 };
 
 const onLimitSliderInput = (e: Event) => {
     const value = Number((e.target as HTMLInputElement).value);
-    renderSettings.maxInstancesPerModel = value > limitSliderMax ? Infinity : value;
+    renderSettings.maxInstancesPerModel =
+        value > limitSliderMax ? Infinity : value;
 };
 
 const commitMaxModel = (e: Event) => {
@@ -325,116 +577,138 @@ const commitMaxModel = (e: Event) => {
     // 输入不合法时回显当前值（无限显示为「无限」）
     input.value = Number.isFinite(renderSettings.maxInstancesPerModel)
         ? String(renderSettings.maxInstancesPerModel)
-        : t('无限');
+        : t("无限");
 };
 
 // 设置变化后立即写入 sessionStorage，并提示「需重新导入蓝图」
-watch(renderSettings, () => {
-    persistRenderSettings();
-    settingsDirty.value = true;
-}, { deep: true });
+watch(
+    renderSettings,
+    () => {
+        persistRenderSettings();
+        settingsDirty.value = true;
+    },
+    { deep: true }
+);
 
 const working = ref(false);
 const codeExpired = ref(false);
-const parseErrorMessage = ref('');
+const parseErrorMessage = ref("");
 const selectedBuildingIndex = ref(null as number | null);
 
 const commandQueue = computed(() => {
-    if (data.value === null)
-        return null;
+    if (data.value === null) return null;
     return new CommandQueue(data.value);
 });
 provide(commandQueueKey, commandQueue);
 
-watchEffect(onCleanup => {
+watchEffect((onCleanup) => {
     if (commandQueue.value) {
         // 非 silent 命令（几何/拓扑变更）与 silent 命令（纯数据变更）都应标记蓝图代码过期
-        const stopWatch = watch(commandQueue.value.stateVersion, () => codeExpired.value = true);
+        const stopWatch = watch(
+            commandQueue.value.stateVersion,
+            () => (codeExpired.value = true)
+        );
         onCleanup(stopWatch);
     }
 });
 
 const buildingFocused = (selected: boolean) => {
     // 固定状态下取消选择不会收起面板
-    if (selected || !pinned.value)
-        expandSidebar.value = selected;
-    if (selected)
-        activeTab.value = 'info';
-}
+    if (selected || !pinned.value) expandSidebar.value = selected;
+    if (selected) activeTab.value = "info";
+};
 
 // 右键列表图标：一键剔除全部同 itemId 建筑（支持撤销/重做）
 const removeBuildingsByItem = (itemId: number) => {
     const queue = commandQueue.value;
-    if (!queue)
-        return;
+    if (!queue) return;
     queue.push(new RemoveBuildingsByItemCommand(itemId, queue.data));
     selectedBuildingIndex.value = null;
-}
+};
 
 const selectedBuilding = computed(() => {
     if (data.value === null || selectedBuildingIndex.value === null)
         return null;
     return data.value.buildings[selectedBuildingIndex.value];
-})
+});
 const buildingInfo = computed(() => {
-    if (data.value === null)
-        return null;
+    if (data.value === null) return null;
     return new BuildingInfo(data.value.buildings);
-})
+});
 provide(buildingInfoKey, buildingInfo);
 
 const allIconLayouts = new Map<number, string>([
-    [1, '无'],
-    [10, '1-1'], [11, '1-2'],
-    [20, '2-1'], [21, '2-2'], [22, '2-3'], [23, '2-4'], [24, '2-5'],
-    [30, '3-1'], [31, '3-2'], [32, '3-3'], [33, '3-4'],
-    [40, '4-1'], [41, '4-2'],
-    [50, '5-1'], [51, '5-2'],
+    [1, "无"],
+    [10, "1-1"],
+    [11, "1-2"],
+    [20, "2-1"],
+    [21, "2-2"],
+    [22, "2-3"],
+    [23, "2-4"],
+    [24, "2-5"],
+    [30, "3-1"],
+    [31, "3-2"],
+    [32, "3-3"],
+    [33, "3-4"],
+    [40, "4-1"],
+    [41, "4-2"],
+    [50, "5-1"],
+    [51, "5-2"],
 ]);
 const iconLayout = computed<number>({
-    get() { return data.value?.header.layout ?? 0; },
-    set(v) { data.value!.header.layout = v; },
-})
+    get() {
+        return data.value?.header.layout ?? 0;
+    },
+    set(v) {
+        data.value!.header.layout = v;
+    },
+});
 
 const editingIconSlot = ref<number | null>(null);
 const editHeaderIcon = (index: number) => {
-    if (!data.value)
-        return;
+    if (!data.value) return;
     editingIconSlot.value = index;
     iconPickerModal.value?.open();
-}
+};
 const setHeaderIcon = (iconId: number) => {
     if (data.value && editingIconSlot.value !== null)
         data.value.header.icons[editingIconSlot.value] = iconId;
     editingIconSlot.value = null;
-}
+};
 
 /** 将 properties 原始字符串解析为 [{ name, value }] 列表 */
 const propertyPairs = computed<{ name: string; value: string }[]>(() => {
-    const raw = data.value?.header.properties ?? '';
+    const raw = data.value?.header.properties ?? "";
     if (!raw) return [];
-    return raw.split(';')
-        .map(s => s.trim())
-        .filter(s => s.length > 0)
-        .map(s => {
-            const idx = s.indexOf(':');
-            if (idx < 0) return { name: s, value: '' };
+    return raw
+        .split(";")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+        .map((s) => {
+            const idx = s.indexOf(":");
+            if (idx < 0) return { name: s, value: "" };
             return { name: s.substring(0, idx), value: s.substring(idx + 1) };
         });
 });
 
 const rebuildProperties = (pairs: { name: string; value: string }[]) => {
-    data.value!.header.properties = pairs.map(p => `${p.name}:${p.value};`).join('');
+    data.value!.header.properties = pairs
+        .map((p) => `${p.name}:${p.value};`)
+        .join("");
 };
 
-const updateProperty = (index: number, field: 'name' | 'value', val: string) => {
-    const pairs = propertyPairs.value.map(p => ({ ...p }));
+const updateProperty = (
+    index: number,
+    field: "name" | "value",
+    val: string
+) => {
+    const pairs = propertyPairs.value.map((p) => ({ ...p }));
     pairs[index][field] = val;
     rebuildProperties(pairs);
 };
 
 const addProperty = () => {
-    const pairs = [...propertyPairs.value, { name: '', value: '' }];
+    const pairs = [...propertyPairs.value, { name: "", value: "" }];
     rebuildProperties(pairs);
 };
 
@@ -444,65 +718,68 @@ const removeProperty = (index: number) => {
 };
 
 const encodeBp = () => {
-    if (!codeExpired.value || !data.value)
-        return;
-    bpStr.value = toStr(data.value)
+    if (!codeExpired.value || !data.value) return;
+    bpStr.value = toStr(data.value);
     codeExpired.value = false;
-}
+};
 const bpStrLatest = () => {
     encodeBp();
     return bpStr.value;
-}
+};
 
-const bpStrInput = ref('');
+const bpStrInput = ref("");
 const bpStrDisplay = () => {
-    if (codeExpired.value)
-        return 'BLUEPRINT:...';
-    const len = bpStr.value.length
-    if (len < 1000)
-        return bpStr.value;
-    return bpStr.value.substring(0, 400) + '\n...\n' + bpStr.value.substring(len - 400, len);
-}
+    if (codeExpired.value) return "BLUEPRINT:...";
+    const len = bpStr.value.length;
+    if (len < 1000) return bpStr.value;
+    return (
+        bpStr.value.substring(0, 400) +
+        "\n...\n" +
+        bpStr.value.substring(len - 400, len)
+    );
+};
 watchEffect(() => {
     bpStrInput.value = bpStrDisplay();
 });
 
-const bpUrl = ref('');
+const bpUrl = ref("");
 watchEffect(() => {
     if (codeExpired.value && bpUrl.value) {
         URL.revokeObjectURL(bpUrl.value);
-        bpUrl.value = '';
+        bpUrl.value = "";
     }
-})
+});
 const prepareSave = () => {
     if (!bpUrl.value) {
-        bpUrl.value = URL.createObjectURL(new Blob([bpStrLatest()], { type: 'text/plain' }));
+        bpUrl.value = URL.createObjectURL(
+            new Blob([bpStrLatest()], { type: "text/plain" })
+        );
     }
-}
+};
 onUnmounted(() => {
     if (bpUrl.value) {
         URL.revokeObjectURL(bpUrl.value);
-        bpUrl.value = '';
+        bpUrl.value = "";
     }
-})
+});
 
 // 用于判断蓝图是否被替换（而非同一份重新粘贴）：
 // 若建筑数量或末尾 33 字符（" + 32 位 MD5 校验）变化，则视为新蓝图，重置相机视角
-let prevMd5Suffix = '';
+let prevMd5Suffix = "";
 let prevBuildingsCount = -1;
 
 const parseBp = (s: string) => {
-    const md5Suffix = s.length >= 33 ? s.slice(-33) : '';
+    const md5Suffix = s.length >= 33 ? s.slice(-33) : "";
     if (s) {
         try {
             data.value = shallowReactive(fromStr(s.trim()));
             data.value.header = reactive(data.value.header);
-            parseErrorMessage.value = '';
-            watch(data.value, () => codeExpired.value = true);
-            if (typeof gtag !== 'undefined') {
-                gtag('event', 'bp_parse', {
-                    'bp_length': s.length,
-                })
+            parseErrorMessage.value = "";
+            watch(data.value, () => (codeExpired.value = true));
+            if (typeof gtag !== "undefined") {
+                gtag("event", "bp_parse", {
+                    bp_length: s.length,
+                });
             }
         } catch (e) {
             parseErrorMessage.value = String(e);
@@ -515,13 +792,12 @@ const parseBp = (s: string) => {
         }
     } else {
         data.value = null;
-        parseErrorMessage.value = '';
+        parseErrorMessage.value = "";
     }
 
     const newBuildingsCount = data.value?.buildings.length ?? 0;
     const blueprintChanged =
-        md5Suffix !== prevMd5Suffix
-        || newBuildingsCount !== prevBuildingsCount;
+        md5Suffix !== prevMd5Suffix || newBuildingsCount !== prevBuildingsCount;
     prevMd5Suffix = md5Suffix;
     prevBuildingsCount = newBuildingsCount;
 
@@ -536,7 +812,7 @@ const parseBp = (s: string) => {
     captureRenderSettings();
     // 重新导入后场景已按最新设置重建，清掉「待生效」提示
     settingsDirty.value = false;
-}
+};
 
 // 拖拽状态
 const isDragOver = ref(false);
@@ -545,7 +821,7 @@ const isDragOver = ref(false);
 const onDragOver = (e: DragEvent) => {
     isDragOver.value = true;
     if (e.dataTransfer) {
-        e.dataTransfer.dropEffect = 'copy';
+        e.dataTransfer.dropEffect = "copy";
     }
 };
 
@@ -557,20 +833,18 @@ const onDragLeave = () => {
 // 拖拽放下：读取文件内容并解析
 const onDrop = async (e: DragEvent) => {
     isDragOver.value = false;
-    if (!e.dataTransfer)
-        return;
+    if (!e.dataTransfer) return;
 
     const files = e.dataTransfer.files;
-    if (files.length === 0)
-        return;
+    if (files.length === 0) return;
 
     const file = files[0];
     // 限制文件类型：仅允许 .txt 或 text/plain
-    const isTxt = file.name.toLowerCase().endsWith('.txt')
-        || file.type === 'text/plain';
+    const isTxt =
+        file.name.toLowerCase().endsWith(".txt") || file.type === "text/plain";
 
     if (!isTxt) {
-        parseErrorMessage.value = t('仅支持 .txt 文件');
+        parseErrorMessage.value = t("仅支持 .txt 文件");
         return;
     }
 
@@ -589,12 +863,13 @@ const onBpFile = async (e: Event) => {
     if (input.files && input.files[0]) {
         const file = input.files[0];
         // 限制文件类型：仅允许 .txt 或 text/plain
-        const isTxt = file.name.toLowerCase().endsWith('.txt')
-            || file.type === 'text/plain';
+        const isTxt =
+            file.name.toLowerCase().endsWith(".txt") ||
+            file.type === "text/plain";
 
         if (!isTxt) {
-            parseErrorMessage.value = t('仅支持 .txt 文件');
-            input.value = '';
+            parseErrorMessage.value = t("仅支持 .txt 文件");
+            input.value = "";
             return;
         }
 
@@ -608,82 +883,80 @@ const onBpFile = async (e: Event) => {
             working.value = false;
         }
     }
-    input.value = '';
+    input.value = "";
 };
 
 const onCopy = (e: ClipboardEvent) => {
-    if (!e.clipboardData)
-        return;
+    if (!e.clipboardData) return;
     e.preventDefault();
-    e.clipboardData.setData('text/plain', bpStrLatest());
-}
+    e.clipboardData.setData("text/plain", bpStrLatest());
+};
 
 const onCut = (e: ClipboardEvent) => {
-    if (!e.clipboardData)
-        return;
+    if (!e.clipboardData) return;
     e.preventDefault();
-    e.clipboardData.setData('text/plain', bpStrLatest());
-    parseBp('');
-}
+    e.clipboardData.setData("text/plain", bpStrLatest());
+    parseBp("");
+};
 
 const onPaste = (e: ClipboardEvent) => {
-    if (!e.clipboardData)
-        return;
+    if (!e.clipboardData) return;
     e.preventDefault();
     (e.target as HTMLElement).blur();
-    parseBp(e.clipboardData.getData('text/plain'));
-}
+    parseBp(e.clipboardData.getData("text/plain"));
+};
 
 const copy = async () => {
     working.value = true;
     try {
         await navigator.clipboard.writeText(bpStrLatest());
     } catch {
-        alert(t('复制粘贴不支持'));
+        alert(t("复制粘贴不支持"));
     }
     working.value = false;
-}
+};
 
 const paste = async () => {
     working.value = true;
     try {
         parseBp(await navigator.clipboard.readText());
     } catch {
-        alert(t('复制粘贴不支持'));
+        alert(t("复制粘贴不支持"));
     }
     working.value = false;
-}
+};
 
 const hotkey = (event: KeyboardEvent) => {
-    if (event.isComposing)
-        return;
+    if (event.isComposing) return;
     if (event.ctrlKey && !event.altKey) {
-        if (event.code === 'KeyZ') {
-            if (event.shiftKey)
-                commandQueue.value?.redo();
-            else
-                commandQueue.value?.undo();
-        } else if (event.code === 'KeyY' && !event.shiftKey) {
+        if (event.code === "KeyZ") {
+            if (event.shiftKey) commandQueue.value?.redo();
+            else commandQueue.value?.undo();
+        } else if (event.code === "KeyY" && !event.shiftKey) {
             commandQueue.value?.redo();
         }
         return;
     }
-    if (event.altKey || event.metaKey)
-        return;
+    if (event.altKey || event.metaKey) return;
     // 在输入框/文本域中打字时不触发
     const target = event.target as HTMLElement | null;
     const tag = target?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable)
+    if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        target?.isContentEditable
+    )
         return;
     // O 或 0：快速打开蓝图面板
-    if (event.code === 'KeyO' || event.code === 'Digit0') {
+    if (event.code === "KeyO" || event.code === "Digit0") {
         if (pinned.value) return; // 固定状态时不响应快捷键
         expandSidebar.value = !expandSidebar.value;
-        if (expandSidebar.value) activeTab.value = 'info';
+        if (expandSidebar.value) activeTab.value = "info";
     }
-}
-onMounted(() => document.body.addEventListener('keydown', hotkey));
-onUnmounted(() => document.body.removeEventListener('keydown', hotkey));
+};
+onMounted(() => document.body.addEventListener("keydown", hotkey));
+onUnmounted(() => document.body.removeEventListener("keydown", hotkey));
 </script>
 
 <style lang="scss">
@@ -743,7 +1016,7 @@ body {
     display: inline-block;
 
     &.active {
-        opacity: 1.0;
+        opacity: 1;
     }
 }
 
@@ -882,7 +1155,13 @@ body {
     }
 
     $tag-cut: 10px;
-    $tag-clip: polygon(0 0, 100% 0, 100% calc(100% - #{$tag-cut}), calc(100% - #{$tag-cut}) 100%, 0 100%);
+    $tag-clip: polygon(
+        0 0,
+        100% 0,
+        100% calc(100% - #{$tag-cut}),
+        calc(100% - #{$tag-cut}) 100%,
+        0 100%
+    );
 
     .property-name-row .prop-tag {
         flex: 0 1 72%;
@@ -915,7 +1194,7 @@ body {
         padding: 4px 8px;
         border: 0;
         border-radius: 3px;
-        background: rgba(255, 255, 255, 0.10);
+        background: rgba(255, 255, 255, 0.1);
 
         &::placeholder {
             color: rgba(255, 255, 255, 0.35);
@@ -948,7 +1227,7 @@ body {
     /* ---------- 蓝图代码区样式微调 ---------- */
     .bp-code {
         word-break: break-all;
-        font-family: 'Menlo', 'Consolas', monospace;
+        font-family: "Menlo", "Consolas", monospace;
         font-size: 0.8rem;
         line-height: 1.4;
         background: #1e2a33;
@@ -965,7 +1244,7 @@ body {
 
 .bp-code {
     word-break: break-all;
-    font-family: 'Menlo', 'Consolas', monospace;
+    font-family: "Menlo", "Consolas", monospace;
     font-size: 0.8rem;
     line-height: 1.4;
     background: #1e2a33;
@@ -993,7 +1272,7 @@ ul.operations {
     flex-direction: column;
     flex: auto;
 
-    >li {
+    > li {
         display: block;
         list-style: none;
         border-bottom: 1px solid #fff6;
@@ -1023,7 +1302,7 @@ ul.operations {
 .select-li {
     display: flex;
 
-    >select {
+    > select {
         margin-left: 5px;
         flex: 1 100px;
     }
@@ -1080,7 +1359,7 @@ ul.operations > li.render-settings-li {
     transition: background 0.15s;
 
     &::after {
-        content: '';
+        content: "";
         position: absolute;
         left: 2px;
         top: 2px;
@@ -1153,7 +1432,7 @@ ul.operations > li.render-settings-li {
 
 .channel-name code {
     margin-left: 4px;
-    font-family: 'Menlo', 'Consolas', monospace;
+    font-family: "Menlo", "Consolas", monospace;
     font-size: 0.78rem;
     color: #9ec4e8;
 }

@@ -24,9 +24,9 @@ import {
     SRGBColorSpace,
     Texture,
     UnsignedByteType,
-} from 'three';
-import type { ColorSpace } from 'three';
-import type { MaterialMapUrls } from './textureManifest';
+} from "three";
+import type { ColorSpace } from "three";
+import type { MaterialMapUrls } from "./textureManifest";
 
 /** 单张贴图的加载超时（超时按失败处理，不影响模型本体） */
 const LOAD_TIMEOUT_MS = 15000;
@@ -44,13 +44,12 @@ const imageCache = new Map<string, Promise<HTMLImageElement | null>>();
 
 function decodeImage(url: string): Promise<HTMLImageElement | null> {
     const cached = imageCache.get(url);
-    if (cached !== undefined)
-        return cached;
+    if (cached !== undefined) return cached;
 
-    const task = new Promise<HTMLImageElement | null>(resolve => {
+    const task = new Promise<HTMLImageElement | null>((resolve) => {
         const image = new Image();
         const timer = setTimeout(() => {
-            image.src = '';
+            image.src = "";
             console.warn(`[tex] 贴图加载超时：${url}`);
             resolve(null);
         }, LOAD_TIMEOUT_MS);
@@ -72,7 +71,11 @@ function decodeImage(url: string): Promise<HTMLImageElement | null> {
 
 // ---------------------------------------------------------------- 贴图构造
 
-function makeTexture(image: HTMLImageElement, colorSpace: ColorSpace, name: string): Texture {
+function makeTexture(
+    image: HTMLImageElement,
+    colorSpace: ColorSpace,
+    name: string
+): Texture {
     const texture = new Texture(image);
     // glTF 的 UV 约定：v 轴朝下；three 默认 flipY=true 会把它翻回来，必须关掉
     texture.flipY = false;
@@ -95,22 +98,23 @@ function makeTexture(image: HTMLImageElement, colorSpace: ColorSpace, name: stri
 function packOrm(image: HTMLImageElement, name: string): DataTexture | null {
     const width = image.naturalWidth;
     const height = image.naturalHeight;
-    if (width === 0 || height === 0)
-        return null;
+    if (width === 0 || height === 0) return null;
 
-    const canvas = document.createElement('canvas');
+    const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
-    const context = canvas.getContext('2d', { willReadFrequently: true });
-    if (context === null)
-        return null;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (context === null) return null;
     context.drawImage(image, 0, 0);
 
     let source: ImageData;
     try {
         source = context.getImageData(0, 0, width, height);
     } catch (e) {
-        console.warn(`[tex] 读取 spec 贴图象素失败（可能是跨域污染）：${name}`, e);
+        console.warn(
+            `[tex] 读取 spec 贴图象素失败（可能是跨域污染）：${name}`,
+            e
+        );
         return null;
     }
 
@@ -123,11 +127,17 @@ function packOrm(image: HTMLImageElement, name: string): DataTexture | null {
         const gloss = src[i + 3] / 255;
         packed[i] = 255;
         packed[i + 1] = Math.round((1 - gloss) * 255);
-        packed[i + 2] = Math.round((0.299 * r + 0.587 * g + 0.114 * b));
+        packed[i + 2] = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
         packed[i + 3] = 255;
     }
 
-    const texture = new DataTexture(packed, width, height, RGBAFormat, UnsignedByteType);
+    const texture = new DataTexture(
+        packed,
+        width,
+        height,
+        RGBAFormat,
+        UnsignedByteType
+    );
     texture.name = `${name}#orm`;
     texture.flipY = false;
     texture.colorSpace = NoColorSpace;
@@ -151,42 +161,59 @@ export interface MaterialTextureSet {
     readonly orm: Texture | null;
 }
 
-const EMPTY_SET: MaterialTextureSet = Object.freeze({ normal: null, emissive: null, orm: null });
+const EMPTY_SET: MaterialTextureSet = Object.freeze({
+    normal: null,
+    emissive: null,
+    orm: null,
+});
 
 const setCache = new Map<string, Promise<MaterialTextureSet>>();
 
 async function buildSet(urls: MaterialMapUrls): Promise<MaterialTextureSet> {
     const [normalImage, emissiveImage, specImage] = await Promise.all([
-        urls.normal === undefined ? Promise.resolve(null) : decodeImage(urls.normal),
-        urls.emissive === undefined ? Promise.resolve(null) : decodeImage(urls.emissive),
-        urls.spec === undefined ? Promise.resolve(null) : decodeImage(urls.spec),
+        urls.normal === undefined
+            ? Promise.resolve(null)
+            : decodeImage(urls.normal),
+        urls.emissive === undefined
+            ? Promise.resolve(null)
+            : decodeImage(urls.emissive),
+        urls.spec === undefined
+            ? Promise.resolve(null)
+            : decodeImage(urls.spec),
     ]);
 
-    const normal = normalImage === null
-        ? null
-        : makeTexture(normalImage, NoColorSpace, urls.normal ?? 'normal');
-    const emissive = emissiveImage === null
-        ? null
-        : makeTexture(emissiveImage, SRGBColorSpace, urls.emissive ?? 'emissive');
-    const orm = specImage === null
-        ? null
-        : packOrm(specImage, urls.spec ?? 'spec');
+    const normal =
+        normalImage === null
+            ? null
+            : makeTexture(normalImage, NoColorSpace, urls.normal ?? "normal");
+    const emissive =
+        emissiveImage === null
+            ? null
+            : makeTexture(
+                  emissiveImage,
+                  SRGBColorSpace,
+                  urls.emissive ?? "emissive"
+              );
+    const orm =
+        specImage === null ? null : packOrm(specImage, urls.spec ?? "spec");
 
     return { normal, emissive, orm };
 }
 
 /** 按清单条目加载一组通道贴图；失败的通道是 `null`，整体永不 reject */
-export function loadMaterialTextureSet(urls: MaterialMapUrls): Promise<MaterialTextureSet> {
-    const key = `${urls.normal ?? '-'}|${urls.emissive ?? '-'}|${urls.spec ?? '-'}`;
-    if (key === '-|-|-')
-        return Promise.resolve(EMPTY_SET);
+export function loadMaterialTextureSet(
+    urls: MaterialMapUrls
+): Promise<MaterialTextureSet> {
+    const key = `${urls.normal ?? "-"}|${urls.emissive ?? "-"}|${
+        urls.spec ?? "-"
+    }`;
+    if (key === "-|-|-") return Promise.resolve(EMPTY_SET);
 
     const cached = setCache.get(key);
-    if (cached !== undefined)
-        return cached;
+    if (cached !== undefined) return cached;
 
-    const task = buildSet(urls).catch(e => {
-        console.warn('[tex] 通道贴图装配失败（忽略，模型保留底色）', e);
+    const task = buildSet(urls).catch((e) => {
+        console.warn("[tex] 通道贴图装配失败（忽略，模型保留底色）", e);
         return EMPTY_SET;
     });
     setCache.set(key, task);

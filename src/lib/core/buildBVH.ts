@@ -1,9 +1,9 @@
-import { Matrix4 } from 'three';
-import { BVH } from '@/bvh/bvh';
-import { buildingMeta } from '@/data/building';
-import { isInserter } from '@/data/items';
-import type { BlueprintBuilding } from '@/blueprint/parser';
-import { inserterTrans } from './geometryHelpers';
+import { Matrix4 } from "three";
+import { BVH } from "@/bvh/bvh";
+import { buildingMeta } from "@/data/building";
+import { isInserter } from "@/data/items";
+import type { BlueprintBuilding } from "@/blueprint/parser";
+import { inserterTrans } from "./geometryHelpers";
 
 export interface BuildBVHResult {
     bvh: BVH;
@@ -25,12 +25,19 @@ export interface BuildBVHResult {
  * 改用 1e-6 的极小缩放：包围盒仍有 1e-6 的尺寸，BVH 可正常构建；
  * 视觉上不可见，拾取时也几乎不可能命中。
  */
-export function buildBVH(transforms: Matrix4[][], buildings: BlueprintBuilding[]): BuildBVHResult {
+export function buildBVH(
+    transforms: Matrix4[][],
+    buildings: BlueprintBuilding[]
+): BuildBVHResult {
     const temp = new Matrix4();
     const inserterOffset = new Matrix4().makeTranslation(0, 0, -0.5);
     /** 未知建筑的占位缩放：极小但非零，详见函数注释 */
     const HIDDEN_SCALE = 1e-6;
-    const hidden = new Matrix4().makeScale(HIDDEN_SCALE, HIDDEN_SCALE, HIDDEN_SCALE);
+    const hidden = new Matrix4().makeScale(
+        HIDDEN_SCALE,
+        HIDDEN_SCALE,
+        HIDDEN_SCALE
+    );
     const unknown = new Set<number>();
 
     const selectBoxes = buildings.map((b, i) => {

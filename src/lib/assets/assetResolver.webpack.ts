@@ -13,7 +13,7 @@
  * - 图标走 `eager` 模板字符串 `import()`（沿用改造前的写法）。
  */
 
-import type { AssetResolver } from './types';
+import type { AssetResolver } from "./types";
 
 /**
  * webpack `require.context` 的最小接口（@types/webpack-env 的 RequireContext
@@ -35,53 +35,71 @@ function createGlbContext(): RequireContext | null {
         // 千万不要写成 `typeof require.context !== 'function'`：webpack 会把这个属性访问
         // 编译成「某个空模块的 .context」（恒为 undefined），判断永远成立，
         // 结果就是整个 GLB 功能静默失效、全部建筑回退元数据表（已实测验证）。
-        const context = require.context('../../assets/icons/models', false, /\.glb$/i);
-        return typeof context === 'function' ? context as unknown as RequireContext : null;
-    }
-    catch (e) {
+        const context = require.context(
+            "../../assets/icons/models",
+            false,
+            /\.glb$/i
+        );
+        return typeof context === "function"
+            ? (context as unknown as RequireContext)
+            : null;
+    } catch (e) {
         // 打包器不支持 require.context 时静默降级为“纯元数据表”模式
-        console.warn('[glb] require.context 不可用，全部建筑回退元数据表', e);
+        console.warn("[glb] require.context 不可用，全部建筑回退元数据表", e);
         return null;
     }
 }
 
 function createTextureContext(): RequireContext | null {
     try {
-        const context = require.context('../../assets/icons/models', true, /\.png$/i);
-        return typeof context === 'function' ? context as unknown as RequireContext : null;
-    }
-    catch (e) {
-        console.warn('[tex] require.context 不可用，全部贴图退回 GLB 内嵌底色', e);
+        const context = require.context(
+            "../../assets/icons/models",
+            true,
+            /\.png$/i
+        );
+        return typeof context === "function"
+            ? (context as unknown as RequireContext)
+            : null;
+    } catch (e) {
+        console.warn(
+            "[tex] require.context 不可用，全部贴图退回 GLB 内嵌底色",
+            e
+        );
         return null;
     }
 }
 
 /** 从 require.context 返回的模块导出里取出 URL：既支持字符串，也支持 `{ default }`。 */
 function pickUrl(mod: unknown): string | null {
-    if (typeof mod === 'string')
-        return mod.length > 0 ? mod : null;
+    if (typeof mod === "string") return mod.length > 0 ? mod : null;
     const def = (mod as { default?: unknown } | null | undefined)?.default;
-    return typeof def === 'string' && def.length > 0 ? def : null;
+    return typeof def === "string" && def.length > 0 ? def : null;
 }
 
 /** `./smelter.glb` → `smelter` */
 function modelNameFromKey(key: string): string {
-    const normalized = key.replace(/\\/g, '/');
-    const base = normalized.slice(normalized.lastIndexOf('/') + 1);
-    return base.replace(/\.glb$/i, '');
+    const normalized = key.replace(/\\/g, "/");
+    const base = normalized.slice(normalized.lastIndexOf("/") + 1);
+    return base.replace(/\.glb$/i, "");
 }
 
 const glbContext = createGlbContext();
 const textureContext = createTextureContext();
 
-const glbKeys = new Set((glbContext?.keys() ?? []).map(key => key.replace(/^\.\//, '')));
+const glbKeys = new Set(
+    (glbContext?.keys() ?? []).map((key) => key.replace(/^\.\//, ""))
+);
 
 /** `assets/icons/models/<建筑目录>/<文件>.png` → `<建筑目录>/<文件>.png` */
 const MODEL_TEXTURE_KEY = /^.*assets\/icons\/models\//i;
 
-const textureKeys = new Set((textureContext?.keys() ?? []).map(key => key.replace(/^\.\//, '')));
+const textureKeys = new Set(
+    (textureContext?.keys() ?? []).map((key) => key.replace(/^\.\//, ""))
+);
 
-const glbModelNames: readonly string[] = (glbContext?.keys() ?? []).map(modelNameFromKey);
+const glbModelNames: readonly string[] = (glbContext?.keys() ?? []).map(
+    modelNameFromKey
+);
 
 export const assetResolver: AssetResolver = {
     glbModelNames(): readonly string[] {
@@ -89,51 +107,51 @@ export const assetResolver: AssetResolver = {
     },
 
     async glbModelUrl(name: string): Promise<string | null> {
-        if (glbContext === null)
-            return null;
+        if (glbContext === null) return null;
         const key = `${name}.glb`;
-        if (!glbKeys.has(key))
-            return null;
+        if (!glbKeys.has(key)) return null;
         try {
             const url = pickUrl(await glbContext(`./${key}`));
             if (url === null)
                 console.warn(`[glb] 模型 ${name} 没有解析出 URL，回退元数据表`);
             return url;
-        }
-        catch (e) {
+        } catch (e) {
             console.warn(`[glb] 模型 ${name} 的资源解析失败，回退元数据表`, e);
             return null;
         }
     },
 
     modelTextureUrl(srcRelativePath: string): string | null {
-        if (textureContext === null)
-            return null;
-        const normalized = srcRelativePath.replace(/\\/g, '/');
-        const relative = normalized.replace(MODEL_TEXTURE_KEY, '');
-        if (relative === normalized || !textureKeys.has(relative))
-            return null;
+        if (textureContext === null) return null;
+        const normalized = srcRelativePath.replace(/\\/g, "/");
+        const relative = normalized.replace(MODEL_TEXTURE_KEY, "");
+        if (relative === normalized || !textureKeys.has(relative)) return null;
         try {
             return pickUrl(textureContext(`./${relative}`));
-        }
-        catch (e) {
+        } catch (e) {
             console.warn(`[tex] 贴图 ${srcRelativePath} 的资源解析失败`, e);
             return null;
         }
     },
 
     async itemRecipeIconUrl(name: string): Promise<string> {
-        const mod = await import(/* webpackMode: "eager" */`@/assets/icons/item_recipe/${name}.png`);
+        const mod = await import(
+            /* webpackMode: "eager" */ `@/assets/icons/item_recipe/${name}.png`
+        );
         return mod.default;
     },
 
     async techIconUrl(techId: number): Promise<string> {
-        const mod = await import(/* webpackMode: "eager" */`@/assets/icons/tech/${techId}.png`);
+        const mod = await import(
+            /* webpackMode: "eager" */ `@/assets/icons/tech/${techId}.png`
+        );
         return mod.default;
     },
 
     async signalIconUrl(signalId: number): Promise<string> {
-        const mod = await import(/* webpackMode: "eager" */`@/assets/icons/signal/signal-${signalId}.png`);
+        const mod = await import(
+            /* webpackMode: "eager" */ `@/assets/icons/signal/signal-${signalId}.png`
+        );
         return mod.default;
     },
 };

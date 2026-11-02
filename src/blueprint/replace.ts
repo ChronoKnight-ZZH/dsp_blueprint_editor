@@ -1,5 +1,10 @@
-import { BeltParameters, BlueprintBuilding, BlueprintData, StationParameters } from "./parser";
-import { recipesMap } from "@/data/recipes"
+import {
+    BeltParameters,
+    BlueprintBuilding,
+    BlueprintData,
+    StationParameters,
+} from "./parser";
+import { recipesMap } from "@/data/recipes";
 import { isBelt, isStation } from "@/data/items";
 import { recipeIconId } from "@/data/icons";
 import { Command, Updater } from "@/command";
@@ -13,7 +18,7 @@ export interface ReplaceParams {
         station: boolean;
         beltIcon: boolean;
         blueprintIcon: boolean;
-    }
+    };
 }
 
 export class ReplaceCommand implements Command {
@@ -22,7 +27,7 @@ export class ReplaceCommand implements Command {
 
     recipeBuildings: BlueprintBuilding[] = [];
     filterBuildings: BlueprintBuilding[] = [];
-    stationStorage: {b: BlueprintBuilding, i: number}[] = [];
+    stationStorage: { b: BlueprintBuilding; i: number }[] = [];
     beltBuildings: BlueprintBuilding[] = [];
     blueprintIconIndex: number[] = [];
 
@@ -45,34 +50,30 @@ export class ReplaceCommand implements Command {
                     this.recipeBuildings.push(b);
 
             if (params.scope.filter)
-                if (b.filterId === searchItem)
-                    this.filterBuildings.push(b);
+                if (b.filterId === searchItem) this.filterBuildings.push(b);
 
             if (params.scope.beltIcon && isBelt(b.itemId)) {
                 const p = b.parameters as BeltParameters | null;
-                if (p?.iconId === searchIcon)
-                    this.beltBuildings.push(b);
+                if (p?.iconId === searchIcon) this.beltBuildings.push(b);
             }
 
             if (params.scope.station && isStation(b.itemId)) {
                 this.stationStorage.push(
                     ...(b.parameters as StationParameters).storage
-                        .filter(s => s.itemId === searchItem)
+                        .filter((s) => s.itemId === searchItem)
                         .map((s, i) => ({ b, i }))
                 );
             }
         }
         if (params.scope.blueprintIcon) {
-            const icons = bp.header.icons
+            const icons = bp.header.icons;
             for (let i = 0; i < icons.length; i++)
-                if (icons[i] === searchIcon)
-                    this.blueprintIconIndex.push(i);
+                if (icons[i] === searchIcon) this.blueprintIconIndex.push(i);
         }
     }
     replace(recipeId: number, data: BlueprintData, updater: Updater) {
         const recipe = recipesMap.get(recipeId);
-        if (!recipe)
-            throw new Error(`Unknown recipe ${recipeId}`);
+        if (!recipe) throw new Error(`Unknown recipe ${recipeId}`);
         const item = recipe.to[0].item.id;
         const icon = recipeIconId(recipeId);
 
@@ -92,8 +93,7 @@ export class ReplaceCommand implements Command {
             (b.parameters as StationParameters).storage[i].itemId = item;
             updater.updateStationInfo.dispatch(b);
         }
-        for (const i of this.blueprintIconIndex)
-            data.header.icons[i] = icon;
+        for (const i of this.blueprintIconIndex) data.header.icons[i] = icon;
     }
     do(data: BlueprintData, updater: Updater) {
         this.replace(this.replaceRecipeId, data, updater);
@@ -101,5 +101,7 @@ export class ReplaceCommand implements Command {
     undo(data: BlueprintData, updater: Updater) {
         this.replace(this.searchRecipeId, data, updater);
     }
-    merge() { return false; }
+    merge() {
+        return false;
+    }
 }

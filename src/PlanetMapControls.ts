@@ -1,4 +1,12 @@
-import { EventDispatcher, MOUSE, PerspectiveCamera, Quaternion, TOUCH, Vector2, Vector3 } from 'three';
+import {
+    EventDispatcher,
+    MOUSE,
+    PerspectiveCamera,
+    Quaternion,
+    TOUCH,
+    Vector2,
+    Vector3,
+} from "three";
 
 enum STATE {
     NONE,
@@ -50,11 +58,14 @@ export interface CameraHome {
  * （maxDistanceForTilt / minTiltForDistance）：拉远时自动抬高视角，压到平视时
  * 自动收缩距离 —— 否则视线会穿进球体，锚点被星球自己挡在后面。
  */
-export class PlanetMapControls extends EventDispatcher<{ change: object, start: object, end: object }> {
-
-    static changeEvent = { type: 'change' } as const;
-    static startEvent = { type: 'start' } as const;
-    static endEvent = { type: 'end' } as const;
+export class PlanetMapControls extends EventDispatcher<{
+    change: object;
+    start: object;
+    end: object;
+}> {
+    static changeEvent = { type: "change" } as const;
+    static startEvent = { type: "start" } as const;
+    static endEvent = { type: "end" } as const;
 
     enabled = true;
 
@@ -93,10 +104,10 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
      * 语义按拖拽算：W = 把内容往下推 = 视野上移，A = 把内容往右推 = 视野左移。
      */
     keys: Record<string, { pan: Vector2 }> = {
-        KeyW: { pan: new Vector2( 0,  1) },
-        KeyS: { pan: new Vector2( 0, -1) },
-        KeyA: { pan: new Vector2( 1,  0) },
-        KeyD: { pan: new Vector2(-1,  0) },
+        KeyW: { pan: new Vector2(0, 1) },
+        KeyS: { pan: new Vector2(0, -1) },
+        KeyA: { pan: new Vector2(1, 0) },
+        KeyD: { pan: new Vector2(-1, 0) },
     };
     keyPanSpeed = 240.0;
 
@@ -104,20 +115,29 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
     dragThreshold = 3;
 
     /** 左键平移、右键旋转；中键不承担任何操作（缩放只走滚轮） */
-    mouseButtons = { LEFT: MOUSE.PAN, MIDDLE: -1 as MOUSE, RIGHT: MOUSE.ROTATE };
+    mouseButtons = {
+        LEFT: MOUSE.PAN,
+        MIDDLE: -1 as MOUSE,
+        RIGHT: MOUSE.ROTATE,
+    };
 
     touches = { ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_ROTATE };
 
-    constructor(public object: PerspectiveCamera, public domElement: HTMLElement) {
+    constructor(
+        public object: PerspectiveCamera,
+        public domElement: HTMLElement
+    ) {
         super();
-        domElement.style.touchAction = 'none';
+        domElement.style.touchAction = "none";
 
         this.onContextMenu = this.onContextMenu.bind(this);
-        this.domElement.addEventListener('contextmenu', this.onContextMenu);
+        this.domElement.addEventListener("contextmenu", this.onContextMenu);
 
-        this.domElement.addEventListener('pointerdown', this.onPointerDown);
-        this.domElement.addEventListener('pointercancel', this.onPointerCancel);
-        this.domElement.addEventListener('wheel', this.onMouseWheel, { passive: false });
+        this.domElement.addEventListener("pointerdown", this.onPointerDown);
+        this.domElement.addEventListener("pointercancel", this.onPointerCancel);
+        this.domElement.addEventListener("wheel", this.onMouseWheel, {
+            passive: false,
+        });
 
         // force an update at start
         this.update();
@@ -125,8 +145,8 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
 
     private domElementKeyEvents: GlobalEventHandlers | null = null;
     listenToKeyEvents(domElement: GlobalEventHandlers) {
-        domElement.addEventListener('keydown', this.onKeyDown);
-        domElement.addEventListener('keyup', this.onKeyUp);
+        domElement.addEventListener("keydown", this.onKeyDown);
+        domElement.addEventListener("keyup", this.onKeyUp);
         this.domElementKeyEvents = domElement;
     }
 
@@ -181,8 +201,7 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
         const s = Math.sin(this.tilt);
         const c = Math.cos(this.tilt);
         const inner = cameraRadius * cameraRadius - c * c * R * R;
-        if (inner <= 0)
-            return this.minDistance;
+        if (inner <= 0) return this.minDistance;
         return Math.max(this.minDistance, -s * R + Math.sqrt(inner));
     }
 
@@ -206,8 +225,7 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
             return;
         }
 
-        if (distance === undefined)
-            return;
+        if (distance === undefined) return;
 
         this.anchor.set(0, 0, 1);
         this.viewDir.set(0, 1, 0);
@@ -234,8 +252,7 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
     focusSpherePoint(point: Vector3, distance: number) {
         const dir = point.clone().normalize();
         // 退化情形（目标点在球心）：回落到 +Z，避免零向量
-        if (dir.lengthSq() === 0)
-            dir.set(0, 0, 1);
+        if (dir.lengthSq() === 0) dir.set(0, 0, 1);
 
         this.anchor.copy(dir);
         this.viewDir.set(0, 1, 0);
@@ -274,7 +291,12 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
     /** 锚点处的地面尺度（世界单位 / 像素） */
     private worldPerPixel() {
         const h = Math.max(1, this.domElement.clientHeight);
-        return 2 * this.targetDistance() * Math.tan(this.object.fov * DEG2RAD / 2) / h;
+        return (
+            (2 *
+                this.targetDistance() *
+                Math.tan((this.object.fov * DEG2RAD) / 2)) /
+            h
+        );
     }
 
     /** 站在离地 h 高处的相机，能否看到球面上水平距离 horizontal 外的点 */
@@ -300,8 +322,7 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
 
     /** 给定距离，锚点仍在地平线内所需的最小仰角 */
     private minTiltForDistance(distance: number) {
-        if (!this.visibleAt(distance, this.maxTilt))
-            return this.maxTilt;
+        if (!this.visibleAt(distance, this.maxTilt)) return this.maxTilt;
         let lo = this.minTilt;
         let hi = this.maxTilt;
         for (let i = 0; i < 32; i++) {
@@ -319,7 +340,10 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
 
     /** 改距离：拉远到锚点会被地平线挡住时，自动抬高仰角（相当于视角往上漂） */
     setDistance(distance: number) {
-        this.distance = Math.max(this.minDistance, Math.min(this.maxDistance, distance));
+        this.distance = Math.max(
+            this.minDistance,
+            Math.min(this.maxDistance, distance)
+        );
         if (!this.visibleAt(this.distance, this.tilt))
             this.tilt = this.minTiltForDistance(this.distance);
     }
@@ -331,13 +355,18 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
     /** 方位：绕锚点转 */
     rotateAzimuth(angle: number) {
         this.viewDir.applyAxisAngle(this.anchor, angle);
-        this.viewDir.addScaledVector(this.anchor, -this.viewDir.dot(this.anchor));
+        this.viewDir.addScaledVector(
+            this.anchor,
+            -this.viewDir.dot(this.anchor)
+        );
         if (this.viewDir.lengthSq() < EPS) {
             // 退化兜底：随便取一个与 anchor 正交的方向
             this.viewDir.set(0, 1, 0);
-            if (Math.abs(this.anchor.y) > 0.9)
-                this.viewDir.set(1, 0, 0);
-            this.viewDir.addScaledVector(this.anchor, -this.viewDir.dot(this.anchor));
+            if (Math.abs(this.anchor.y) > 0.9) this.viewDir.set(1, 0, 0);
+            this.viewDir.addScaledVector(
+                this.anchor,
+                -this.viewDir.dot(this.anchor)
+            );
         }
         this.viewDir.normalize();
     }
@@ -363,21 +392,36 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
         const height = this.minHeight + Math.sin(this.tilt) * distance;
         const horizontal = Math.cos(this.tilt) * distance;
 
-        this.basisTemp.copy(n).multiplyScalar(R + height).addScaledVector(this.viewDir, horizontal);
-        this.basisForward.copy(n).multiplyScalar(R).sub(this.basisTemp).normalize();
-        this.basisUp.copy(n).addScaledVector(this.basisForward, -n.dot(this.basisForward)).normalize();
-        this.basisRight.crossVectors(this.basisForward, this.basisUp).normalize();
+        this.basisTemp
+            .copy(n)
+            .multiplyScalar(R + height)
+            .addScaledVector(this.viewDir, horizontal);
+        this.basisForward
+            .copy(n)
+            .multiplyScalar(R)
+            .sub(this.basisTemp)
+            .normalize();
+        this.basisUp
+            .copy(n)
+            .addScaledVector(this.basisForward, -n.dot(this.basisForward))
+            .normalize();
+        this.basisRight
+            .crossVectors(this.basisForward, this.basisUp)
+            .normalize();
     }
 
     /** unit: css pixel。把锚点沿球面推走，让地面跟着光标走 */
     pan(deltaX: number, deltaY: number) {
         this.updateBasis();
         const scale = this.worldPerPixel();
-        this.panStep.set(0, 0, 0)
+        this.panStep
+            .set(0, 0, 0)
             .addScaledVector(this.basisRight, -deltaX * scale)
             .addScaledVector(this.basisUp, deltaY * scale);
         // 弧长 → 角度：锚点沿切平面推 s 后归一化，等价于转 s/R
-        this.anchor.addScaledVector(this.panStep, 1 / this.planetRadius).normalize();
+        this.anchor
+            .addScaledVector(this.panStep, 1 / this.planetRadius)
+            .normalize();
     }
 
     dollyOut(dollyScale: number) {
@@ -399,17 +443,25 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
         this.anchor.normalize();
 
         // pan 之后 viewDir 会略微离开切平面，投影回去（等价于平行移动）
-        this.viewDir.addScaledVector(this.anchor, -this.viewDir.dot(this.anchor));
+        this.viewDir.addScaledVector(
+            this.anchor,
+            -this.viewDir.dot(this.anchor)
+        );
         if (this.viewDir.lengthSq() < EPS) {
             this.viewDir.set(0, 1, 0);
-            if (Math.abs(this.anchor.y) > 0.9)
-                this.viewDir.set(1, 0, 0);
-            this.viewDir.addScaledVector(this.anchor, -this.viewDir.dot(this.anchor));
+            if (Math.abs(this.anchor.y) > 0.9) this.viewDir.set(1, 0, 0);
+            this.viewDir.addScaledVector(
+                this.anchor,
+                -this.viewDir.dot(this.anchor)
+            );
         }
         this.viewDir.normalize();
 
         this.tilt = Math.max(this.minTilt, Math.min(this.maxTilt, this.tilt));
-        this.distance = Math.max(this.minDistance, Math.min(this.maxDistance, this.distance));
+        this.distance = Math.max(
+            this.minDistance,
+            Math.min(this.maxDistance, this.distance)
+        );
 
         const R = this.planetRadius;
         const distance = this.effectiveDistance;
@@ -417,18 +469,26 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
         const horizontal = Math.cos(this.tilt) * distance;
 
         const position = this.object.position;
-        position.copy(this.anchor).multiplyScalar(R + height).addScaledVector(this.viewDir, horizontal);
+        position
+            .copy(this.anchor)
+            .multiplyScalar(R + height)
+            .addScaledVector(this.viewDir, horizontal);
 
         // up 取当地法线：地平线水平、建筑竖着（不再吸附正北）
         this.object.up.copy(this.anchor);
-        this.object.lookAt(this.anchor.x * R, this.anchor.y * R, this.anchor.z * R);
+        this.object.lookAt(
+            this.anchor.x * R,
+            this.anchor.y * R,
+            this.anchor.z * R
+        );
 
         // update condition is:
         // min(camera displacement, camera rotation in radians)^2 > EPS
         // using small-angle approximation cos(x/2) = 1 - x^2 / 8
-        if (this.lastPosition.distanceToSquared(this.object.position) > EPS ||
-            8 * (1 - this.lastQuaternion.dot(this.object.quaternion)) > EPS) {
-
+        if (
+            this.lastPosition.distanceToSquared(this.object.position) > EPS ||
+            8 * (1 - this.lastQuaternion.dot(this.object.quaternion)) > EPS
+        ) {
             this.lastPosition.copy(this.object.position);
             this.lastQuaternion.copy(this.object.quaternion);
 
@@ -438,18 +498,24 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
     }
 
     dispose() {
-        this.domElement.removeEventListener('contextmenu', this.onContextMenu);
+        this.domElement.removeEventListener("contextmenu", this.onContextMenu);
 
-        this.domElement.removeEventListener('pointerdown', this.onPointerDown);
-        this.domElement.removeEventListener('pointercancel', this.onPointerCancel);
-        this.domElement.removeEventListener('wheel', this.onMouseWheel);
+        this.domElement.removeEventListener("pointerdown", this.onPointerDown);
+        this.domElement.removeEventListener(
+            "pointercancel",
+            this.onPointerCancel
+        );
+        this.domElement.removeEventListener("wheel", this.onMouseWheel);
 
-        this.domElement.removeEventListener('pointermove', this.onPointerMove);
-        this.domElement.removeEventListener('pointerup', this.onPointerUp);
+        this.domElement.removeEventListener("pointermove", this.onPointerMove);
+        this.domElement.removeEventListener("pointerup", this.onPointerUp);
 
         if (this.domElementKeyEvents !== null) {
-            this.domElementKeyEvents.removeEventListener('keydown', this.onKeyDown);
-            this.domElementKeyEvents.removeEventListener('keyup', this.onKeyUp);
+            this.domElementKeyEvents.removeEventListener(
+                "keydown",
+                this.onKeyDown
+            );
+            this.domElementKeyEvents.removeEventListener("keyup", this.onKeyUp);
         }
     }
 
@@ -491,8 +557,7 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
     handleMouseMoveRotate(event: PointerEvent) {
         this.rotateEnd.set(event.clientX, event.clientY);
         this.rotateDelta.subVectors(this.rotateEnd, this.rotateStart);
-        if (!this.passDragThreshold(this.rotateDelta))
-            return;
+        if (!this.passDragThreshold(this.rotateDelta)) return;
 
         this.rotate(this.rotateDelta.x, this.rotateDelta.y);
 
@@ -502,8 +567,7 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
     handleMouseMovePan(event: PointerEvent) {
         this.panEnd.set(event.clientX, event.clientY);
         this.panDelta.subVectors(this.panEnd, this.panStart);
-        if (!this.passDragThreshold(this.panDelta))
-            return;
+        if (!this.passDragThreshold(this.panDelta)) return;
 
         this.pan(this.panDelta.x, this.panDelta.y);
 
@@ -512,10 +576,8 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
 
     /** 死区判定：第一次越过阈值才放行，避免单击时抖一下视角 */
     private passDragThreshold(delta: Vector2) {
-        if (this.dragging)
-            return true;
-        if (delta.length() < this.dragThreshold)
-            return false;
+        if (this.dragging) return true;
+        if (delta.length() < this.dragThreshold) return false;
         this.dragging = true;
         return true;
     }
@@ -527,7 +589,7 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
     private downKeys = new Set<string>();
 
     protected handleKeyDown(event: KeyboardEvent) {
-        if (event.code === 'KeyN') {
+        if (event.code === "KeyN") {
             this.reset();
             event.preventDefault();
             return;
@@ -546,16 +608,20 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
     updateTimeDelta(deltaTimeInSeconds: number) {
         for (const code of this.downKeys) {
             const act = this.keys[code];
-            if (act === undefined)
-                continue;
-            this.keyPan.copy(act.pan).multiplyScalar(this.keyPanSpeed * deltaTimeInSeconds);
+            if (act === undefined) continue;
+            this.keyPan
+                .copy(act.pan)
+                .multiplyScalar(this.keyPanSpeed * deltaTimeInSeconds);
             this.pan(this.keyPan.x, this.keyPan.y);
         }
     }
 
     handleTouchStartRotate() {
         if (this.pointers.length === 1) {
-            this.rotateStart.set(this.pointers[0].pageX, this.pointers[0].pageY);
+            this.rotateStart.set(
+                this.pointers[0].pageX,
+                this.pointers[0].pageY
+            );
         } else {
             const x = 0.5 * (this.pointers[0].pageX + this.pointers[1].pageX);
             const y = 0.5 * (this.pointers[0].pageY + this.pointers[1].pageY);
@@ -563,21 +629,19 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
         }
     }
 
-	handleTouchStartDolly() {
-        const dx = this.pointers[ 0 ].pageX - this.pointers[ 1 ].pageX;
-        const dy = this.pointers[ 0 ].pageY - this.pointers[ 1 ].pageY;
+    handleTouchStartDolly() {
+        const dx = this.pointers[0].pageX - this.pointers[1].pageX;
+        const dy = this.pointers[0].pageY - this.pointers[1].pageY;
 
-        const distance = Math.sqrt( dx * dx + dy * dy );
+        const distance = Math.sqrt(dx * dx + dy * dy);
 
-        this.dollyStart.set( 0, distance );
+        this.dollyStart.set(0, distance);
     }
 
     handleTouchStartDollyRotate() {
-        if (this.enableDolly)
-            this.handleTouchStartDolly();
+        if (this.enableDolly) this.handleTouchStartDolly();
 
-        if (this.enableRotate)
-            this.handleTouchStartRotate();
+        if (this.enableRotate) this.handleTouchStartRotate();
     }
 
     handleTouchMoveRotate(event: PointerEvent) {
@@ -606,7 +670,10 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
         const distance = Math.sqrt(dx * dx + dy * dy);
 
         this.dollyEnd.set(0, distance);
-        this.dollyDelta.set(0, Math.pow(this.dollyEnd.y / this.dollyStart.y, this.dollySpeed));
+        this.dollyDelta.set(
+            0,
+            Math.pow(this.dollyEnd.y / this.dollyStart.y, this.dollySpeed)
+        );
 
         this.dollyOut(this.dollyDelta.y);
 
@@ -614,43 +681,35 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
     }
 
     handleTouchMoveDollyRotate(event: PointerEvent) {
-        if (this.enableDolly)
-            this.handleTouchMoveDolly(event);
+        if (this.enableDolly) this.handleTouchMoveDolly(event);
 
-        if (this.enableRotate)
-            this.handleTouchMoveRotate(event);
+        if (this.enableRotate) this.handleTouchMoveRotate(event);
     }
 
     //
     // event handlers - FSM: listen for events and reset state
     //
     onPointerDown = (event: PointerEvent) => {
-        if (!this.enabled)
-            return;
+        if (!this.enabled) return;
 
         if (this.pointers.length === 0) {
             this.dragging = false;
             this.domElement.setPointerCapture(event.pointerId);
-            this.domElement.addEventListener('pointermove', this.onPointerMove);
-            this.domElement.addEventListener('pointerup', this.onPointerUp);
+            this.domElement.addEventListener("pointermove", this.onPointerMove);
+            this.domElement.addEventListener("pointerup", this.onPointerUp);
         }
 
         this.addPointer(event);
-        if (event.pointerType === 'touch')
-            this.onTouchStart(event);
-        else
-            this.onMouseDown(event);
-    }
+        if (event.pointerType === "touch") this.onTouchStart(event);
+        else this.onMouseDown(event);
+    };
 
     onPointerMove = (event: PointerEvent) => {
-        if (!this.enabled)
-            return;
+        if (!this.enabled) return;
 
-        if (event.pointerType === 'touch')
-            this.onTouchMove(event);
-        else
-            this.onMouseMove(event);
-    }
+        if (event.pointerType === "touch") this.onTouchMove(event);
+        else this.onMouseMove(event);
+    };
 
     onPointerUp = (event: PointerEvent) => {
         this.removePointer(event);
@@ -658,18 +717,20 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
         if (this.pointers.length === 0) {
             this.domElement.releasePointerCapture(event.pointerId);
 
-            this.domElement.removeEventListener('pointermove', this.onPointerMove);
-            this.domElement.removeEventListener('pointerup', this.onPointerUp);
-
+            this.domElement.removeEventListener(
+                "pointermove",
+                this.onPointerMove
+            );
+            this.domElement.removeEventListener("pointerup", this.onPointerUp);
         }
         this.dispatchEvent(PlanetMapControls.endEvent);
         this.state = STATE.NONE;
         this.dragging = false;
-    }
+    };
 
     onPointerCancel = (event: PointerEvent) => {
         this.removePointer(event);
-    }
+    };
 
     onMouseDown(event: PointerEvent) {
         let mouseAction = -1;
@@ -687,15 +748,13 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
 
         switch (mouseAction) {
             case MOUSE.DOLLY:
-                if (!this.enableDolly)
-                    return;
+                if (!this.enableDolly) return;
                 this.handleMouseDownDolly(event);
                 this.state = STATE.DOLLY;
                 break;
 
             case MOUSE.ROTATE:
-                if (!this.enableRotate)
-                    return;
+                if (!this.enableRotate) return;
                 this.handleMouseDownRotate(event);
                 this.state = STATE.ROTATE;
                 break;
@@ -707,7 +766,6 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
 
             default:
                 this.state = STATE.NONE;
-
         }
 
         if (this.state !== STATE.NONE)
@@ -715,13 +773,11 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
     }
 
     onMouseMove(event: PointerEvent) {
-        if (!this.enabled)
-            return;
+        if (!this.enabled) return;
 
         switch (this.state) {
             case STATE.ROTATE:
-                if (!this.enableRotate)
-                    return;
+                if (!this.enableRotate) return;
                 this.handleMouseMoveRotate(event);
                 break;
             case STATE.PAN:
@@ -738,17 +794,16 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
         this.dispatchEvent(PlanetMapControls.startEvent);
         this.handleMouseWheel(event);
         this.dispatchEvent(PlanetMapControls.endEvent);
-    }
+    };
 
     onKeyDown = (event: KeyboardEvent) => {
-        if (!this.enabled)
-            return;
+        if (!this.enabled) return;
         this.handleKeyDown(event);
-    }
+    };
 
     onKeyUp = (event: KeyboardEvent) => {
         this.handleKeyUp(event);
-    }
+    };
 
     onTouchStart(event: PointerEvent) {
         this.trackPointer(event);
@@ -756,8 +811,7 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
             case 1:
                 switch (this.touches.ONE) {
                     case TOUCH.ROTATE:
-                        if (this.enableRotate === false)
-                            return;
+                        if (this.enableRotate === false) return;
                         this.handleTouchStartRotate();
                         this.state = STATE.TOUCH_ROTATE;
                         break;
@@ -769,8 +823,7 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
             case 2:
                 switch (this.touches.TWO) {
                     case TOUCH.DOLLY_ROTATE:
-                        if (!this.enableDolly && !this.enableRotate)
-                            return;
+                        if (!this.enableDolly && !this.enableRotate) return;
                         this.handleTouchStartDollyRotate();
                         this.state = STATE.TOUCH_DOLLY_ROTATE;
                         break;
@@ -790,13 +843,11 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
         this.trackPointer(event);
         switch (this.state) {
             case STATE.TOUCH_ROTATE:
-                if (!this.enableRotate)
-                    return;
+                if (!this.enableRotate) return;
                 this.handleTouchMoveRotate(event);
                 break;
             case STATE.TOUCH_DOLLY_ROTATE:
-                if (!this.enableDolly && !this.enableRotate)
-                    return;
+                if (!this.enableDolly && !this.enableRotate) return;
                 this.handleTouchMoveDollyRotate(event);
                 break;
             default:
@@ -805,10 +856,9 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
     }
 
     onContextMenu = (event: Event) => {
-        if (this.enabled === false)
-            return;
+        if (this.enabled === false) return;
         event.preventDefault();
-    }
+    };
 
     protected addPointer(event: PointerEvent) {
         this.pointers.push(event);
@@ -834,7 +884,10 @@ export class PlanetMapControls extends EventDispatcher<{ change: object, start: 
     }
 
     getSecondPointerPosition(event: PointerEvent) {
-        const pointer = (event.pointerId === this.pointers[0].pointerId) ? this.pointers[1] : this.pointers[0];
+        const pointer =
+            event.pointerId === this.pointers[0].pointerId
+                ? this.pointers[1]
+                : this.pointers[0];
         return this.pointerPositions[pointer.pointerId];
     }
 }

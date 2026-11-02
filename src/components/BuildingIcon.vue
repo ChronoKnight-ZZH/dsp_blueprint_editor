@@ -1,23 +1,29 @@
 <template>
-    <div class="icon" :class="{'has-count': props.count !== undefined}" :title="props.alt">
-        <img :src="src" :alt="props.alt" loading="lazy">
-        <div v-if="props.count !== undefined" class="count">{{props.count === 1 ? '' : props.count}}</div>
+    <div
+        class="icon"
+        :class="{ 'has-count': props.count !== undefined }"
+        :title="props.alt"
+    >
+        <img :src="src" :alt="props.alt" loading="lazy" />
+        <div v-if="props.count !== undefined" class="count">
+            {{ props.count === 1 ? "" : props.count }}
+        </div>
     </div>
 </template>
 
 <script lang="ts" setup>
-import { ref, watchEffect } from 'vue';
-import { iconUrl } from '@/data/icons';
+import { ref, watchEffect } from "vue";
+import { iconUrl } from "@/data/icons";
 
 const props = defineProps<{
-    iconId: number,
-    alt?: string,
-    count?: number,
+    iconId: number;
+    alt?: string;
+    count?: number;
 }>();
 
-const src = ref('');
+const src = ref("");
 watchEffect(async () => {
-    src.value = '';
+    src.value = "";
     src.value = await iconUrl(props.iconId);
 });
 </script>
@@ -29,7 +35,7 @@ watchEffect(async () => {
     width: 2.5rem;
 
     &.has-count {
-        padding-bottom: .4em;
+        padding-bottom: 0.4em;
     }
 
     img {

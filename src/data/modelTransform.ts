@@ -26,8 +26,8 @@
  *   align ：'height'（默认，按元数据盒高度等比缩放）| 'none'（保持原始比例）
  */
 
-export type ModelUpAxis = 'y' | 'z';
-export type ModelAlign = 'height' | 'none';
+export type ModelUpAxis = "y" | "z";
+export type ModelAlign = "height" | "none";
 
 export interface ModelTransform {
     /** 左右偏移，单位：格（+x 向右） */
@@ -53,7 +53,13 @@ export interface ModelTransform {
 
 /** 全 0 变换：表里没有登记的 modelIndex 一律用它（行为与未接入本表时完全一致） */
 export const ZERO_MODEL_TRANSFORM: Readonly<ModelTransform> = Object.freeze({
-    x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1,
+    x: 0,
+    y: 0,
+    z: 0,
+    pitch: 0,
+    yaw: 0,
+    roll: 0,
+    scale: 1,
 });
 
 /**

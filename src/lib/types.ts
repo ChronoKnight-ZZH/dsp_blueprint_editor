@@ -1,6 +1,6 @@
-import type { Matrix4 } from 'three';
-import type { BlueprintArea, BlueprintData } from '@/blueprint/parser';
-import type { ViewerRenderSettings } from '@/renderSettingsTypes';
+import type { Matrix4 } from "three";
+import type { BlueprintArea, BlueprintData } from "@/blueprint/parser";
+import type { ViewerRenderSettings } from "@/renderSettingsTypes";
 
 /**
  * 公开类型定义。
@@ -8,7 +8,7 @@ import type { ViewerRenderSettings } from '@/renderSettingsTypes';
  * 设置类型复用 `@/renderSettingsTypes`（纯类型、不 import vue），
  * 保证 `src/lib/**` 整体不依赖 Vue（方案 D1）。
  */
-export type { ViewerRenderSettings } from '@/renderSettingsTypes';
+export type { ViewerRenderSettings } from "@/renderSettingsTypes";
 
 /** 容器解析与初始化选项 */
 export interface ViewerOptions {
@@ -92,7 +92,7 @@ export interface BuildingInfoPayload {
 }
 
 /** 3D 场景主题名（对齐 v1） */
-export type ThemeName = 'dark' | 'light' | 'auto';
+export type ThemeName = "dark" | "light" | "auto";
 
 /** 3D 场景主题色（对齐 v1 的 `ThemeColors`） */
 export interface ThemeColors {
@@ -128,7 +128,7 @@ export interface ViewerCallbacks {
 }
 
 export interface RebuildInfo {
-    reason: 'load' | 'settings' | 'data' | 'models';
+    reason: "load" | "settings" | "data" | "models";
     buildingCount: number;
     unknownModelIndexes: number[];
     durationMs: number;
@@ -138,41 +138,41 @@ export interface BlueprintLoadResult {
     /** 建筑总数 */
     buildingCount: number;
     areas: BlueprintArea[];
-    header: BlueprintData['header'];
+    header: BlueprintData["header"];
     /** 缺少 buildingMeta 的 modelIndex：已按隐藏占位处理，不参与拾取 */
     unknownModelIndexes: number[];
     /** 非致命问题（资源缺失等），已去重 */
     warnings: string[];
 }
 
-export type ViewerErrorPhase = 'parse' | 'position' | 'build' | 'lifecycle';
+export type ViewerErrorPhase = "parse" | "position" | "build" | "lifecycle";
 
 export type ViewerErrorCode =
     // 解析阶段
-    | 'invalid-start'
-    | 'header-too-short'
-    | 'checksum-missing'
-    | 'checksum-mismatch'
-    | 'buffer-overflow'
-    | 'parse-failed'
+    | "invalid-start"
+    | "header-too-short"
+    | "checksum-missing"
+    | "checksum-mismatch"
+    | "buffer-overflow"
+    | "parse-failed"
     // JSON 导入（loadBlueprintJSON / parseBlueprintJSON）
-    | 'json-syntax'
-    | 'json-shape'
+    | "json-syntax"
+    | "json-shape"
     // 定位阶段
-    | 'no-root-area'
-    | 'no-longitude'
-    | 'inconsistent-area'
+    | "no-root-area"
+    | "no-longitude"
+    | "inconsistent-area"
     // 构建阶段
-    | 'build-failed'
+    | "build-failed"
     // 生命周期
-    | 'no-container'
-    | 'no-webgl'
-    | 'already-disposed'
+    | "no-container"
+    | "no-webgl"
+    | "already-disposed"
     // 查询（selectBuilding / focusBuilding / getBuildingInfo）
-    | 'not-loaded'
-    | 'building-not-found'
+    | "not-loaded"
+    | "building-not-found"
     /** 建筑存在，但没有可渲染矩阵（未知 modelIndex 的占位盒在球心），无法定位 */
-    | 'not-renderable';
+    | "not-renderable";
 
 /**
  * 按建筑标识定位的结果（`selectBuilding` / `focusBuilding`）。

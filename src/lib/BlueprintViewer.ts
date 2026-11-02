@@ -1,15 +1,30 @@
-import type { PerspectiveCamera } from 'three';
-import type { BlueprintData } from '@/blueprint/parser';
-import { fromStr } from '@/blueprint/parser';
-import type { ViewerRenderSettings } from '@/renderSettingsTypes';
-import { RenderCore, RenderPhaseError } from './core/RenderCore';
-import type { RebuildReason } from './core/RenderCore';
-import { JSONImportError, parseBlueprintJSON, stringifyBlueprintJSON } from './blueprintJSON';
+import type { PerspectiveCamera } from "three";
+import type { BlueprintData } from "@/blueprint/parser";
+import { fromStr } from "@/blueprint/parser";
+import type { ViewerRenderSettings } from "@/renderSettingsTypes";
+import { RenderCore, RenderPhaseError } from "./core/RenderCore";
+import type { RebuildReason } from "./core/RenderCore";
+import {
+    JSONImportError,
+    parseBlueprintJSON,
+    stringifyBlueprintJSON,
+} from "./blueprintJSON";
 import type {
-    BlueprintLoadOutcome, BlueprintLoadResult, BuildingInfoPayload, BuildingLocateResult,
-    FocusOptions, SettingsPort, ThemeColors, ThemeName, ViewerCallbacks, ViewerError,
-    ViewerErrorCode, ViewerErrorPhase, ViewerOptions, ViewerQueryResult,
-} from './types';
+    BlueprintLoadOutcome,
+    BlueprintLoadResult,
+    BuildingInfoPayload,
+    BuildingLocateResult,
+    FocusOptions,
+    SettingsPort,
+    ThemeColors,
+    ThemeName,
+    ViewerCallbacks,
+    ViewerError,
+    ViewerErrorCode,
+    ViewerErrorPhase,
+    ViewerOptions,
+    ViewerQueryResult,
+} from "./types";
 
 /** 默认设置：与 `@/renderSettings` 的默认值保持一致 */
 const DEFAULT_SETTINGS: ViewerRenderSettings = {
@@ -24,7 +39,9 @@ class LocalSettingsPort {
     constructor(initial: Partial<ViewerRenderSettings>) {
         this.value = { ...DEFAULT_SETTINGS, ...initial };
     }
-    read(): ViewerRenderSettings { return this.value; }
+    read(): ViewerRenderSettings {
+        return this.value;
+    }
     write(patch: Partial<ViewerRenderSettings>): void {
         this.value = { ...this.value, ...patch };
     }
@@ -43,49 +60,52 @@ function classifyError(e: unknown, phase: ViewerErrorPhase): ViewerError {
 
     // JSON 导入错误自带 code（json-syntax / json-shape）
     if (e instanceof JSONImportError)
-        return { code: e.code, phase: 'parse', message: e.message, cause: e };
+        return { code: e.code, phase: "parse", message: e.message, cause: e };
 
     const message = e instanceof Error ? e.message : String(e);
     const cause = e;
 
     const parseRules: [string, ViewerErrorCode][] = [
-        ['Invalid start', 'invalid-start'],
-        ['Header too short', 'header-too-short'],
-        ['Checksum not found', 'checksum-missing'],
-        ['Checksum mismatch', 'checksum-mismatch'],
-        ['overflow', 'buffer-overflow'],
-        ['out of range', 'buffer-overflow'],
+        ["Invalid start", "invalid-start"],
+        ["Header too short", "header-too-short"],
+        ["Checksum not found", "checksum-missing"],
+        ["Checksum mismatch", "checksum-mismatch"],
+        ["overflow", "buffer-overflow"],
+        ["out of range", "buffer-overflow"],
     ];
-    if (phase === 'parse') {
+    if (phase === "parse") {
         for (const [needle, code] of parseRules) {
             if (message.includes(needle))
                 return { code, phase, message, cause };
         }
-        return { code: 'parse-failed', phase, message, cause };
+        return { code: "parse-failed", phase, message, cause };
     }
 
     const positionRules: [string, ViewerErrorCode][] = [
-        ['No root area', 'no-root-area'],
-        ['No suitable longitude', 'no-longitude'],
-        ['same segments as its parent', 'inconsistent-area'],
-        ['anchorLocalOffsetY', 'inconsistent-area'],
+        ["No root area", "no-root-area"],
+        ["No suitable longitude", "no-longitude"],
+        ["same segments as its parent", "inconsistent-area"],
+        ["anchorLocalOffsetY", "inconsistent-area"],
     ];
-    if (phase === 'position') {
+    if (phase === "position") {
         for (const [needle, code] of positionRules) {
             if (message.includes(needle))
                 return { code, phase, message, cause };
         }
     }
 
-    return { code: 'build-failed', phase: phase === 'build' ? 'build' : phase, message, cause };
+    return {
+        code: "build-failed",
+        phase: phase === "build" ? "build" : phase,
+        message,
+        cause,
+    };
 }
 
 /** 解析容器参数 */
 function resolveContainer(container: HTMLElement | string): HTMLElement | null {
-    if (typeof container !== 'string')
-        return container;
-    if (typeof document === 'undefined')
-        return null;
+    if (typeof container !== "string") return container;
+    if (typeof document === "undefined") return null;
     return document.querySelector<HTMLElement>(container);
 }
 
@@ -116,9 +136,15 @@ export class BlueprintViewer {
         // 平铺字段是 initialSettings 的语法糖；用条件展开构造，
         // 避免对 `ViewerRenderSettings` 的 readonly 属性做赋值（TS2540）
         const flatInitial: Partial<ViewerRenderSettings> = {
-            ...(options.showRealModels !== undefined ? { showRealModels: options.showRealModels } : {}),
-            ...(options.texturesEnabled !== undefined ? { texturesEnabled: options.texturesEnabled } : {}),
-            ...(options.maxInstancesPerModel !== undefined ? { maxInstancesPerModel: options.maxInstancesPerModel } : {}),
+            ...(options.showRealModels !== undefined
+                ? { showRealModels: options.showRealModels }
+                : {}),
+            ...(options.texturesEnabled !== undefined
+                ? { texturesEnabled: options.texturesEnabled }
+                : {}),
+            ...(options.maxInstancesPerModel !== undefined
+                ? { maxInstancesPerModel: options.maxInstancesPerModel }
+                : {}),
         };
 
         const initial = { ...(options.initialSettings ?? {}), ...flatInitial };
@@ -127,8 +153,8 @@ export class BlueprintViewer {
         const el = resolveContainer(options.container);
         if (el === null) {
             this.initError = {
-                code: 'no-container',
-                phase: 'lifecycle',
+                code: "no-container",
+                phase: "lifecycle",
                 message: `找不到容器元素：${String(options.container)}`,
             };
             this.core = null;
@@ -144,30 +170,35 @@ export class BlueprintViewer {
                 autoResize: options.autoResize,
                 pixelRatio: options.pixelRatio,
                 callbacks: {
-                    onBuildingSelect: pick => this.callbacks.onBuildingSelect?.(pick),
-                    onBuildingRemove: index => this.callbacks.onBuildingRemove?.(index),
+                    onBuildingSelect: (pick) =>
+                        this.callbacks.onBuildingSelect?.(pick),
+                    onBuildingRemove: (index) =>
+                        this.callbacks.onBuildingRemove?.(index),
                     onCameraChange: () => this.callbacks.onCameraChange?.(),
-                    onRebuild: info => this.callbacks.onRebuild?.({
-                        reason: info.reason as RebuildReason,
-                        buildingCount: info.buildingCount,
-                        unknownModelIndexes: info.unknownModelIndexes,
-                        durationMs: info.durationMs,
-                    }),
+                    onRebuild: (info) =>
+                        this.callbacks.onRebuild?.({
+                            reason: info.reason as RebuildReason,
+                            buildingCount: info.buildingCount,
+                            unknownModelIndexes: info.unknownModelIndexes,
+                            durationMs: info.durationMs,
+                        }),
                 },
             });
             // 对齐 v1 构造参数 width/height：显式尺寸优先于容器尺寸
             if (options.width !== undefined || options.height !== undefined) {
                 const rect = el.getBoundingClientRect();
-                this.core.setSize(options.width ?? rect.width, options.height ?? rect.height);
+                this.core.setSize(
+                    options.width ?? rect.width,
+                    options.height ?? rect.height
+                );
             }
             // 对齐 v1 构造参数 theme：默认 dark
-            this.core.setTheme(options.theme ?? 'dark');
-        }
-        catch (e) {
+            this.core.setTheme(options.theme ?? "dark");
+        } catch (e) {
             // 例如 WebGL 不可用
             this.initError = {
-                code: 'no-webgl',
-                phase: 'lifecycle',
+                code: "no-webgl",
+                phase: "lifecycle",
                 message: e instanceof Error ? e.message : String(e),
                 cause: e,
             };
@@ -179,15 +210,13 @@ export class BlueprintViewer {
     /** 从蓝图字符串加载（内部 trim；失败返回结构化错误） */
     loadBlueprint(str: string): BlueprintLoadOutcome {
         const guard = this.guard();
-        if (guard !== null)
-            return guard;
+        if (guard !== null) return guard;
 
         let data: BlueprintData;
         try {
             data = fromStr(str.trim());
-        }
-        catch (e) {
-            return this.fail(classifyError(e, 'parse'));
+        } catch (e) {
+            return this.fail(classifyError(e, "parse"));
         }
         return this.applyData(data);
     }
@@ -195,8 +224,7 @@ export class BlueprintViewer {
     /** 直接注入已解析的数据（总是重建，不做引用比较） */
     loadBlueprintData(data: BlueprintData): BlueprintLoadOutcome {
         const guard = this.guard();
-        if (guard !== null)
-            return guard;
+        if (guard !== null) return guard;
         return this.applyData(data);
     }
 
@@ -209,15 +237,13 @@ export class BlueprintViewer {
      */
     loadBlueprintJSON(text: string): BlueprintLoadOutcome {
         const guard = this.guard();
-        if (guard !== null)
-            return guard;
+        if (guard !== null) return guard;
 
         let data: BlueprintData;
         try {
             data = parseBlueprintJSON(text);
-        }
-        catch (e) {
-            return this.fail(classifyError(e, 'parse'));
+        } catch (e) {
+            return this.fail(classifyError(e, "parse"));
         }
         return this.applyData(data);
     }
@@ -238,8 +264,7 @@ export class BlueprintViewer {
     }
 
     resetCamera(): void {
-        if (this.disposed || this.core === null)
-            return;
+        if (this.disposed || this.core === null) return;
         this.core.resetCamera();
     }
 
@@ -255,11 +280,10 @@ export class BlueprintViewer {
      */
     selectBuilding(index: number | null): BuildingLocateResult {
         const guard = this.guard();
-        if (guard !== null)
-            return guard;
+        if (guard !== null) return guard;
         const core = this.core;
         if (core === null)
-            return this.failLocate('no-webgl', '渲染内核未初始化');
+            return this.failLocate("no-webgl", "渲染内核未初始化");
 
         if (index === null) {
             core.clearSelection();
@@ -267,11 +291,14 @@ export class BlueprintViewer {
         }
 
         if (this.data === null)
-            return this.failLocate('not-loaded', '尚未加载蓝图');
+            return this.failLocate("not-loaded", "尚未加载蓝图");
 
         const resolved = this.resolveIndex(index);
         if (resolved === null)
-            return this.failLocate('building-not-found', `找不到建筑：${index}`);
+            return this.failLocate(
+                "building-not-found",
+                `找不到建筑：${index}`
+            );
 
         core.setSelectedIndex(resolved);
         return { ok: true, index: resolved };
@@ -289,13 +316,15 @@ export class BlueprintViewer {
      *
      * 失败：`not-loaded`、`building-not-found`、`not-renderable`（未知 modelIndex，镜头不动）、`already-disposed`。
      */
-    focusBuilding(index: number | null, options: FocusOptions = {}): BuildingLocateResult {
+    focusBuilding(
+        index: number | null,
+        options: FocusOptions = {}
+    ): BuildingLocateResult {
         const guard = this.guard();
-        if (guard !== null)
-            return guard;
+        if (guard !== null) return guard;
         const core = this.core;
         if (core === null)
-            return this.failLocate('no-webgl', '渲染内核未初始化');
+            return this.failLocate("no-webgl", "渲染内核未初始化");
 
         if (index === null) {
             core.resetCamera();
@@ -303,19 +332,26 @@ export class BlueprintViewer {
         }
 
         if (this.data === null)
-            return this.failLocate('not-loaded', '尚未加载蓝图');
+            return this.failLocate("not-loaded", "尚未加载蓝图");
 
         const resolved = this.resolveIndex(index);
         if (resolved === null)
-            return this.failLocate('building-not-found', `找不到建筑：${index}`);
+            return this.failLocate(
+                "building-not-found",
+                `找不到建筑：${index}`
+            );
         if (core.isUnknownModel(resolved))
-            return this.failLocate('not-renderable', `建筑 ${index} 没有 buildingMeta，无法定位`);
+            return this.failLocate(
+                "not-renderable",
+                `建筑 ${index} 没有 buildingMeta，无法定位`
+            );
 
-        if (options.select !== false)
-            core.setSelectedIndex(resolved);
+        if (options.select !== false) core.setSelectedIndex(resolved);
 
         const ok = core.focusBuilding(resolved, options.distance);
-        return ok ? { ok: true, index: resolved } : this.failLocate('building-not-found', `定位失败：${index}`);
+        return ok
+            ? { ok: true, index: resolved }
+            : this.failLocate("building-not-found", `定位失败：${index}`);
     }
 
     /** 当前选中建筑的数组下标；无选中或未加载返回 `null` */
@@ -330,19 +366,24 @@ export class BlueprintViewer {
      */
     getBuildingInfo(index: number): ViewerQueryResult<BuildingInfoPayload> {
         const guard = this.guard();
-        if (guard !== null)
-            return guard;
+        if (guard !== null) return guard;
         const data = this.data;
         const core = this.core;
         if (data === null || core === null)
-            return this.failQuery('not-loaded', '尚未加载蓝图');
+            return this.failQuery("not-loaded", "尚未加载蓝图");
 
         const info = core.getBuildingInfo(index);
         if (info === null) {
             const building = data.buildings[index];
             if (building === undefined)
-                return this.failQuery('building-not-found', `找不到建筑：${index}`);
-            return this.failQuery('not-renderable', `建筑 ${index} 没有可渲染矩阵（未知 modelIndex）`);
+                return this.failQuery(
+                    "building-not-found",
+                    `找不到建筑：${index}`
+                );
+            return this.failQuery(
+                "not-renderable",
+                `建筑 ${index} 没有可渲染矩阵（未知 modelIndex）`
+            );
         }
 
         const building = data.buildings[index];
@@ -400,8 +441,7 @@ export class BlueprintViewer {
 
     /** 当前生效的主题色（对齐 v1 `getTheme`）；未初始化或已销毁时返回 `null` */
     getTheme(): ThemeColors | null {
-        if (this.disposed || this.core === null)
-            return null;
+        if (this.disposed || this.core === null) return null;
         return this.core.getTheme();
     }
 
@@ -411,29 +451,25 @@ export class BlueprintViewer {
      * 未初始化时返回 `null`。内部会先渲染一帧再取图，可直接在 rAF 之外调用。
      */
     toDataURL(): string | null {
-        if (this.disposed || this.core === null)
-            return null;
+        if (this.disposed || this.core === null) return null;
         return this.core.toDataURL();
     }
 
     /** 导出当前画面为 Blob（对齐 v1 `toBlob`）；未初始化时 resolve `null` */
     toBlob(): Promise<Blob | null> {
-        if (this.disposed || this.core === null)
-            return Promise.resolve(null);
+        if (this.disposed || this.core === null) return Promise.resolve(null);
         return this.core.toBlob();
     }
 
     setRenderSettings(partial: Partial<ViewerRenderSettings>): void {
-        if (this.disposed || this.core === null)
-            return;
+        if (this.disposed || this.core === null) return;
         try {
             this.port.write(partial);
             // 生效路径见方案 §4.1：Set 里只有 showRealModels / maxInstancesPerModel 需要重建，
             // texturesEnabled 由 RenderCore 内部的材质重挂完成，不触发重建
             this.core.setRenderSettings(this.port.read());
-        }
-        catch (e) {
-            this.reportError(classifyError(e, 'build'));
+        } catch (e) {
+            this.reportError(classifyError(e, "build"));
         }
     }
 
@@ -443,23 +479,25 @@ export class BlueprintViewer {
      * **默认整体替换**（对齐 v1 `setCallbacks`）；传 `{ merge: true }` 则是合并（v2 旧行为）。
      */
     setCallbacks(cbs: ViewerCallbacks, opts?: { merge?: boolean }): void {
-        this.callbacks = opts?.merge === true ? { ...this.callbacks, ...cbs } : cbs;
+        this.callbacks =
+            opts?.merge === true ? { ...this.callbacks, ...cbs } : cbs;
         this.core?.setCallbacks({
-            onBuildingSelect: pick => this.callbacks.onBuildingSelect?.(pick),
-            onBuildingRemove: index => this.callbacks.onBuildingRemove?.(index),
+            onBuildingSelect: (pick) => this.callbacks.onBuildingSelect?.(pick),
+            onBuildingRemove: (index) =>
+                this.callbacks.onBuildingRemove?.(index),
             onCameraChange: () => this.callbacks.onCameraChange?.(),
-            onRebuild: info => this.callbacks.onRebuild?.({
-                reason: info.reason as RebuildReason,
-                buildingCount: info.buildingCount,
-                unknownModelIndexes: info.unknownModelIndexes,
-                durationMs: info.durationMs,
-            }),
+            onRebuild: (info) =>
+                this.callbacks.onRebuild?.({
+                    reason: info.reason as RebuildReason,
+                    buildingCount: info.buildingCount,
+                    unknownModelIndexes: info.unknownModelIndexes,
+                    durationMs: info.durationMs,
+                }),
         });
     }
 
     dispose(): void {
-        if (this.disposed)
-            return;
+        if (this.disposed) return;
         this.disposed = true;
         this.core?.dispose();
         this.data = null;
@@ -472,7 +510,9 @@ export class BlueprintViewer {
     private guard(): { ok: false; error: ViewerError } | null {
         if (this.disposed) {
             const error: ViewerError = {
-                code: 'already-disposed', phase: 'lifecycle', message: 'Viewer 已销毁',
+                code: "already-disposed",
+                phase: "lifecycle",
+                message: "Viewer 已销毁",
             };
             this.reportError(error);
             return { ok: false, error };
@@ -489,14 +529,20 @@ export class BlueprintViewer {
     }
 
     /** 查询类失败（`selectBuilding` / `focusBuilding` 共用） */
-    private failLocate(code: ViewerErrorCode, message: string): { ok: false; error: ViewerError } {
-        const error: ViewerError = { code, phase: 'lifecycle', message };
+    private failLocate(
+        code: ViewerErrorCode,
+        message: string
+    ): { ok: false; error: ViewerError } {
+        const error: ViewerError = { code, phase: "lifecycle", message };
         this.reportError(error);
         return { ok: false, error };
     }
 
     /** 查询类失败（`getBuildingInfo` 等返回值类查询用） */
-    private failQuery(code: ViewerErrorCode, message: string): { ok: false; error: ViewerError } {
+    private failQuery(
+        code: ViewerErrorCode,
+        message: string
+    ): { ok: false; error: ViewerError } {
         return this.failLocate(code, message);
     }
 
@@ -509,11 +555,9 @@ export class BlueprintViewer {
      */
     private resolveIndex(index: number): number | null {
         const buildings = this.data?.buildings;
-        if (buildings === undefined)
-            return null;
-        if (index >= 0 && index < buildings.length)
-            return index;
-        const found = buildings.findIndex(b => b.index === index);
+        if (buildings === undefined) return null;
+        if (index >= 0 && index < buildings.length) return index;
+        const found = buildings.findIndex((b) => b.index === index);
         return found === -1 ? null : found;
     }
 
@@ -521,22 +565,22 @@ export class BlueprintViewer {
         const core = this.core;
         if (core === null) {
             return this.fail({
-                code: 'no-webgl', phase: 'lifecycle', message: '渲染内核未初始化',
+                code: "no-webgl",
+                phase: "lifecycle",
+                message: "渲染内核未初始化",
             });
         }
 
         // 定位阶段与构建阶段分开捕获，便于区分「蓝图数据坏了」与「渲染内部缺陷」
         try {
             core.setBlueprintData(data);
-        }
-        catch (e) {
-            return this.fail(classifyError(e, 'build'));
+        } catch (e) {
+            return this.fail(classifyError(e, "build"));
         }
 
         this.data = data;
 
-        if (!this.keepCamera)
-            core.resetCamera();
+        if (!this.keepCamera) core.resetCamera();
 
         const stats = core.lastBuildStats();
         const result: BlueprintLoadResult = {
@@ -551,13 +595,11 @@ export class BlueprintViewer {
 
     private reportError(error: ViewerError): void {
         const key = `${error.code}:${error.message}`;
-        if (this.warnings.has(key))
-            return;
+        if (this.warnings.has(key)) return;
         this.warnings.add(key);
         try {
             this.callbacks.onError?.(error);
-        }
-        catch {
+        } catch {
             // 宿主回调抛错不影响内部状态
         }
         // 同时留一条控制台记录，便于无回调时排查

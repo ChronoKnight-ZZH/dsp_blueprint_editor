@@ -18,7 +18,13 @@
  * 启发式/默认灰兜住，不会再出现纯白。
  */
 
-import { DataTexture, LinearFilter, RGBAFormat, SRGBColorSpace, UnsignedByteType } from 'three';
+import {
+    DataTexture,
+    LinearFilter,
+    RGBAFormat,
+    SRGBColorSpace,
+    UnsignedByteType,
+} from "three";
 
 /** 中性灰：无任何线索时的默认兜底色 */
 const DEFAULT_COLOR = 0x8f9498;
@@ -35,36 +41,36 @@ const WATER_COLOR = 0x2e6f8e;
  */
 const missingAlbedoColorOverrides: Readonly<Record<string, number>> = {
     // 太空舱：整个 GLB 没有材质，舱体白
-    'space-capsule::': 0xcdd2d8,
+    "space-capsule::": 0xcdd2d8,
     // 传送带：整个 GLB 没有材质，带体深灰
-    'belt-1::': 0x3c4043,
-    'belt-2::': 0x3c4043,
-    'belt-3::': 0x3c4043,
+    "belt-1::": 0x3c4043,
+    "belt-2::": 0x3c4043,
+    "belt-3::": 0x3c4043,
     // 石墙：石灰色
-    'stone-wall::stone-wall': 0x7b776d,
+    "stone-wall::stone-wall": 0x7b776d,
     // 人造恒星发光环：无底色无自发光，用亮青近似原作辉光
-    'fusion-reactor::fusion-reactor-effect': 0xbfe8ff,
+    "fusion-reactor::fusion-reactor-effect": 0xbfe8ff,
     // 自动集装机的 mask 件
-    'piler::piler-mask': 0x6a6f74,
+    "piler::piler-mask": 0x6a6f74,
     // 卫星配电站挂件 / 垂直发射井的无名材质
-    'energy-exchanger-mcl-0::Default-Material': 0x8f9498,
-    'energy-exchanger-mcl-1::Default-Material': 0x8f9498,
-    'energy-exchanger-mcl-2::Default-Material': 0x8f9498,
-    'vertical-launching-silo::DefaultMaterial': 0x8f9498,
+    "energy-exchanger-mcl-0::Default-Material": 0x8f9498,
+    "energy-exchanger-mcl-1::Default-Material": 0x8f9498,
+    "energy-exchanger-mcl-2::Default-Material": 0x8f9498,
+    "vertical-launching-silo::DefaultMaterial": 0x8f9498,
 };
 
 /** 按 `<模型名>::<材质名>` 解析兜底色（导出供测试与诊断） */
-export function missingAlbedoColor(modelName: string, materialName: string): number {
-    const override = missingAlbedoColorOverrides[`${modelName}::${materialName}`];
-    if (override !== undefined)
-        return override;
+export function missingAlbedoColor(
+    modelName: string,
+    materialName: string
+): number {
+    const override =
+        missingAlbedoColorOverrides[`${modelName}::${materialName}`];
+    if (override !== undefined) return override;
     const name = materialName.toLowerCase();
-    if (name.includes('black'))
-        return BLACK_COLOR;
-    if (name.includes('glass'))
-        return GLASS_COLOR;
-    if (name.includes('water'))
-        return WATER_COLOR;
+    if (name.includes("black")) return BLACK_COLOR;
+    if (name.includes("glass")) return GLASS_COLOR;
+    if (name.includes("water")) return WATER_COLOR;
     return DEFAULT_COLOR;
 }
 
@@ -86,7 +92,7 @@ function buildSolidTexture(color: number): DataTexture {
     texture.magFilter = LinearFilter;
     texture.minFilter = LinearFilter;
     texture.generateMipmaps = false;
-    texture.name = `fallback-albedo-${color.toString(16).padStart(6, '0')}`;
+    texture.name = `fallback-albedo-${color.toString(16).padStart(6, "0")}`;
     // 与 textureMaps.ts 的共享贴图约定一致：不随单个材质释放
     texture.userData.sharedTexture = true;
     texture.needsUpdate = true;
@@ -94,7 +100,10 @@ function buildSolidTexture(color: number): DataTexture {
 }
 
 /** 解析并取（带缓存的）兜底纯色贴图；同一颜色全局只构造一次 */
-export function missingAlbedoTexture(modelName: string, materialName: string): DataTexture {
+export function missingAlbedoTexture(
+    modelName: string,
+    materialName: string
+): DataTexture {
     const color = missingAlbedoColor(modelName, materialName);
     let texture = textureCache.get(color);
     if (texture === undefined) {

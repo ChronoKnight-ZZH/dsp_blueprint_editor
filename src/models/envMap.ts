@@ -15,8 +15,8 @@ import {
     EquirectangularReflectionMapping,
     PMREMGenerator,
     SRGBColorSpace,
-} from 'three';
-import type { Texture, WebGLRenderer } from 'three';
+} from "three";
+import type { Texture, WebGLRenderer } from "three";
 
 let buildingEnvironment: Texture | null = null;
 
@@ -36,21 +36,22 @@ export function setBuildingEnvironment(texture: Texture | null): void {
  *
  * 失败（无 WebGL / PMREM 不支持）时返回 null，调用方按「无环境反射」降级。
  */
-export function createNeutralEnvironment(renderer: WebGLRenderer): Texture | null {
+export function createNeutralEnvironment(
+    renderer: WebGLRenderer
+): Texture | null {
     try {
-        const canvas = document.createElement('canvas');
+        const canvas = document.createElement("canvas");
         canvas.width = 256;
         canvas.height = 128;
-        const context = canvas.getContext('2d');
-        if (context === null)
-            return null;
+        const context = canvas.getContext("2d");
+        if (context === null) return null;
 
         const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
-        gradient.addColorStop(0.0, '#c9d6e5');   // 天顶
-        gradient.addColorStop(0.42, '#f2f4f6');  // 高空散射
-        gradient.addColorStop(0.5, '#dfe2e4');   // 地平线
-        gradient.addColorStop(0.58, '#8b9096');  // 地面反射带
-        gradient.addColorStop(1.0, '#33383d');   // 地面
+        gradient.addColorStop(0.0, "#c9d6e5"); // 天顶
+        gradient.addColorStop(0.42, "#f2f4f6"); // 高空散射
+        gradient.addColorStop(0.5, "#dfe2e4"); // 地平线
+        gradient.addColorStop(0.58, "#8b9096"); // 地面反射带
+        gradient.addColorStop(1.0, "#33383d"); // 地面
         context.fillStyle = gradient;
         context.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -65,9 +66,8 @@ export function createNeutralEnvironment(renderer: WebGLRenderer): Texture | nul
         source.dispose();
 
         return target.texture;
-    }
-    catch (e) {
-        console.warn('[env] 中性环境贴图生成失败，建筑材质将没有环境反射', e);
+    } catch (e) {
+        console.warn("[env] 中性环境贴图生成失败，建筑材质将没有环境反射", e);
         return null;
     }
 }

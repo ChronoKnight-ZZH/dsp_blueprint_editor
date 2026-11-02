@@ -17,7 +17,7 @@
 
 .icon-placeholder {
     border: 1px dashed currentColor;
-    background: #FFF4;
+    background: #fff4;
     padding-top: 100%;
 }
 
@@ -47,7 +47,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        overflow: hidden;      /* 关键：防止内部 img 溢出到相邻格子 */
+        overflow: hidden; /* 关键：防止内部 img 溢出到相邻格子 */
         box-sizing: border-box;
         cursor: pointer;
 
@@ -57,7 +57,7 @@
             height: 100%;
             object-fit: contain;
             display: block;
-            pointer-events: none;   /* 点击事件交给 .icon */
+            pointer-events: none; /* 点击事件交给 .icon */
         }
 
         /* 兼容其他可能的内部元素 */
@@ -88,7 +88,7 @@
     transition: opacity 0.15s;
 
     &.active {
-        opacity: 1.0;
+        opacity: 1;
     }
 
     img {

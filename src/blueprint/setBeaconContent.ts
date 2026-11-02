@@ -21,23 +21,23 @@ export class SetBeaconContentCommand implements Command {
     }
 
     do(_data: BlueprintData, _updater: Updater) {
-        this.building.content = this.newContent && this.newContent.length > 0
-            ? this.newContent
-            : undefined;
+        this.building.content =
+            this.newContent && this.newContent.length > 0
+                ? this.newContent
+                : undefined;
     }
 
     undo(_data: BlueprintData, _updater: Updater) {
-        this.building.content = this.oldContent && this.oldContent.length > 0
-            ? this.oldContent
-            : undefined;
+        this.building.content =
+            this.oldContent && this.oldContent.length > 0
+                ? this.oldContent
+                : undefined;
     }
 
     merge(c: Command): boolean {
         // 合并连续对同一建筑文本的编辑：新命令直接替换目标文本
-        if (!(c instanceof SetBeaconContentCommand))
-            return false;
-        if (c.building !== this.building)
-            return false;
+        if (!(c instanceof SetBeaconContentCommand)) return false;
+        if (c.building !== this.building) return false;
         this.newContent = c.newContent;
         return true;
     }

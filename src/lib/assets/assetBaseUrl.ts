@@ -42,14 +42,12 @@ const scriptBaseUrl: string | null = detectScriptBaseUrl();
 
 function detectScriptBaseUrl(): string | null {
     try {
-        if (typeof document === 'undefined')
-            return null;
+        if (typeof document === "undefined") return null;
         const current = document.currentScript as HTMLScriptElement | null;
         const src = current?.src;
-        if (typeof src === 'string' && src.length > 0)
-            return new URL('.', src).href;
-    }
-    catch {
+        if (typeof src === "string" && src.length > 0)
+            return new URL(".", src).href;
+    } catch {
         // 探测失败不是错误：退到 document.baseURI
     }
     return null;
@@ -64,11 +62,13 @@ function detectScriptBaseUrl(): string | null {
 function detectModuleBaseUrl(): string | null {
     try {
         // 必须用 typeof 守卫：UMD / 编辑器构建 / 单测里这个标识符不存在
-        if (typeof __DSP_LIB_MODULE_URL__ !== 'string' || __DSP_LIB_MODULE_URL__.length === 0)
+        if (
+            typeof __DSP_LIB_MODULE_URL__ !== "string" ||
+            __DSP_LIB_MODULE_URL__.length === 0
+        )
             return null;
-        return new URL('.', __DSP_LIB_MODULE_URL__).href;
-    }
-    catch {
+        return new URL(".", __DSP_LIB_MODULE_URL__).href;
+    } catch {
         // 非法 URL（例如测试里注入了占位串）时静默跳过
     }
     return null;
@@ -76,13 +76,11 @@ function detectModuleBaseUrl(): string | null {
 
 function documentBaseUrl(): string | null {
     try {
-        if (typeof document === 'undefined')
-            return null;
+        if (typeof document === "undefined") return null;
         const baseURI = document.baseURI;
-        if (typeof baseURI === 'string' && baseURI.length > 0)
-            return new URL('.', baseURI).href;
-    }
-    catch {
+        if (typeof baseURI === "string" && baseURI.length > 0)
+            return new URL(".", baseURI).href;
+    } catch {
         // ignore
     }
     return null;
@@ -91,24 +89,24 @@ function documentBaseUrl(): string | null {
 /** 统一成「目录形式」：绝对 URL 或相对路径，末尾一定有 `/` */
 function toDirectoryUrl(raw: string): string {
     const trimmed = raw.trim();
-    if (trimmed === '')
-        return '';
+    if (trimmed === "") return "";
     // 允许宿主写成绝对 URL / 根相对路径 / 相对路径三种形态
     try {
-        if (typeof document !== 'undefined')
-            return new URL(trimmed.endsWith('/') ? trimmed : `${trimmed}/`, document.baseURI).href;
-    }
-    catch {
+        if (typeof document !== "undefined")
+            return new URL(
+                trimmed.endsWith("/") ? trimmed : `${trimmed}/`,
+                document.baseURI
+            ).href;
+    } catch {
         // 没有 document（SSR / 单测）时按字符串处理
     }
-    return trimmed.endsWith('/') ? trimmed : `${trimmed}/`;
+    return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
 }
 
 /** 目录 URL 统一成末尾带 `/` 的形态 */
 function toRootUrl(dirUrl: string): string {
-    if (dirUrl === '')
-        return '';
-    return `${dirUrl.replace(/\/+$/, '')}/`;
+    if (dirUrl === "") return "";
+    return `${dirUrl.replace(/\/+$/, "")}/`;
 }
 
 /**
@@ -117,10 +115,13 @@ function toRootUrl(dirUrl: string): string {
  * @param baseUrl 库产物根目录（含 `models/` 与 `img/` 的那一级）。
  *                传 `null` / `undefined` / `''` 清除配置，回到自动探测。
  */
-export function configureAssetBaseUrl(baseUrl: string | null | undefined): void {
-    configuredBaseUrl = baseUrl === null || baseUrl === undefined || baseUrl.trim() === ''
-        ? null
-        : baseUrl;
+export function configureAssetBaseUrl(
+    baseUrl: string | null | undefined
+): void {
+    configuredBaseUrl =
+        baseUrl === null || baseUrl === undefined || baseUrl.trim() === ""
+            ? null
+            : baseUrl;
 }
 
 /** 当前生效的产物根目录（末尾带 `/`；空串表示「相对当前页面」） */
@@ -130,12 +131,12 @@ export function currentAssetBaseUrl(): string {
 
     // ESM 优先：打包器里 import.meta.url 一定指向本 chunk，比 currentScript 可靠
     // （module script 的 document.currentScript 恒为 null）。
-    const detected = detectModuleBaseUrl() ?? scriptBaseUrl ?? documentBaseUrl();
-    if (detected !== null)
-        return toRootUrl(detected);
+    const detected =
+        detectModuleBaseUrl() ?? scriptBaseUrl ?? documentBaseUrl();
+    if (detected !== null) return toRootUrl(detected);
 
     // 没有任何可探测的基准：退成相对页面的路径，交给浏览器解析
-    return '';
+    return "";
 }
 
 /**
@@ -144,7 +145,7 @@ export function currentAssetBaseUrl(): string {
  * @param relativePath 形如 `models/smelter.glb`、`img/tech/1001.png`
  */
 export function resolveAssetUrl(relativePath: string): string {
-    const path = relativePath.replace(/^\/+/, '');
+    const path = relativePath.replace(/^\/+/, "");
     const root = currentAssetBaseUrl();
-    return root === '' ? path : `${root}${path}`;
+    return root === "" ? path : `${root}${path}`;
 }

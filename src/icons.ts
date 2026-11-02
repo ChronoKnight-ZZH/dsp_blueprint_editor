@@ -1,18 +1,44 @@
-import { InstancedBufferAttribute, InterleavedBuffer, InterleavedBufferAttribute, UniformsUtils, ShaderMaterial, Texture, UniformsLib, Color, ShaderLib, Vector2, Vector3, InstancedBufferGeometry, Mesh } from "three";
+import {
+    InstancedBufferAttribute,
+    InterleavedBuffer,
+    InterleavedBufferAttribute,
+    UniformsUtils,
+    ShaderMaterial,
+    Texture,
+    UniformsLib,
+    Color,
+    ShaderLib,
+    Vector2,
+    Vector3,
+    InstancedBufferGeometry,
+    Mesh,
+} from "three";
 import { BlueprintBuilding } from "./blueprint/parser";
 import { IconTexture } from "./iconTexture";
 
 export class IconsMaterial extends ShaderMaterial {
     sizeAttenuation = true;
 
-    get map() { return this.uniforms.map.value as Texture; }
-    set map(m: Texture) { this.uniforms.map.value = m; }
+    get map() {
+        return this.uniforms.map.value as Texture;
+    }
+    set map(m: Texture) {
+        this.uniforms.map.value = m;
+    }
 
-    get color() { return this.uniforms.diffuse.value as Color; }
-    set color(m: Color) { this.uniforms.diffuse.value = m; }
+    get color() {
+        return this.uniforms.diffuse.value as Color;
+    }
+    set color(m: Color) {
+        this.uniforms.diffuse.value = m;
+    }
 
-    get iMapSize() { return this.uniforms.iMapSize.value as Vector2; }
-    set iMapSize(m: Vector2) { this.uniforms.iMapSize.value = m; }
+    get iMapSize() {
+        return this.uniforms.iMapSize.value as Vector2;
+    }
+    set iMapSize(m: Vector2) {
+        this.uniforms.iMapSize.value = m;
+    }
 
     constructor(map: Texture) {
         super({
@@ -20,7 +46,10 @@ export class IconsMaterial extends ShaderMaterial {
                 UniformsLib.common,
                 {
                     iMapSize: {
-                        value: new Vector2(IconTexture.WIDTH, IconTexture.HEIGHT),
+                        value: new Vector2(
+                            IconTexture.WIDTH,
+                            IconTexture.HEIGHT
+                        ),
                     },
                 },
             ]),
@@ -92,33 +121,49 @@ function updateAttr(attr: InstancedBufferAttribute, index: number) {
 }
 
 function extendAttr(attr: InstancedBufferAttribute, newLength: number) {
-    const newArr = new (attr.array.constructor as Int32ArrayConstructor)(newLength * attr.itemSize);
+    const newArr = new (attr.array.constructor as Int32ArrayConstructor)(
+        newLength * attr.itemSize
+    );
     newArr.set(attr.array);
     attr.array = newArr;
 }
 
 export class IconGeometry extends InstancedBufferGeometry {
-    constructor(length: number, hasScale=true) {
+    constructor(length: number, hasScale = true) {
         super();
         this.instanceCount = 0;
 
         const float32Array = new Float32Array([
-            - 0.5, - 0.5, 0, 0, 0,
-            - 0.5,   0.5, 0, 0, 1,
-              0.5, - 0.5, 0, 1, 0,
-              0.5,   0.5, 0, 1, 1,
+            -0.5, -0.5, 0, 0, 0, -0.5, 0.5, 0, 0, 1, 0.5, -0.5, 0, 1, 0, 0.5,
+            0.5, 0, 1, 1,
         ]);
 
         const interleavedBuffer = new InterleavedBuffer(float32Array, 5);
 
-        this.setIndex([0, 2, 1,  1, 2, 3]);
-        this.setAttribute('position', new InterleavedBufferAttribute(interleavedBuffer, 3, 0, false));
-        this.setAttribute('uv',       new InterleavedBufferAttribute(interleavedBuffer, 2, 3, false));
+        this.setIndex([0, 2, 1, 1, 2, 3]);
+        this.setAttribute(
+            "position",
+            new InterleavedBufferAttribute(interleavedBuffer, 3, 0, false)
+        );
+        this.setAttribute(
+            "uv",
+            new InterleavedBufferAttribute(interleavedBuffer, 2, 3, false)
+        );
 
-        this.setAttribute('iconId', new InstancedBufferAttribute(new Int32Array(length), 1));
-        this.setAttribute('iconPos', new InstancedBufferAttribute(new Float32Array(length * 3), 3));
-        if (hasScale)  // TODO: workaround for iconSubscript
-            this.setAttribute('iconScale', new InstancedBufferAttribute(new Float32Array(length * 2), 2));
+        this.setAttribute(
+            "iconId",
+            new InstancedBufferAttribute(new Int32Array(length), 1)
+        );
+        this.setAttribute(
+            "iconPos",
+            new InstancedBufferAttribute(new Float32Array(length * 3), 3)
+        );
+        if (hasScale)
+            // TODO: workaround for iconSubscript
+            this.setAttribute(
+                "iconScale",
+                new InstancedBufferAttribute(new Float32Array(length * 2), 2)
+            );
     }
 
     private indexMap = new Map<BlueprintBuilding, number>();
@@ -126,25 +171,44 @@ export class IconGeometry extends InstancedBufferGeometry {
 
     reserve(length: number) {
         this.dispose();
-		extendAttr(this.getAttribute('iconId') as InstancedBufferAttribute, length);
-		extendAttr(this.getAttribute('iconPos') as InstancedBufferAttribute, length);
-		extendAttr(this.getAttribute('iconScale') as InstancedBufferAttribute, length);
+        extendAttr(
+            this.getAttribute("iconId") as InstancedBufferAttribute,
+            length
+        );
+        extendAttr(
+            this.getAttribute("iconPos") as InstancedBufferAttribute,
+            length
+        );
+        extendAttr(
+            this.getAttribute("iconScale") as InstancedBufferAttribute,
+            length
+        );
     }
 
     hasIcon(b: BlueprintBuilding) {
         return this.indexMap.has(b);
     }
 
-    addIcon(b: BlueprintBuilding, iconId: number, pos: Vector3, scale: Vector2, update=false) {
+    addIcon(
+        b: BlueprintBuilding,
+        iconId: number,
+        pos: Vector3,
+        scale: Vector2,
+        update = false
+    ) {
         const index = this.nextIndex++;
-        if (index >= this.getAttribute('iconId').count) {
+        if (index >= this.getAttribute("iconId").count) {
             this.reserve(Math.ceil(index * 1.5));
         }
         this.indexMap.set(b, index);
 
-        const idAttr = this.getAttribute('iconId') as InstancedBufferAttribute;
-        const posAttr = this.getAttribute('iconPos') as InstancedBufferAttribute;
-        const scaleAttr = this.getAttribute('iconScale') as InstancedBufferAttribute;
+        const idAttr = this.getAttribute("iconId") as InstancedBufferAttribute;
+        const posAttr = this.getAttribute(
+            "iconPos"
+        ) as InstancedBufferAttribute;
+        const scaleAttr = this.getAttribute(
+            "iconScale"
+        ) as InstancedBufferAttribute;
 
         (idAttr.array as Int32Array)[index] = iconId;
         pos.toArray(posAttr.array, index * 3);
@@ -160,9 +224,8 @@ export class IconGeometry extends InstancedBufferGeometry {
 
     updateIconId(b: BlueprintBuilding, iconId: number) {
         const index = this.indexMap.get(b);
-        if (index === undefined)
-            return;  // 无图标建筑（noIconBuildings）或从未被渲染的建筑，静默跳过
-        const idAttr = this.getAttribute('iconId') as InstancedBufferAttribute;
+        if (index === undefined) return; // 无图标建筑（noIconBuildings）或从未被渲染的建筑，静默跳过
+        const idAttr = this.getAttribute("iconId") as InstancedBufferAttribute;
         (idAttr.array as Int32Array)[index] = iconId;
         updateAttr(idAttr, index);
     }

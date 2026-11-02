@@ -1,4 +1,4 @@
-import { Matrix4, Vector3 } from 'three';
+import { Matrix4, Vector3 } from "three";
 
 /** 分拣器抬升高度（建筑局部空间，沿法线方向） */
 export const INSERTER_HEIGHT = 0.3;

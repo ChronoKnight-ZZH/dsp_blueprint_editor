@@ -1,30 +1,47 @@
-import { BoxGeometry, InstancedBufferAttribute, InstancedMesh, MeshLambertMaterial, WebGLProgramParametersWithUniforms, WebGLRenderer } from "three";
+import {
+    BoxGeometry,
+    InstancedBufferAttribute,
+    InstancedMesh,
+    MeshLambertMaterial,
+    WebGLProgramParametersWithUniforms,
+    WebGLRenderer,
+} from "three";
 
 class CargoGeometry extends BoxGeometry {
-    cargoDistance
+    cargoDistance;
     constructor(count: number) {
         super(0.3, 0.15, 0.4);
-        this.cargoDistance = new InstancedBufferAttribute(new Float32Array(count), 1);
-        this.setAttribute('cargoDistance', this.cargoDistance);
+        this.cargoDistance = new InstancedBufferAttribute(
+            new Float32Array(count),
+            1
+        );
+        this.setAttribute("cargoDistance", this.cargoDistance);
     }
 }
 
 class CargoMaterial extends MeshLambertMaterial {
-    cargoMoveUniform = { value: 0. };
+    cargoMoveUniform = { value: 0 };
 
     // this overrides base class method
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    onBeforeCompile(parameters: WebGLProgramParametersWithUniforms, renderer: WebGLRenderer) {
+    onBeforeCompile(
+        parameters: WebGLProgramParametersWithUniforms,
+        renderer: WebGLRenderer
+    ) {
         parameters.vertexShader = parameters.vertexShader
-            .replace('#include <common>',
-`attribute float cargoDistance;
+            .replace(
+                "#include <common>",
+                `attribute float cargoDistance;
 uniform float cargoMove;
 
-#include <common>`)
-            .replace('#include <skinning_vertex>',
-`#include <skinning_vertex>
+#include <common>`
+            )
+            .replace(
+                "#include <skinning_vertex>",
+                `#include <skinning_vertex>
 transformed.z -= cargoMove * cargoDistance;
-`);
+`
+            );
         parameters.uniforms.cargoMove = this.cargoMoveUniform;
     }
 }
@@ -44,12 +61,10 @@ export class Cargos extends InstancedMesh {
         (this.geometry.cargoDistance.array as Float32Array)[i] = d;
     }
 
-
     public get cargoMove() {
         return this.material.cargoMoveUniform.value;
     }
     public set cargoMove(v) {
         this.material.cargoMoveUniform.value = v;
     }
-
 }

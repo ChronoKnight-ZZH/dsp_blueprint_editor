@@ -1,38 +1,46 @@
 <template>
     <h2 class="overview-header">
-        {{t('包含设施')}}
+        {{ t("包含设施") }}
     </h2>
-    <div class="overview-hint">{{ t('右键点击剔除') }}</div>
-    <p>{{ t('共{total}个', {total}) }}</p>
+    <div class="overview-hint">{{ t("右键点击剔除") }}</div>
+    <p>{{ t("共{total}个", { total }) }}</p>
     <div class="overview-icons">
-        <span v-for="[itemId, count] in buildingCounter" :key="itemId" class="overview-icon-item"
-              :title="t('右键删除全部此类建筑')"
-              @contextmenu.prevent="onIconContextMenu(itemId)">
-            <BuildingIcon :icon-id="itemIconId(itemId)" :alt="itemName(itemId)" :count="count"/>
+        <span
+            v-for="[itemId, count] in buildingCounter"
+            :key="itemId"
+            class="overview-icon-item"
+            :title="t('右键删除全部此类建筑')"
+            @contextmenu.prevent="onIconContextMenu(itemId)"
+        >
+            <BuildingIcon
+                :icon-id="itemIconId(itemId)"
+                :alt="itemName(itemId)"
+                :count="count"
+            />
         </span>
     </div>
 </template>
 
 <script lang="ts" setup>
-import { computed, inject } from 'vue';
-import { useI18n } from 'vue-i18n';
+import { computed, inject } from "vue";
+import { useI18n } from "vue-i18n";
 
-import { commandQueueKey } from '@/define';
-import BuildingIcon from './BuildingIcon.vue';
-import { itemIconId } from '@/data/icons';
-import { itemName } from '@/i18n';
+import { commandQueueKey } from "@/define";
+import BuildingIcon from "./BuildingIcon.vue";
+import { itemIconId } from "@/data/icons";
+import { itemName } from "@/i18n";
 
 const { t } = useI18n();
 
 const emit = defineEmits<{
-    (e: 'remove-by-item', itemId: number): void;
+    (e: "remove-by-item", itemId: number): void;
 }>();
 
 const commandQueue = inject(commandQueueKey)!.value!;
 
 const onIconContextMenu = (itemId: number) => {
     // 右键列表图标：一键剔除全部同类建筑（可 Ctrl+Z 撤销）
-    emit('remove-by-item', itemId);
+    emit("remove-by-item", itemId);
 };
 
 const total = computed(() => {
@@ -79,7 +87,7 @@ const buildingCounter = computed(() => {
     border-radius: 4px;
 
     &:hover {
-        outline: 1px solid rgba(230, 80, 80, .7);
+        outline: 1px solid rgba(230, 80, 80, 0.7);
     }
 }
 </style>

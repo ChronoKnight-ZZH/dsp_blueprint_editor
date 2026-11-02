@@ -43,7 +43,11 @@ for (const [a, b] of upgradeEdges) {
 }
 
 /** 从 start 出发走 n 步能到达的节点（恰好 n 步的前沿，不含自身；与说明中的 reachN 语义一致） */
-function reachN(adj: Record<number, number[]>, start: number, n: number): number[] {
+function reachN(
+    adj: Record<number, number[]>,
+    start: number,
+    n: number
+): number[] {
     let cur = new Set<number>([start]);
     for (let i = 0; i < n; i++) {
         const next = new Set<number>();
@@ -74,15 +78,12 @@ export const upgradeableItems: number[] = (() => {
  * 能到达的全部节点。maxSteps 取最长链长度（分拣器 4 级 = 3 步）即可覆盖。
  */
 export function reachableTargets(fromId: number): number[] {
-    if (!upgradeableItems.includes(fromId))
-        return [];
+    if (!upgradeableItems.includes(fromId)) return [];
     const maxSteps = upgradeableItems.length;
     const merged = new Set<number>();
     for (let n = 1; n <= maxSteps; n++) {
-        for (const t of reachN(upAdj, fromId, n))
-            merged.add(t);
-        for (const t of reachN(downAdj, fromId, n))
-            merged.add(t);
+        for (const t of reachN(upAdj, fromId, n)) merged.add(t);
+        for (const t of reachN(downAdj, fromId, n)) merged.add(t);
     }
     return [...merged].sort((x, y) => x - y);
 }
@@ -95,13 +96,20 @@ export function reachableTargets(fromId: number): number[] {
  * 它们的 parameters 在升降级后无需改动，原样保留即可。
  */
 export class UpgradeCommand implements Command {
-    private upgraded: { b: BlueprintBuilding; oldItemId: number; oldModelIndex: number }[] = [];
+    private upgraded: {
+        b: BlueprintBuilding;
+        oldItemId: number;
+        oldModelIndex: number;
+    }[] = [];
     private toModelIndex: number;
 
-    constructor(bp: BlueprintData, private fromItemId: number, private toItemId: number) {
+    constructor(
+        bp: BlueprintData,
+        private fromItemId: number,
+        private toItemId: number
+    ) {
         const toItem = itemsMap.get(toItemId);
-        if (!toItem)
-            throw new Error(`Unknown target item ${toItemId}`);
+        if (!toItem) throw new Error(`Unknown target item ${toItemId}`);
         if (!toItem.models.length)
             throw new Error(`Target item ${toItemId} has no model`);
         this.toModelIndex = toItem.models[0];
@@ -134,12 +142,9 @@ export class UpgradeCommand implements Command {
      * 槽位而抛 'No icon to update'，故需按类型分流。
      */
     private dispatchIconUpdate(b: BlueprintBuilding, updater: Updater) {
-        if (isBelt(b.itemId))
-            updater.updateBeltIcon.dispatch(b);
-        else if (isInserter(b.itemId))
-            updater.updateSorterIcon.dispatch(b);
-        else
-            updater.updateBuildingIcon.dispatch(b);
+        if (isBelt(b.itemId)) updater.updateBeltIcon.dispatch(b);
+        else if (isInserter(b.itemId)) updater.updateSorterIcon.dispatch(b);
+        else updater.updateBuildingIcon.dispatch(b);
     }
 
     do(_data: BlueprintData, updater: Updater) {
@@ -155,5 +160,7 @@ export class UpgradeCommand implements Command {
         }
     }
 
-    merge() { return false; }
+    merge() {
+        return false;
+    }
 }

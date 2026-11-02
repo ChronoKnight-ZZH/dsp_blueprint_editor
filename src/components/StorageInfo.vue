@@ -1,28 +1,40 @@
 <template>
-    <div v-if="p.type === StorageType.FILTERED" class="storage-grid" :class="'capacity-' + capacity">
-        <div v-for="(g, i) in p.grids" :key="i" :class="{ban: i >= capacityForAutomation}">
+    <div
+        v-if="p.type === StorageType.FILTERED"
+        class="storage-grid"
+        :class="'capacity-' + capacity"
+    >
+        <div
+            v-for="(g, i) in p.grids"
+            :key="i"
+            :class="{ ban: i >= capacityForAutomation }"
+        >
             <BuildingIcon v-if="g.filter > 0" :icon-id="itemIconId(g.filter)" />
         </div>
     </div>
     <div class="building-params">
         <div>
-            <label>{{ t('自动化容量限制') }}</label>
+            <label>{{ t("自动化容量限制") }}</label>
             <span class="v">{{ capacityForAutomation }}</span>
         </div>
     </div>
 </template>
 
 <script lang="ts" setup>
-import { computed } from 'vue';
-import { useI18n } from 'vue-i18n';
-import { BlueprintBuilding, StorageParameters, StorageType } from '@/blueprint/parser';
-import BuildingIcon from './BuildingIcon.vue';
-import { itemIconId } from '@/data/icons';
+import { computed } from "vue";
+import { useI18n } from "vue-i18n";
+import {
+    BlueprintBuilding,
+    StorageParameters,
+    StorageType,
+} from "@/blueprint/parser";
+import BuildingIcon from "./BuildingIcon.vue";
+import { itemIconId } from "@/data/icons";
 
 const { t } = useI18n();
 
 const props = defineProps<{
-    building: BlueprintBuilding,
+    building: BlueprintBuilding;
 }>();
 
 const capacity = computed(() => {
@@ -41,7 +53,7 @@ const capacityForAutomation = computed(() => {
     display: grid;
     grid-template-columns: repeat(10, 1fr);
     width: 100%;
-    background: #FFFFFF40;
+    background: #ffffff40;
 
     &.capacity-30 {
         grid-template-rows: repeat(3, 1fr);

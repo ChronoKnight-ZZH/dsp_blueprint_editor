@@ -1,8 +1,8 @@
-import { Matrix4, Vector2, Vector3 } from 'three';
-import { buildingMeta } from '@/data/building';
-import { recipeIconId, itemIconId } from '@/data/icons';
-import type { BlueprintBuilding } from '@/blueprint/parser';
-import { INSERTER_HEIGHT } from './geometryHelpers';
+import { Matrix4, Vector2, Vector3 } from "three";
+import { buildingMeta } from "@/data/building";
+import { recipeIconId, itemIconId } from "@/data/icons";
+import type { BlueprintBuilding } from "@/blueprint/parser";
+import { INSERTER_HEIGHT } from "./geometryHelpers";
 
 /**
  * 图标相关的纯计算：图标 id 解析 + 图标在建筑局部空间里的位置/缩放。
@@ -21,20 +21,28 @@ export function buildingIconId(b: BlueprintBuilding) {
 
 /** 传送带图标缩放 */
 export const beltIconScale = new Vector2(1.1, 1.1);
-const beltIconTrans = new Matrix4().makeTranslation(0., 0., 0.5);
+const beltIconTrans = new Matrix4().makeTranslation(0, 0, 0.5);
 
 /** 传送带图标位置（带子中心偏上一点） */
-export function beltIconPos(b: BlueprintBuilding, buildingTrans: Matrix4, pos: Vector3) {
+export function beltIconPos(
+    b: BlueprintBuilding,
+    buildingTrans: Matrix4,
+    pos: Vector3
+) {
     trans.multiplyMatrices(buildingTrans, beltIconTrans);
     pos.setFromMatrixPosition(trans);
 }
 
 /** 分拣器图标缩放 */
 export const sorterIconScale = new Vector2(0.8, 0.8);
-const sorterIconTrans = new Matrix4().makeTranslation(0., 0., INSERTER_HEIGHT);
+const sorterIconTrans = new Matrix4().makeTranslation(0, 0, INSERTER_HEIGHT);
 
 /** 分拣器图标位置 */
-export function sorterIconPos(b: BlueprintBuilding, buildingTrans: Matrix4, pos: Vector3) {
+export function sorterIconPos(
+    b: BlueprintBuilding,
+    buildingTrans: Matrix4,
+    pos: Vector3
+) {
     trans.multiplyMatrices(buildingTrans, sorterIconTrans);
     pos.setFromMatrixPosition(trans);
 }
@@ -43,10 +51,14 @@ export function sorterIconPos(b: BlueprintBuilding, buildingTrans: Matrix4, pos:
  * 普通建筑图标位置与缩放。
  * 返回 `false` 表示没有元数据（未知建筑，调用方应跳过该图标）。
  */
-export function buildingIconPos(b: BlueprintBuilding, buildingTrans: Matrix4, pos: Vector3, scale: Vector2) {
+export function buildingIconPos(
+    b: BlueprintBuilding,
+    buildingTrans: Matrix4,
+    pos: Vector3,
+    scale: Vector2
+) {
     const meta = buildingMeta.get(b.modelIndex);
-    if (meta === undefined)
-        return false;
+    if (meta === undefined) return false;
     trans.multiplyMatrices(buildingTrans, meta.iconTrans);
     scale3.setFromMatrixScale(trans);
     scale.set(scale3.x, scale3.y);

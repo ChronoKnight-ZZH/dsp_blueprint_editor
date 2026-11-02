@@ -14,8 +14,8 @@
  * `globals` 提供同一份清单（同样由 `scripts/lib-build/assetInventory.js` 扫描磁盘得到）。
  */
 
-import type { AssetInventory, AssetResolver } from './types';
-import { resolveAssetUrl } from './assetBaseUrl';
+import type { AssetInventory, AssetResolver } from "./types";
+import { resolveAssetUrl } from "./assetBaseUrl";
 
 /**
  * 构建期注入的资产清单。未注入时（例如直接跑源码）退化成空清单：
@@ -32,7 +32,10 @@ const EMPTY_INVENTORY: AssetInventory = {
 
 function injectedInventory(): AssetInventory {
     // 必须用 typeof 守卫：未注入时直接读会抛 ReferenceError
-    if (typeof __DSP_LIB_ASSET_INVENTORY__ === 'undefined' || __DSP_LIB_ASSET_INVENTORY__ === null)
+    if (
+        typeof __DSP_LIB_ASSET_INVENTORY__ === "undefined" ||
+        __DSP_LIB_ASSET_INVENTORY__ === null
+    )
         return EMPTY_INVENTORY;
     return __DSP_LIB_ASSET_INVENTORY__;
 }
@@ -40,25 +43,27 @@ function injectedInventory(): AssetInventory {
 const inventory = injectedInventory();
 
 /** 清单里的模型条目是 `models/<name>.glb` */
-const MODEL_PREFIX = 'models/';
+const MODEL_PREFIX = "models/";
 const GLB_EXTENSION = /\.glb$/i;
 
 /** 清单里的图标键是 `icons/<category>/…`，产物里落在 `img/<category>/…` */
-const INVENTORY_ICON_PREFIX = 'icons/';
-const OUTPUT_ICON_PREFIX = 'img/';
+const INVENTORY_ICON_PREFIX = "icons/";
+const OUTPUT_ICON_PREFIX = "img/";
 
 /** 清单键（相对 `src/assets/`）→ 产物相对路径 */
 function iconOutputPath(inventoryPath: string): string {
-    return `${OUTPUT_ICON_PREFIX}${inventoryPath.slice(INVENTORY_ICON_PREFIX.length)}`;
+    return `${OUTPUT_ICON_PREFIX}${inventoryPath.slice(
+        INVENTORY_ICON_PREFIX.length
+    )}`;
 }
 
 /** 清单（相对 `src/assets/`）里的全部模型路径（用于 O(1) 判断「文件到底在不在」） */
 const modelPaths = new Set(inventory.models);
 
 /** 模型名（不含目录与扩展名），顺序沿用清单（构建时已排序） */
-const modelNames: readonly string[] = inventory.models.map(path => path
-    .replace(/^models\//i, '')
-    .replace(GLB_EXTENSION, ''));
+const modelNames: readonly string[] = inventory.models.map((path) =>
+    path.replace(/^models\//i, "").replace(GLB_EXTENSION, "")
+);
 
 const itemRecipePaths = new Set(inventory.itemRecipe);
 const techPaths = new Set(inventory.tech);
@@ -68,7 +73,7 @@ const signalPaths = new Set(inventory.signal);
 const MODEL_TEXTURE_KEY = /^.*assets\/icons\/models\//i;
 
 function toPosix(value: string): string {
-    return value.replace(/\\/g, '/');
+    return value.replace(/\\/g, "/");
 }
 
 export const assetResolver: AssetResolver = {
@@ -83,9 +88,11 @@ export const assetResolver: AssetResolver = {
 
     modelTextureUrl(srcRelativePath: string): string | null {
         const normalized = toPosix(srcRelativePath);
-        const relative = normalized.replace(MODEL_TEXTURE_KEY, '');
+        const relative = normalized.replace(MODEL_TEXTURE_KEY, "");
         if (relative === normalized) {
-            console.warn(`[asset] 无法识别的贴图路径（不在 assets/icons/models 下）：${srcRelativePath}`);
+            console.warn(
+                `[asset] 无法识别的贴图路径（不在 assets/icons/models 下）：${srcRelativePath}`
+            );
             return null;
         }
         // 清单里的贴图在产物中落在 img/models/<建筑目录>/<文件>.png
@@ -101,8 +108,7 @@ export const assetResolver: AssetResolver = {
 
     async techIconUrl(techId: number): Promise<string> {
         const path = `icons/tech/${techId}.png`;
-        if (!techPaths.has(path))
-            throw new Error(`找不到科技图标：${techId}`);
+        if (!techPaths.has(path)) throw new Error(`找不到科技图标：${techId}`);
         return resolveAssetUrl(iconOutputPath(path));
     },
 

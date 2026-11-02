@@ -1,6 +1,6 @@
-import type { InstancedMesh, Matrix4 } from 'three';
-import type { BVH } from '@/bvh/bvh';
-import type { AllBuildings } from './AllBuildings';
+import type { InstancedMesh, Matrix4 } from "three";
+import type { BVH } from "@/bvh/bvh";
+import type { AllBuildings } from "./AllBuildings";
 
 /** 回退建筑（元数据盒 / 程序化几何）的实例引用 */
 export interface ModelRefInstanced {

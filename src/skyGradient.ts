@@ -1,7 +1,14 @@
 import {
-    Color, Matrix3, Matrix4, Mesh, PlaneGeometry, ShaderMaterial, Vector3,
-    type BufferGeometry, type Camera,
-} from 'three';
+    Color,
+    Matrix3,
+    Matrix4,
+    Mesh,
+    PlaneGeometry,
+    ShaderMaterial,
+    Vector3,
+    type BufferGeometry,
+    type Camera,
+} from "three";
 
 /**
  * 渐变天光 + 星空 + 大气层。
@@ -54,7 +61,7 @@ export interface SkyGradientOptions {
 
 /** 默认大气层高度占星球半径的比例（旧行为里边缘光环位于 1.02R） */
 const DEFAULT_ATMOSPHERE_RATIO = 0.05;
-const vertexShader = /* glsl */`
+const vertexShader = /* glsl */ `
 varying vec2 vNdc;
 void main() {
     vNdc = position.xy;
@@ -62,7 +69,7 @@ void main() {
     gl_Position = vec4(position.xy, 1.0, 1.0);
 }
 `;
-const fragmentShader = /* glsl */`
+const fragmentShader = /* glsl */ `
 uniform mat4 uProjectionInverse;
 uniform mat3 uCameraRotation;
 uniform vec3 uCameraPosition;
@@ -181,12 +188,15 @@ export interface SkyGradient {
  * 创建一个铺满屏幕的天光/星空背景。挂到 scene 上即可，无需每帧手动更新
  * （uniform 在 onBeforeRender 里从相机同步）。
  */
-export function createSkyGradient(options: SkyGradientOptions = {}): SkyGradient {
+export function createSkyGradient(
+    options: SkyGradientOptions = {}
+): SkyGradient {
     const planetRadius = options.planetRadius ?? 200.2;
     // 大气层高度：世界单位（地表到大气顶），默认 0.02 × 半径 = 旧观感
-    const atmosphereHeight = options.atmosphereHeight !== undefined && options.atmosphereHeight > 0
-        ? options.atmosphereHeight
-        : planetRadius * DEFAULT_ATMOSPHERE_RATIO;
+    const atmosphereHeight =
+        options.atmosphereHeight !== undefined && options.atmosphereHeight > 0
+            ? options.atmosphereHeight
+            : planetRadius * DEFAULT_ATMOSPHERE_RATIO;
 
     const zenith = new Color(options.zenith ?? 0x000000);
     const horizon = new Color(options.horizon ?? 0x14324a);
@@ -202,7 +212,11 @@ export function createSkyGradient(options: SkyGradientOptions = {}): SkyGradient
             uUp: { value: new Vector3(0, 1, 0) },
             uPlanetRadius: { value: planetRadius },
             uAtmosphereHeight: { value: atmosphereHeight / planetRadius },
-            uAtmosphereScale: { value: atmosphereHeight / (planetRadius * DEFAULT_ATMOSPHERE_RATIO) },
+            uAtmosphereScale: {
+                value:
+                    atmosphereHeight /
+                    (planetRadius * DEFAULT_ATMOSPHERE_RATIO),
+            },
             uZenith: { value: zenith },
             uHorizon: { value: horizon },
             uNadir: { value: nadir },
@@ -226,7 +240,8 @@ export function createSkyGradient(options: SkyGradientOptions = {}): SkyGradient
     mesh.frustumCulled = false;
     mesh.renderOrder = -1000;
 
-    const uProjectionInverse = material.uniforms.uProjectionInverse.value as Matrix4;
+    const uProjectionInverse = material.uniforms.uProjectionInverse
+        .value as Matrix4;
     const uCameraRotation = material.uniforms.uCameraRotation.value as Matrix3;
     const uCameraPosition = material.uniforms.uCameraPosition.value as Vector3;
     const uUp = material.uniforms.uUp.value as Vector3;
@@ -236,8 +251,7 @@ export function createSkyGradient(options: SkyGradientOptions = {}): SkyGradient
         uCameraRotation.setFromMatrix4(camera.matrixWorld);
         uCameraPosition.setFromMatrixPosition(camera.matrixWorld);
         uUp.copy(camera.up);
-        if (uUp.lengthSq() < 1e-8)
-            uUp.set(0, 1, 0);
+        if (uUp.lengthSq() < 1e-8) uUp.set(0, 1, 0);
         uUp.normalize();
     };
 

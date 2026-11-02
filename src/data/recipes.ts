@@ -1,5 +1,5 @@
-import { recipes } from './recipesData';
-import { Recipe } from './types';
+import { recipes } from "./recipesData";
+import { Recipe } from "./types";
 
 export const recipesMap = new Map<number, Recipe>();
 

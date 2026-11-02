@@ -1,5 +1,12 @@
-import { TextureLoader, Texture, RGBAFormat, UnsignedByteType, Vector2, SRGBColorSpace } from 'three';
-import { allIconIds, iconUrl } from './data/icons';
+import {
+    TextureLoader,
+    Texture,
+    RGBAFormat,
+    UnsignedByteType,
+    Vector2,
+    SRGBColorSpace,
+} from "three";
+import { allIconIds, iconUrl } from "./data/icons";
 
 const WIDTH = 24;
 const HEIGHT = 24;
@@ -12,7 +19,11 @@ const ICON_SIZE = 80;
  */
 export interface TextureSink {
     initTexture(texture: Texture): void;
-    copyTextureToTexture(position: Vector2, srcTexture: Texture, dstTexture: Texture): void;
+    copyTextureToTexture(
+        position: Vector2,
+        srcTexture: Texture,
+        dstTexture: Texture
+    ): void;
 }
 
 export class IconTexture {
@@ -28,11 +39,11 @@ export class IconTexture {
     private disposed = false;
 
     constructor(private renderer: TextureSink) {
-        const emptyCanvas = document.createElement('canvas');
+        const emptyCanvas = document.createElement("canvas");
         emptyCanvas.width = WIDTH * ICON_SIZE;
         emptyCanvas.height = HEIGHT * ICON_SIZE;
         this.texture = new Texture(emptyCanvas);
-        this.texture.name = 'icons';
+        this.texture.name = "icons";
         this.texture.format = RGBAFormat;
         this.texture.type = UnsignedByteType;
         this.texture.flipY = true;
@@ -43,41 +54,43 @@ export class IconTexture {
         let nextIndex = 1; // 0 is reserved for empty icon
         for (const i of allIconIds()) {
             if (nextIndex >= WIDTH * HEIGHT)
-                throw new Error('IconTexture too small');
+                throw new Error("IconTexture too small");
             this.iconIds.set(i, nextIndex);
             nextIndex++;
         }
 
-        for (let i = 0; i < this.loaded.length; i++)
-            this.loaded[i] = false;
+        for (let i = 0; i < this.loaded.length; i++) this.loaded[i] = false;
     }
 
     requestIcon(iconId: number) {
         const index = this.iconIds.get(iconId);
         if (index === undefined) {
-            console.warn(`Unknown icon ${iconId}`)
+            console.warn(`Unknown icon ${iconId}`);
             return 0;
         }
 
         // 按槽位索引判断，同一 iconId 才不会重复下载/上传（修复：旧代码用 this.loaded[iconId]）
-        if (this.loaded[index])
-            return index;
+        if (this.loaded[index]) return index;
         this.loaded[index] = true;
 
         (async () => {
             try {
-                const texture = await this.loader.loadAsync(await iconUrl(iconId));
+                const texture = await this.loader.loadAsync(
+                    await iconUrl(iconId)
+                );
                 // 图集可能已被 dispose（场景销毁 / 重建），此时不要再写纹理
                 if (this.disposed) {
                     texture.dispose();
                     return;
                 }
-                const pos = new Vector2(index % WIDTH, Math.floor(index / WIDTH));
+                const pos = new Vector2(
+                    index % WIDTH,
+                    Math.floor(index / WIDTH)
+                );
                 pos.multiplyScalar(ICON_SIZE);
                 this.renderer.copyTextureToTexture(pos, texture, this.texture);
                 texture.dispose();
-            }
-            catch {
+            } catch {
                 // 允许下次重试
                 this.loaded[index] = false;
             }

@@ -1,4 +1,4 @@
-import type { BlueprintData } from '@/blueprint/parser';
+import type { BlueprintData } from "@/blueprint/parser";
 
 /**
  * `BlueprintData` 与 JSON 文本之间的转换。
@@ -18,18 +18,19 @@ import type { BlueprintData } from '@/blueprint/parser';
 /** 导入结果：成功给数据，失败给可上报的结构化原因 */
 export type BlueprintJSONOutcome =
     | { ok: true; value: BlueprintData }
-    | { ok: false; error: { code: 'json-syntax' | 'json-shape'; message: string } };
+    | {
+          ok: false;
+          error: { code: "json-syntax" | "json-shape"; message: string };
+      };
 
 /** `Uint8Array` 经 JSON 往返后的形状 */
 type BytesAsJSON = Record<string, number>;
 
 function reviveBytes(value: unknown): Uint8Array | undefined {
-    if (value === undefined || value === null)
-        return undefined;
-    if (value instanceof Uint8Array)
-        return value;
+    if (value === undefined || value === null) return undefined;
+    if (value instanceof Uint8Array) return value;
     // JSON.stringify(Uint8Array) → {"0":n,"1":n,…}
-    if (typeof value === 'object') {
+    if (typeof value === "object") {
         const obj = value as BytesAsJSON;
         const keys = Object.keys(obj);
         // 空对象（原字节数组为空）→ 长度 0 的数组
@@ -48,15 +49,14 @@ function reviveBytes(value: unknown): Uint8Array | undefined {
 }
 
 function reviveTime(value: unknown): Date {
-    if (value instanceof Date)
-        return value;
-    if (typeof value === 'string' || typeof value === 'number') {
+    if (value instanceof Date) return value;
+    if (typeof value === "string" || typeof value === "number") {
         const d = new Date(value);
         if (Number.isNaN(d.getTime()))
             throw new Error(`header.time 不是合法时间：${String(value)}`);
         return d;
     }
-    throw new Error('header.time 缺失或类型错误（需要 ISO 字符串或时间戳）');
+    throw new Error("header.time 缺失或类型错误（需要 ISO 字符串或时间戳）");
 }
 
 /**
@@ -67,30 +67,27 @@ function reviveTime(value: unknown): Date {
  * 它们给出的错误已经能被 `BlueprintViewer` 分类上报。
  */
 export function reviveBlueprintData(raw: unknown): BlueprintData {
-    if (typeof raw !== 'object' || raw === null)
-        throw new Error('JSON 根节点不是对象');
+    if (typeof raw !== "object" || raw === null)
+        throw new Error("JSON 根节点不是对象");
 
     const data = raw as Partial<BlueprintData> & Record<string, unknown>;
 
-    if (typeof data.header !== 'object' || data.header === null)
-        throw new Error('缺少 header 对象');
-    if (!Array.isArray(data.areas))
-        throw new Error('缺少 areas 数组');
-    if (!Array.isArray(data.buildings))
-        throw new Error('缺少 buildings 数组');
+    if (typeof data.header !== "object" || data.header === null)
+        throw new Error("缺少 header 对象");
+    if (!Array.isArray(data.areas)) throw new Error("缺少 areas 数组");
+    if (!Array.isArray(data.buildings)) throw new Error("缺少 buildings 数组");
 
-    const header = data.header as BlueprintData['header'] & Record<string, unknown>;
+    const header = data.header as BlueprintData["header"] &
+        Record<string, unknown>;
     header.time = reviveTime(header.time);
 
     for (const b of data.buildings as unknown[]) {
-        if (typeof b !== 'object' || b === null)
-            throw new Error('buildings 里存在非对象元素');
+        if (typeof b !== "object" || b === null)
+            throw new Error("buildings 里存在非对象元素");
         const rec = b as Record<string, unknown>;
         const bytes = reviveBytes(rec.extraBytes);
-        if (bytes === undefined)
-            delete rec.extraBytes;
-        else
-            rec.extraBytes = bytes;
+        if (bytes === undefined) delete rec.extraBytes;
+        else rec.extraBytes = bytes;
     }
 
     return data as BlueprintData;
@@ -101,26 +98,30 @@ export function parseBlueprintJSON(text: string): BlueprintData {
     let raw: unknown;
     try {
         raw = JSON.parse(text);
-    }
-    catch (e) {
-        throw new JSONImportError('json-syntax', e instanceof Error ? e.message : String(e));
+    } catch (e) {
+        throw new JSONImportError(
+            "json-syntax",
+            e instanceof Error ? e.message : String(e)
+        );
     }
     try {
         return reviveBlueprintData(raw);
-    }
-    catch (e) {
-        throw new JSONImportError('json-shape', e instanceof Error ? e.message : String(e));
+    } catch (e) {
+        throw new JSONImportError(
+            "json-shape",
+            e instanceof Error ? e.message : String(e)
+        );
     }
 }
 
 /** 带上 `json-syntax` / `json-shape` 区分的内部错误 */
 export class JSONImportError extends Error {
     constructor(
-        public readonly code: 'json-syntax' | 'json-shape',
-        message: string,
+        public readonly code: "json-syntax" | "json-shape",
+        message: string
     ) {
         super(message);
-        this.name = 'JSONImportError';
+        this.name = "JSONImportError";
     }
 }
 
@@ -143,15 +144,23 @@ export function stringifyBlueprintJSON(data: BlueprintData): string {
  */
 export function formatBlueprintJSON(text: string): BlueprintJSONOutcome {
     const trimmed = text.trim();
-    if (trimmed === '') {
-        return { ok: false, error: { code: 'json-shape', message: '输入为空' } };
+    if (trimmed === "") {
+        return {
+            ok: false,
+            error: { code: "json-shape", message: "输入为空" },
+        };
     }
     try {
         const data = parseBlueprintJSON(trimmed);
         return { ok: true, value: data };
-    }
-    catch (e) {
-        const code = e instanceof JSONImportError ? e.code : 'json-shape';
-        return { ok: false, error: { code, message: e instanceof Error ? e.message : String(e) } };
+    } catch (e) {
+        const code = e instanceof JSONImportError ? e.code : "json-shape";
+        return {
+            ok: false,
+            error: {
+                code,
+                message: e instanceof Error ? e.message : String(e),
+            },
+        };
     }
 }

@@ -1,3 +1,3 @@
-export * from './types';
-export { itemsMap } from './items';
-export { recipesMap } from './recipes';
+export * from "./types";
+export { itemsMap } from "./items";
+export { recipesMap } from "./recipes";

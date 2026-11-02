@@ -2,7 +2,7 @@ import { Box3, Group, Matrix4, Vector3 } from 'three';
 import { buildingMeta } from '@/data/building';
 import { ZERO_MODEL_TRANSFORM } from '@/data/modelTransform';
 import type { ModelTransform } from '@/data/modelTransform';
-import { buildModelPlacement, resolveBuildingModel } from '@/models/buildingModel';
+import { buildModelPlacement } from '@/models/buildingModel';
 import type { LoadedGlbModel } from '@/models/glbLoader';
 
 /**
@@ -126,6 +126,7 @@ describe('GLB 放置矩阵', () => {
                 },
             }));
 
+            // eslint-disable-next-line @typescript-eslint/no-var-requires -- jest.isolateModules 内必须用运行时 require 才能让 doMock 生效
             const isolated = require('@/models/buildingModel') as typeof import('@/models/buildingModel');
             // 69 在表里写着 yaw:180，但没有模型时必须一个都不生效
             const r = isolated.resolveBuildingModel(69);

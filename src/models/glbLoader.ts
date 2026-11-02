@@ -9,11 +9,11 @@
  * - 同时最多 `MAX_CONCURRENT_LOADS` 个模型在下载/解析，避免一次亮出几十个请求。
  */
 
-import { Box3, Group, Object3D, Texture } from 'three';
-import type { Material } from 'three';
-import { modelUrl } from './glbAssets';
-import { applyModelMaterialTextures } from './materialTextures';
-import type { TextureSettings } from '@/renderSettingsTypes';
+import { Box3, Group, Object3D, Texture } from "three";
+import type { Material } from "three";
+import { modelUrl } from "./glbAssets";
+import { applyModelMaterialTextures } from "./materialTextures";
+import type { TextureSettings } from "@/renderSettingsTypes";
 
 /** 已加载完成的 GLB 模型（`scene` 作为实例化渲染的原型，不要直接加进场景） */
 export interface LoadedGlbModel {
@@ -55,30 +55,41 @@ const listeners = new Set<(model: LoadedGlbModel) => void>();
  */
 const DEFAULT_TEXTURE_SETTINGS: TextureSettings = {
     texturesEnabled: true,
-    textures: { albedo: true, normal: true, spec: true, emissive: true, effect: true, dirt: true, glass: true },
+    textures: {
+        albedo: true,
+        normal: true,
+        spec: true,
+        emissive: true,
+        effect: true,
+        dirt: true,
+        glass: true,
+    },
 };
 
 let settingsProvider: (() => TextureSettings) | null = null;
 
 /** 注入设置读取函数（返回当前生效的贴图设置） */
-export function setSettingsProvider(provider: (() => TextureSettings) | null): void {
+export function setSettingsProvider(
+    provider: (() => TextureSettings) | null
+): void {
     settingsProvider = provider;
 }
 
 /** 读取当前贴图设置；未注入或读取抛错时回退默认值 */
 export function currentTextureSettings(): TextureSettings {
-    if (settingsProvider === null)
-        return DEFAULT_TEXTURE_SETTINGS;
+    if (settingsProvider === null) return DEFAULT_TEXTURE_SETTINGS;
     try {
         return settingsProvider();
     } catch (e) {
-        console.warn('[glb] 读取贴图设置失败（使用默认值）', e);
+        console.warn("[glb] 读取贴图设置失败（使用默认值）", e);
         return DEFAULT_TEXTURE_SETTINGS;
     }
 }
 
 /** 显式传入设置时用它，否则用 provider/default；供 core 这类不依赖全局的调用方使用 */
-export function resolveTextureSettings(override?: TextureSettings): TextureSettings {
+export function resolveTextureSettings(
+    override?: TextureSettings
+): TextureSettings {
     return override ?? currentTextureSettings();
 }
 
@@ -97,7 +108,9 @@ export function glbFailedModels(): ReadonlySet<string> {
 }
 
 /** 模型加载成功时回调；返回取消订阅函数 */
-export function onGlbModelLoaded(cb: (model: LoadedGlbModel) => void): () => void {
+export function onGlbModelLoaded(
+    cb: (model: LoadedGlbModel) => void
+): () => void {
     listeners.add(cb);
     return () => {
         listeners.delete(cb);
@@ -114,7 +127,7 @@ function acquireSlot(): Promise<void> {
         activeLoads++;
         return Promise.resolve();
     }
-    return new Promise<void>(resolve => {
+    return new Promise<void>((resolve) => {
         waitingSlots.push(() => {
             activeLoads++;
             resolve();
@@ -131,16 +144,19 @@ function releaseSlot(): void {
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error(`GLB 加载超时（${timeoutMs}ms）`)), timeoutMs);
+        const timer = setTimeout(
+            () => reject(new Error(`GLB 加载超时（${timeoutMs}ms）`)),
+            timeoutMs
+        );
         promise.then(
-            value => {
+            (value) => {
                 clearTimeout(timer);
                 resolve(value);
             },
-            error => {
+            (error) => {
                 clearTimeout(timer);
                 reject(error);
-            },
+            }
         );
     });
 }
@@ -156,7 +172,7 @@ interface GltfLoaderLike {
         data: ArrayBuffer | string,
         path: string,
         onLoad: (gltf: GltfLike) => void,
-        onError?: (error: unknown) => void,
+        onError?: (error: unknown) => void
     ): void;
 }
 
@@ -168,13 +184,16 @@ interface GltfLoaderModule {
  * GLTFLoader 本身也是懒加载的：只有第一次真的需要解析模型时才拉
  * `gltf-loader` chunk，首屏不会为它付费。
  */
-async function parseGlb(buffer: ArrayBuffer, baseUrl: string): Promise<GltfLike> {
+async function parseGlb(
+    buffer: ArrayBuffer,
+    baseUrl: string
+): Promise<GltfLike> {
     const mod = (await import(
-        /* webpackChunkName: "gltf-loader" */ 'three/examples/jsm/loaders/GLTFLoader.js'
+        /* webpackChunkName: "gltf-loader" */ "three/examples/jsm/loaders/GLTFLoader.js"
     )) as unknown as GltfLoaderModule;
     const loader = new mod.GLTFLoader();
     return new Promise<GltfLike>((resolve, reject) => {
-        loader.parse(buffer, baseUrl, resolve, error => {
+        loader.parse(buffer, baseUrl, resolve, (error) => {
             reject(error instanceof Error ? error : new Error(String(error)));
         });
     });
@@ -182,30 +201,34 @@ async function parseGlb(buffer: ArrayBuffer, baseUrl: string): Promise<GltfLike>
 
 // ---------------------------------------------------------------- 加载流程
 
-async function runLoad(name: string, timeoutMs: number): Promise<LoadedGlbModel | null> {
-    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+async function runLoad(
+    name: string,
+    timeoutMs: number
+): Promise<LoadedGlbModel | null> {
+    const controller =
+        typeof AbortController === "function" ? new AbortController() : null;
 
     const pipeline = async (): Promise<LoadedGlbModel | null> => {
         const url = await modelUrl(name);
-        if (url === null)
-            return null;
+        if (url === null) return null;
 
-        const response = await fetch(url, controller === null ? undefined : { signal: controller.signal });
-        if (!response.ok)
-            throw new Error(`HTTP ${response.status}`);
+        const response = await fetch(
+            url,
+            controller === null ? undefined : { signal: controller.signal }
+        );
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const buffer = await response.arrayBuffer();
-        const baseUrl = url.slice(0, url.lastIndexOf('/') + 1);
+        const baseUrl = url.slice(0, url.lastIndexOf("/") + 1);
         const gltf = await parseGlb(buffer, baseUrl);
 
         const scene = gltf.scene ?? gltf.scenes?.[0];
-        if (scene === undefined)
-            throw new Error('GLB 中没有可用场景');
+        if (scene === undefined) throw new Error("GLB 中没有可用场景");
 
         scene.updateMatrixWorld(true);
         const bbox = new Box3().setFromObject(scene);
         if (bbox.isEmpty())
-            throw new Error('GLB 包围盒为空（可能是纯空节点或解析异常）');
+            throw new Error("GLB 包围盒为空（可能是纯空节点或解析异常）");
 
         return { name, url, scene, bbox };
     };
@@ -220,14 +243,19 @@ async function runLoad(name: string, timeoutMs: number): Promise<LoadedGlbModel 
         loaded.set(name, model);
         // 通道贴图（法线/自发光/spec-gloss）不在 GLB 里，按清单异步补挂：
         // 不 await、不许失败——贴图没到之前先显示底色，到了材质原地更新即可
-        void applyModelMaterialTextures(model, currentTextureSettings()).catch(e => {
-            console.warn(`[glb] 模型 ${name} 的通道贴图接入失败（保留底色）`, e);
-        });
+        void applyModelMaterialTextures(model, currentTextureSettings()).catch(
+            (e) => {
+                console.warn(
+                    `[glb] 模型 ${name} 的通道贴图接入失败（保留底色）`,
+                    e
+                );
+            }
+        );
         for (const cb of listeners) {
             try {
                 cb(model);
             } catch (e) {
-                console.warn('[glb] 模型加载监听器抛错（已忽略）', e);
+                console.warn("[glb] 模型加载监听器抛错（已忽略）", e);
             }
         }
         return model;
@@ -236,7 +264,9 @@ async function runLoad(name: string, timeoutMs: number): Promise<LoadedGlbModel 
         // 超时时主动 abort 底层 fetch，避免连接被白占
         try {
             controller?.abort();
-        } catch { /* ignore */ }
+        } catch {
+            /* ignore */
+        }
         console.warn(`[glb] 模型 ${name} 加载失败，回退元数据表`, e);
         return null;
     }
@@ -246,21 +276,24 @@ async function runLoad(name: string, timeoutMs: number): Promise<LoadedGlbModel 
  * 按模型名懒加载。永不 reject：失败返回 null。
  * 同一模型名的并发调用共享同一个 Promise。
  */
-export function loadGlbModel(name: string, options?: LoadGlbOptions): Promise<LoadedGlbModel | null> {
+export function loadGlbModel(
+    name: string,
+    options?: LoadGlbOptions
+): Promise<LoadedGlbModel | null> {
     const cached = loaded.get(name);
-    if (cached !== undefined)
-        return Promise.resolve(cached);
-    if (failed.has(name))
-        return Promise.resolve(null);
+    if (cached !== undefined) return Promise.resolve(cached);
+    if (failed.has(name)) return Promise.resolve(null);
 
     const running = pending.get(name);
-    if (running !== undefined)
-        return running;
+    if (running !== undefined) return running;
 
     const task = (async (): Promise<LoadedGlbModel | null> => {
         await acquireSlot();
         try {
-            return await runLoad(name, options?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+            return await runLoad(
+                name,
+                options?.timeoutMs ?? DEFAULT_TIMEOUT_MS
+            );
         } finally {
             releaseSlot();
         }
@@ -276,10 +309,8 @@ export function loadGlbModel(name: string, options?: LoadGlbOptions): Promise<Lo
 
 /** 清除失败负缓存，允许重新尝试（例如网络恢复后手动重试） */
 export function resetGlbFailure(name?: string): void {
-    if (name === undefined)
-        failed.clear();
-    else
-        failed.delete(name);
+    if (name === undefined) failed.clear();
+    else failed.delete(name);
 }
 
 /**
@@ -291,8 +322,11 @@ export function resetGlbFailure(name?: string): void {
 export function reapplyLoadedModelMaterials(settings?: TextureSettings): void {
     const effective = resolveTextureSettings(settings);
     for (const model of loaded.values()) {
-        void applyModelMaterialTextures(model, effective).catch(e => {
-            console.warn(`[glb] 重新挂载模型 ${model.name} 的通道贴图失败（保留底色）`, e);
+        void applyModelMaterialTextures(model, effective).catch((e) => {
+            console.warn(
+                `[glb] 重新挂载模型 ${model.name} 的通道贴图失败（保留底色）`,
+                e
+            );
         });
     }
 }
@@ -311,21 +345,18 @@ function disposeMaterial(material: Material): void {
 }
 
 function disposeObject(root: Object3D): void {
-    root.traverse(o => {
+    root.traverse((o) => {
         // 结构化判断，避免把 Object3D 断言成 Mesh 后 isMesh 被收窄成字面量 true
         const mesh = o as unknown as {
             isMesh?: boolean;
             geometry?: { dispose(): void };
             material?: Material | Material[];
         };
-        if (mesh.isMesh !== true || mesh.geometry === undefined)
-            return;
+        if (mesh.isMesh !== true || mesh.geometry === undefined) return;
         mesh.geometry.dispose();
         const materials = mesh.material;
         if (Array.isArray(materials)) {
-            for (const m of materials)
-                if (m !== undefined)
-                    disposeMaterial(m);
+            for (const m of materials) if (m !== undefined) disposeMaterial(m);
         } else if (materials !== undefined) {
             disposeMaterial(materials);
         }
@@ -335,8 +366,7 @@ function disposeObject(root: Object3D): void {
 /** 释放某个已加载模型的 GPU 资源并移出缓存 */
 export function releaseGlbModel(name: string): void {
     const model = loaded.get(name);
-    if (model === undefined)
-        return;
+    if (model === undefined) return;
     loaded.delete(name);
     try {
         disposeObject(model.scene);
@@ -347,6 +377,5 @@ export function releaseGlbModel(name: string): void {
 
 /** 释放全部已加载模型（例如切换蓝图后彻底回收） */
 export function releaseAllGlbModels(): void {
-    for (const name of Array.from(loaded.keys()))
-        releaseGlbModel(name);
+    for (const name of Array.from(loaded.keys())) releaseGlbModel(name);
 }

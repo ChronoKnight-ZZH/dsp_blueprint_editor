@@ -13,13 +13,16 @@
  */
 
 // ---- 对外类与类型 ----
-export { BlueprintViewer } from './BlueprintViewer';
+export { BlueprintViewer } from "./BlueprintViewer";
 
 // 解析函数就是 parser 的 `fromStr`；以 `parseBlueprint` 别名导出，保持一致的可读 API
-export { fromStr as parseBlueprint, toStr as serializeBlueprint } from '@/blueprint/parser';
+export {
+    fromStr as parseBlueprint,
+    toStr as serializeBlueprint,
+} from "@/blueprint/parser";
 
 // 资产根地址：库构建下决定 assets/ 的位置（编辑器构建下由 webpack publicPath 决定，此调用无副作用）
-export { configureAssetBaseUrl } from './assets/assetBaseUrl';
+export { configureAssetBaseUrl } from "./assets/assetBaseUrl";
 
 export type {
     ViewerOptions,
@@ -41,7 +44,11 @@ export type {
     // 主题
     ThemeName,
     ThemeColors,
-} from './types';
+} from "./types";
 
 // 宿主做「按 id 取建筑 / 自己渲染建筑名」时常需要这两个类型
-export type { BlueprintArea, BlueprintBuilding, BlueprintData } from '@/blueprint/parser';
+export type {
+    BlueprintArea,
+    BlueprintBuilding,
+    BlueprintData,
+} from "@/blueprint/parser";

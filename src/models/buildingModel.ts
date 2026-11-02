@@ -11,19 +11,32 @@
  * 任何一步失败都只是 `glb === null`，绝不抛错。
  */
 
-import { Matrix4, Vector3 } from 'three';
-import { buildingMeta } from '@/data/building';
-import type { BuildingMeta } from '@/data/building';
-import { itemsMap } from '@/data/items';
-import { modelTransformOf } from '@/data/modelTransform';
-import type { ModelAlign, ModelTransform, ModelUpAxis } from '@/data/modelTransform';
-import { availableModelNames, modelNameCandidates, resolveModelName } from './glbAssets';
-import { getLoadedGlbModel, loadGlbModel, onGlbModelLoaded, glbFailedModels } from './glbLoader';
-import type { LoadedGlbModel } from './glbLoader';
-import { GRID_HORIZONTAL, HEIGHT_GRID_SIZE } from '@/planetConstants';
+import { Matrix4, Vector3 } from "three";
+import { buildingMeta } from "@/data/building";
+import type { BuildingMeta } from "@/data/building";
+import { itemsMap } from "@/data/items";
+import { modelTransformOf } from "@/data/modelTransform";
+import type {
+    ModelAlign,
+    ModelTransform,
+    ModelUpAxis,
+} from "@/data/modelTransform";
+import {
+    availableModelNames,
+    modelNameCandidates,
+    resolveModelName,
+} from "./glbAssets";
+import {
+    getLoadedGlbModel,
+    loadGlbModel,
+    onGlbModelLoaded,
+    glbFailedModels,
+} from "./glbLoader";
+import type { LoadedGlbModel } from "./glbLoader";
+import { GRID_HORIZONTAL, HEIGHT_GRID_SIZE } from "@/planetConstants";
 
 /** 模型来源：'glb' 外部模型，'meta' 元数据表回退，'unknown' 两边都没有 */
-export type ModelSource = 'glb' | 'meta' | 'unknown';
+export type ModelSource = "glb" | "meta" | "unknown";
 
 export interface ResolvedBuildingModel {
     readonly modelIndex: number;
@@ -51,26 +64,31 @@ interface ModelItemRef {
 const modelIndexItems = new Map<number, ModelItemRef[]>();
 
 for (const item of itemsMap.values()) {
-    for (let variantIndex = 0; variantIndex < item.models.length; variantIndex++) {
+    for (
+        let variantIndex = 0;
+        variantIndex < item.models.length;
+        variantIndex++
+    ) {
         const modelIndex = item.models[variantIndex];
-        const ref: ModelItemRef = { itemId: item.id, itemName: item.name, icon: item.icon, variantIndex };
+        const ref: ModelItemRef = {
+            itemId: item.id,
+            itemName: item.name,
+            icon: item.icon,
+            variantIndex,
+        };
         const list = modelIndexItems.get(modelIndex);
-        if (list === undefined)
-            modelIndexItems.set(modelIndex, [ref]);
-        else
-            list.push(ref);
+        if (list === undefined) modelIndexItems.set(modelIndex, [ref]);
+        else list.push(ref);
     }
 }
 
 /** modelIndex → GLB 模型名（经 itemsData 的 icon 与别名表）；无匹配返回 null */
 export function buildingModelName(modelIndex: number): string | null {
     const refs = modelIndexItems.get(modelIndex);
-    if (refs === undefined)
-        return null;
+    if (refs === undefined) return null;
     for (const ref of refs) {
         const name = resolveModelName(ref.icon, ref.variantIndex);
-        if (name !== null)
-            return name;
+        if (name !== null) return name;
     }
     return null;
 }
@@ -79,8 +97,8 @@ export function buildingModelName(modelIndex: number): string | null {
 
 const DEG_TO_RAD = Math.PI / 180;
 
-const DEFAULT_UP_AXIS: ModelUpAxis = 'y';
-const DEFAULT_ALIGN: ModelAlign = 'height';
+const DEFAULT_UP_AXIS: ModelUpAxis = "y";
+const DEFAULT_ALIGN: ModelAlign = "height";
 /**
  * 按高度自动缩放时的收紧区间。
  *
@@ -115,7 +133,7 @@ export function buildModelPlacement(
     meta: BuildingMeta | undefined,
     modelIndex: number,
     /** 仅用于单测注入固定变换，避免测试依赖表里可随时调整的调参值 */
-    transformOverride?: Readonly<ModelTransform>,
+    transformOverride?: Readonly<ModelTransform>
 ): Matrix4 {
     const t = transformOverride ?? modelTransformOf(modelIndex);
     const upAxis = t.upAxis ?? DEFAULT_UP_AXIS;
@@ -123,13 +141,12 @@ export function buildModelPlacement(
 
     // 1) glTF 空间 → 建筑局部空间：glTF 是 y-up，绕 X 轴 +90° 把 +y 映射到 +z
     const orient = new Matrix4();
-    if (upAxis === 'y')
-        orient.makeRotationX(Math.PI / 2);
+    if (upAxis === "y") orient.makeRotationX(Math.PI / 2);
 
     glb.bbox.getSize(_size);
     glb.bbox.getCenter(_center);
     // 旋转前，模型在“上”方向上的原始尺寸
-    const modelHeight = upAxis === 'y' ? _size.y : _size.z;
+    const modelHeight = upAxis === "y" ? _size.y : _size.z;
 
     let scale = t.scale ?? 1;
     let targetX = 0;
@@ -139,14 +156,18 @@ export function buildModelPlacement(
     if (meta !== undefined) {
         const boxHeight = meta.boxSize[2];
         const [centerX, centerY, centerZ] = meta.boxCenter;
-        if (align === 'height' && modelHeight > 1e-6)
-            scale *= clamp(boxHeight / modelHeight, AUTO_SCALE_MIN, AUTO_SCALE_MAX);
+        if (align === "height" && modelHeight > 1e-6)
+            scale *= clamp(
+                boxHeight / modelHeight,
+                AUTO_SCALE_MIN,
+                AUTO_SCALE_MAX
+            );
         targetX = centerX;
         targetY = centerY;
         targetZ = centerZ;
     } else {
         // 没有元数据：把模型底面贴到原点平面（仅当调用方明确允许时才用）
-        targetZ = modelHeight * scale / 2;
+        targetZ = (modelHeight * scale) / 2;
     }
 
     // 2) 朝向修正：Roll(绕 Y) → Pitch(绕 X) → Yaw(绕 Z)
@@ -169,7 +190,7 @@ export function buildModelPlacement(
     const placement = new Matrix4().makeTranslation(
         targetX + t.x * GRID_HORIZONTAL - offsetCenter.x,
         targetY + t.y * GRID_HORIZONTAL - offsetCenter.y,
-        targetZ + t.z * HEIGHT_GRID_SIZE - offsetCenter.z,
+        targetZ + t.z * HEIGHT_GRID_SIZE - offsetCenter.z
     );
     placement.multiply(entity);
     return placement;
@@ -182,10 +203,11 @@ const requested = new Set<number>();
 const changeListeners = new Set<() => void>();
 
 /** 解析某个模型号对应的最终渲染模型（GLB 优先 + 元数据回退），结果按 modelIndex 缓存 */
-export function resolveBuildingModel(modelIndex: number): ResolvedBuildingModel {
+export function resolveBuildingModel(
+    modelIndex: number
+): ResolvedBuildingModel {
     const cached = resolvedCache.get(modelIndex);
-    if (cached !== undefined)
-        return cached;
+    if (cached !== undefined) return cached;
 
     const meta = buildingMeta.get(modelIndex);
     let glbName: string | null = null;
@@ -201,13 +223,28 @@ export function resolveBuildingModel(modelIndex: number): ResolvedBuildingModel 
         }
     } catch (e) {
         // 解析/放置任何异常 → 保持 meta 回退
-        console.warn(`[glb] modelIndex ${modelIndex} 解析失败，回退元数据表`, e);
+        console.warn(
+            `[glb] modelIndex ${modelIndex} 解析失败，回退元数据表`,
+            e
+        );
         glb = null;
         placement = new Matrix4();
     }
 
-    const source: ModelSource = glb !== null && meta !== undefined ? 'glb' : (meta !== undefined ? 'meta' : 'unknown');
-    const result: ResolvedBuildingModel = { modelIndex, glbName, glb, meta, placement, source };
+    const source: ModelSource =
+        glb !== null && meta !== undefined
+            ? "glb"
+            : meta !== undefined
+            ? "meta"
+            : "unknown";
+    const result: ResolvedBuildingModel = {
+        modelIndex,
+        glbName,
+        glb,
+        meta,
+        placement,
+        source,
+    };
     resolvedCache.set(modelIndex, result);
     return result;
 }
@@ -221,7 +258,11 @@ export function resolveBuildingModel(modelIndex: number): ResolvedBuildingModel 
  */
 export function requestBuildingModel(modelIndex: number): void {
     const resolved = resolveBuildingModel(modelIndex);
-    if (resolved.glbName === null || resolved.glb !== null || requested.has(modelIndex))
+    if (
+        resolved.glbName === null ||
+        resolved.glb !== null ||
+        requested.has(modelIndex)
+    )
         return;
     requested.add(modelIndex);
     // 失败也只会 resolve(null)，渲染继续保持元数据表回退
@@ -243,7 +284,7 @@ onGlbModelLoaded(() => {
         try {
             cb();
         } catch (e) {
-            console.warn('[glb] 模型变更监听器抛错（已忽略）', e);
+            console.warn("[glb] 模型变更监听器抛错（已忽略）", e);
         }
     }
 });
@@ -292,18 +333,18 @@ export function getModelMappingReport(): ModelMappingReport {
         // 所有引用图标名下的候选文件都要登记，否则会误报“未使用文件”
         for (const r of refs) {
             for (const c of modelNameCandidates(r.icon, r.variantIndex)) {
-                if (availableModelNames.has(c))
-                    registered.add(c);
+                if (availableModelNames.has(c)) registered.add(c);
             }
         }
         const ref = refs[0];
-        const icon = ref?.icon ?? '';
+        const icon = ref?.icon ?? "";
         const variantIndex = ref?.variantIndex ?? 0;
-        const candidates = icon === '' ? [] : modelNameCandidates(icon, variantIndex);
+        const candidates =
+            icon === "" ? [] : modelNameCandidates(icon, variantIndex);
         return {
             modelIndex,
             itemId: ref?.itemId ?? null,
-            itemName: ref?.itemName ?? '(itemsData 未登记)',
+            itemName: ref?.itemName ?? "(itemsData 未登记)",
             icon,
             variantIndex,
             glbName: buildingModelName(modelIndex),
@@ -314,25 +355,23 @@ export function getModelMappingReport(): ModelMappingReport {
     const modelIndexes = Array.from(buildingMeta.keys()).sort((a, b) => a - b);
     for (const modelIndex of modelIndexes) {
         const entry = toEntry(modelIndex);
-        if (entry.glbName === null)
-            unmapped.push(entry);
-        else
-            mapped.push(entry);
+        if (entry.glbName === null) unmapped.push(entry);
+        else mapped.push(entry);
     }
 
     const missingMeta: ModelMappingEntry[] = [];
-    for (const modelIndex of Array.from(modelIndexItems.keys()).sort((a, b) => a - b)) {
-        if (buildingMeta.has(modelIndex))
-            continue;
+    for (const modelIndex of Array.from(modelIndexItems.keys()).sort(
+        (a, b) => a - b
+    )) {
+        if (buildingMeta.has(modelIndex)) continue;
         const entry = toEntry(modelIndex);
-        if (entry.glbName !== null)
-            missingMeta.push(entry);
+        if (entry.glbName !== null) missingMeta.push(entry);
     }
 
     // 别名表里登记的备选文件（例如 assembler-mk-1-lod2_0）在 toEntry 里已随候选加入 registered，
     // 因此这里不需要再处理别名。
     const unusedFiles = Array.from(availableModelNames)
-        .filter(name => !registered.has(name))
+        .filter((name) => !registered.has(name))
         .sort();
 
     return {

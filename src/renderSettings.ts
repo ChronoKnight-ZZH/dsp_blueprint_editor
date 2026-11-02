@@ -8,12 +8,18 @@
  * 导入时的值渲染。这也是设置面板里提示「需重新导入蓝图才能生效」的原因。
  */
 
-import { reactive } from 'vue';
-import type { FullRenderSettings } from '@/renderSettingsTypes';
+import { reactive } from "vue";
+import type { FullRenderSettings } from "@/renderSettingsTypes";
 
 /** 贴图通道：-a 反照率 / -n 法线 / -s 高光·粗糙 / -e 自发光 / -eff 特效 / -dirt 污渍 / -glass 玻璃 */
 export type TextureChannel =
-    | 'albedo' | 'normal' | 'spec' | 'emissive' | 'effect' | 'dirt' | 'glass';
+    | "albedo"
+    | "normal"
+    | "spec"
+    | "emissive"
+    | "effect"
+    | "dirt"
+    | "glass";
 
 export interface RenderSettings {
     /** 是否用外部 GLB 真实模型渲染；关闭后全部回退元数据方块 */
@@ -32,14 +38,21 @@ export interface RenderSettings {
  * 该文件是**纯类型**（不 import vue），供 `src/lib/core/**` 与 Viewer 使用；
  * 这里用可赋值检查锁死两者不会漂移：任一侧字段改名/改类型都会在此报错。
  */
-const _renderSettingsCompat: FullRenderSettings = null as unknown as RenderSettings;
+const _renderSettingsCompat: FullRenderSettings =
+    null as unknown as RenderSettings;
 void _renderSettingsCompat;
 
 // 渲染设置保存键名
-const STORAGE_KEY = 'dsp-blueprint-editor:render-settings';
+const STORAGE_KEY = "dsp-blueprint-editor:render-settings";
 
 const CHANNEL_KEYS: readonly TextureChannel[] = [
-    'albedo', 'normal', 'spec', 'emissive', 'effect', 'dirt', 'glass',
+    "albedo",
+    "normal",
+    "spec",
+    "emissive",
+    "effect",
+    "dirt",
+    "glass",
 ];
 
 // 默认设置
@@ -64,8 +77,7 @@ function loadSettings(): RenderSettings {
     const settings = defaultSettings();
     try {
         const raw = sessionStorage.getItem(STORAGE_KEY);
-        if (raw === null)
-            return settings;
+        if (raw === null) return settings;
 
         const saved = JSON.parse(raw) as {
             showRealModels?: unknown;
@@ -74,28 +86,30 @@ function loadSettings(): RenderSettings {
             maxInstancesPerModel?: unknown;
         };
 
-        if (typeof saved.showRealModels === 'boolean')
+        if (typeof saved.showRealModels === "boolean")
             settings.showRealModels = saved.showRealModels;
-        if (typeof saved.texturesEnabled === 'boolean')
+        if (typeof saved.texturesEnabled === "boolean")
             settings.texturesEnabled = saved.texturesEnabled;
 
-        if (saved.textures !== null && typeof saved.textures === 'object') {
+        if (saved.textures !== null && typeof saved.textures === "object") {
             for (const key of CHANNEL_KEYS) {
                 const value = saved.textures[key];
-                if (typeof value === 'boolean')
-                    settings.textures[key] = value;
+                if (typeof value === "boolean") settings.textures[key] = value;
             }
         }
 
         // JSON 无法表示 Infinity，约定用 null 表示无限
         if (saved.maxInstancesPerModel === null)
             settings.maxInstancesPerModel = Infinity;
-        else if (typeof saved.maxInstancesPerModel === 'number'
-            && Number.isFinite(saved.maxInstancesPerModel)
-            && saved.maxInstancesPerModel > 0)
-            settings.maxInstancesPerModel = Math.floor(saved.maxInstancesPerModel);
-    }
-    catch {
+        else if (
+            typeof saved.maxInstancesPerModel === "number" &&
+            Number.isFinite(saved.maxInstancesPerModel) &&
+            saved.maxInstancesPerModel > 0
+        )
+            settings.maxInstancesPerModel = Math.floor(
+                saved.maxInstancesPerModel
+            );
+    } catch {
         // sessionStorage 不可用（隐私模式等）或数据损坏 → 静默使用默认值
     }
     return settings;
@@ -117,7 +131,10 @@ export const renderSettings = reactive(loadSettings());
  */
 const appliedSettings: RenderSettings = defaultSettings();
 
-function copyRenderSettings(target: RenderSettings, source: RenderSettings): void {
+function copyRenderSettings(
+    target: RenderSettings,
+    source: RenderSettings
+): void {
     target.showRealModels = source.showRealModels;
     target.texturesEnabled = source.texturesEnabled;
     Object.assign(target.textures, source.textures);
@@ -140,16 +157,20 @@ export function captureRenderSettings(): void {
 /** 写回 sessionStorage；Infinity 序列化为 null */
 export function persistRenderSettings(): void {
     try {
-        sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
-            showRealModels: renderSettings.showRealModels,
-            texturesEnabled: renderSettings.texturesEnabled,
-            textures: { ...renderSettings.textures },
-            maxInstancesPerModel: Number.isFinite(renderSettings.maxInstancesPerModel)
-                ? renderSettings.maxInstancesPerModel
-                : null,
-        }));
-    }
-    catch {
+        sessionStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify({
+                showRealModels: renderSettings.showRealModels,
+                texturesEnabled: renderSettings.texturesEnabled,
+                textures: { ...renderSettings.textures },
+                maxInstancesPerModel: Number.isFinite(
+                    renderSettings.maxInstancesPerModel
+                )
+                    ? renderSettings.maxInstancesPerModel
+                    : null,
+            })
+        );
+    } catch {
         // 写失败只影响「刷新后保持」，不影响当前会话生效
     }
 }
