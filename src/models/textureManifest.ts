@@ -58,11 +58,6 @@ export const materialTextureFiles: Readonly<Record<string, MaterialMapFiles>> = 
         emissive: 'assets/icons/models/assembler/assembler-mk-4-e.png',
         spec: 'assets/icons/models/assembler/assembler-mk-4-s.png',
     },
-    "assembler::assembler-mk-1": {
-        normal: 'assets/icons/models/assembler/assembler-mk-n.png',
-        emissive: 'assets/icons/models/assembler/assembler-mk-e.png',
-        spec: 'assets/icons/models/assembler/assembler-mk-s.png',
-    },
     "battle-base::battle-base": {
         normal: 'assets/icons/models/battle base/battle-base-n.png',
         emissive: 'assets/icons/models/battle base/battle-base-e.png',
@@ -113,10 +108,10 @@ export const materialTextureFiles: Readonly<Record<string, MaterialMapFiles>> = 
         emissive: 'assets/icons/models/fractionator/fractionator-e.png',
         spec: 'assets/icons/models/fractionator/fractionator-s.png',
     },
-    "fuel-plant::power-generator-fusion": {
-        normal: 'assets/icons/models/fusion power station/fusion-power-station-n.png',
-        emissive: 'assets/icons/models/fusion power station/fusion-power-station-e.png',
-        spec: 'assets/icons/models/fusion power station/fusion-power-station-s.png',
+    "fuel-plant::power-generator-thermal": {
+        normal: 'assets/icons/models/power generator/power-generator-n.png',
+        emissive: 'assets/icons/models/power generator/power-generator-e.png',
+        spec: 'assets/icons/models/power generator/power-generator-s.png',
     },
     "fusion-power-station::power-generator-fusion": {
         normal: 'assets/icons/models/fusion power station/fusion-power-station-n.png',
@@ -227,11 +222,6 @@ export const materialTextureFiles: Readonly<Record<string, MaterialMapFiles>> = 
         normal: 'assets/icons/models/piler/piler-n.png',
         emissive: 'assets/icons/models/piler/piler-e.png',
         spec: 'assets/icons/models/piler/piler-s.png',
-    },
-    "power-generator::power-generator-thermal": {
-        normal: 'assets/icons/models/power generator/power-generator-n.png',
-        emissive: 'assets/icons/models/power generator/power-generator-e.png',
-        spec: 'assets/icons/models/power generator/power-generator-s.png',
     },
     "ray-receiver::ray-receiver": {
         normal: 'assets/icons/models/ray receiver/ray-receiver-n.png',

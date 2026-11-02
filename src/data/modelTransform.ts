@@ -78,9 +78,9 @@ export const modelTransform: Readonly<Record<number, ModelTransform>> = {
     483: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 集装分拣器 · inserter-4.glb
 
     // ── 四向分流器（三种变形共用 icon，模型按变形下标区分）───────────────
-    38: { x: 0, y: 0, z: -0.4, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 四向分流器 a · splitter-1.glb
-    39: { x: 0, y: 0, z: -0.4, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 四向分流器 b · splitter-2.glb
-    40: { x: 0, y: 0, z: -0.4, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 四向分流器 c · splitter-3.glb
+    38: { x: 0, y: 0, z: -0.4, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 四向分流器 a · splitter-a.glb
+    39: { x: 0, y: 0, z: -0.4, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 四向分流器 b · splitter-b.glb
+    40: { x: 0, y: 0, z: -0.4, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 四向分流器 c · splitter-c.glb
 
     // ── 物流设备 ──────────────────────────────────────────────────────
     257: { x: 0, y: 0, z: -0.5, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 自动集装机 · piler.glb

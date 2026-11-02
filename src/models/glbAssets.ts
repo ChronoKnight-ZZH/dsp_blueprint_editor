@@ -49,13 +49,12 @@ export interface ModelAlias {
 export const iconModelAliases: Readonly<Record<string, ModelAlias>> = {
     'assembler-1': {
         primary: 'assembler-1',
-        fallbacks: ['assembler'],
-        note: '制造台 Mk.I：实际导出名是 assembler-1（与 assembler 逐字节相同）；旧文档里的 lod1_0/lod2_0 文件并不存在，改为回退 assembler。',
+        note: '制造台 Mk.I：实际导出名是 assembler-1；旧的 assembler.glb 与其逐字节相同，已清理。',
     },
     'splitter-4dir': {
-        primary: 'splitter-1',
-        variants: ['splitter-1', 'splitter-2', 'splitter-3'],
-        note: '四向分流器三种变形：Item.models=[38,39,40] 的下标 0/1/2 → splitter-1/2/3（对应 buildingMeta 里的 四向分流器 a/b/c）。',
+        primary: 'splitter-a',
+        variants: ['splitter-a', 'splitter-b', 'splitter-c'],
+        note: '四向分流器三种变形：Item.models=[38,39,40] 的下标 0/1/2 → splitter-a/b/c（对应 buildingMeta 里的 四向分流器 a/b/c）。旧的 splitter-1/2/3.glb 与 a/b/c 逐字节相同，已清理。',
     },
     'accumulator-full': {
         primary: 'accumulator',

@@ -40,12 +40,12 @@ describe('建筑材质贴图清单 textureManifest', () => {
         }
     });
 
-    it('清单规模与当前资产一致（法线/自发光/spec 覆盖 69 个材质、161 张图）', () => {
+    it('清单规模与当前资产一致（法线/自发光/spec 覆盖 67 个材质、161 张图）', () => {
         const entries = Object.values(materialMapUrls);
-        expect(entries).toHaveLength(69);
-        expect(entries.filter(e => e.normal !== undefined)).toHaveLength(67);
-        expect(entries.filter(e => e.emissive !== undefined)).toHaveLength(61);
-        expect(entries.filter(e => e.spec !== undefined)).toHaveLength(69);
+        expect(entries).toHaveLength(67);
+        expect(entries.filter(e => e.normal !== undefined)).toHaveLength(65);
+        expect(entries.filter(e => e.emissive !== undefined)).toHaveLength(59);
+        expect(entries.filter(e => e.spec !== undefined)).toHaveLength(67);
         expect(manifestTextureFiles).toHaveLength(161);
     });
 });

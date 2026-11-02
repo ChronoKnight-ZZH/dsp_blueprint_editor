@@ -43,8 +43,6 @@ export const METALNESS_WITHOUT_SPEC_MAP = 0.25;
 export const modelMaterialTunings: Readonly<Record<string, Partial<ModelMaterialTuning>>> = {
     /** 蓄电器〔n+e+s〕 */
     'accumulator': { emissiveIntensity: 1.0, envMapIntensity: 0.8, metalness: 1.0 },
-    /** 制造台（旧模型，与 assembler-1 逐字节相同）〔n+e+s〕 */
-    'assembler': { emissiveIntensity: 1.0, envMapIntensity: 0.8, metalness: 1.0 },
     /** 制造台 Mk.I〔n+e+s〕 */
     'assembler-1': { emissiveIntensity: 1.0, envMapIntensity: 0.8, metalness: 1.0 },
     /** 制造台 Mk.II〔n+e+s〕 */
@@ -133,8 +131,6 @@ export const modelMaterialTunings: Readonly<Record<string, Partial<ModelMaterial
     'orbital-substation': { emissiveIntensity: 1.0, envMapIntensity: 0.8, metalness: 1.0 },
     /** 自动集装机〔n+e+s〕 */
     'piler': { emissiveIntensity: 1.0, envMapIntensity: 0.8, metalness: 1.0 },
-    /** 发电设备（power-generator）〔n+e+s〕 */
-    'power-generator': { emissiveIntensity: 1.0, envMapIntensity: 0.8, metalness: 1.0 },
     /** 射线接收站〔n+e+s〕 */
     'ray-receiver': { emissiveIntensity: 1.0, envMapIntensity: 0.8, metalness: 1.0 },
     /** 运载火箭〔n+e+s〕 */
@@ -149,12 +145,6 @@ export const modelMaterialTunings: Readonly<Record<string, Partial<ModelMaterial
     'solar-panel': { emissiveIntensity: 1.0, envMapIntensity: 0.8, metalness: 1.0 },
     /** 太空舱〔无通道图〕 */
     'space-capsule': { emissiveIntensity: 1.0, envMapIntensity: 0.8, metalness: 1.0 },
-    /** 四向分流器 a〔无通道图〕 */
-    'splitter-1': { emissiveIntensity: 1.0, envMapIntensity: 0.8, metalness: 1.0 },
-    /** 四向分流器 b〔无通道图〕 */
-    'splitter-2': { emissiveIntensity: 1.0, envMapIntensity: 0.8, metalness: 1.0 },
-    /** 四向分流器 c〔无通道图〕 */
-    'splitter-3': { emissiveIntensity: 1.0, envMapIntensity: 0.8, metalness: 1.0 },
     /** 四向分流器 a〔n+s〕 */
     'splitter-a': { emissiveIntensity: 1.0, envMapIntensity: 0.8, metalness: 1.0 },
     /** 四向分流器 b〔n+s〕 */

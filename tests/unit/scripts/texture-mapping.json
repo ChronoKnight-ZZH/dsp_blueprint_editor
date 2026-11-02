@@ -82,16 +82,6 @@
       "spec": null
     },
     {
-      "glb": "assembler",
-      "material": "assembler-mk-1",
-      "albedo": "assembler/assembler-mk-a.png",
-      "stem": "assembler-mk",
-      "dir": "assembler",
-      "normal": "assembler/assembler-mk-n.png",
-      "emissive": "assembler/assembler-mk-e.png",
-      "spec": "assembler/assembler-mk-s.png"
-    },
-    {
       "glb": "battle-base",
       "material": "battle-base",
       "albedo": "battle base/battle-base-a.png",
@@ -297,26 +287,6 @@
       "albedo": "fractionator/fractionator-glass-s.png",
       "stem": null,
       "dir": "fractionator",
-      "normal": null,
-      "emissive": null,
-      "spec": null
-    },
-    {
-      "glb": "fuel-plant",
-      "material": "power-generator-fusion",
-      "albedo": "fusion power station/fusion-power-station-a.png",
-      "stem": "fusion-power-station",
-      "dir": "fusion power station",
-      "normal": "fusion power station/fusion-power-station-n.png",
-      "emissive": "fusion power station/fusion-power-station-e.png",
-      "spec": "fusion power station/fusion-power-station-s.png"
-    },
-    {
-      "glb": "fuel-plant",
-      "material": "power-generator-fusion-effect",
-      "albedo": "fusion power station/fusion-power-station-effect.png",
-      "stem": null,
-      "dir": "fusion power station",
       "normal": null,
       "emissive": null,
       "spec": null
@@ -762,7 +732,7 @@
       "spec": null
     },
     {
-      "glb": "power-generator",
+      "glb": "fuel-plant",
       "material": "power-generator-thermal",
       "albedo": "power generator/power-generator-a.png",
       "stem": "power-generator",
@@ -772,7 +742,7 @@
       "spec": "power generator/power-generator-s.png"
     },
     {
-      "glb": "power-generator",
+      "glb": "fuel-plant",
       "material": "power-generator-thermal-glass",
       "albedo": "fractionator/fractionator-glass-s.png",
       "stem": null,
@@ -782,7 +752,7 @@
       "spec": null
     },
     {
-      "glb": "power-generator",
+      "glb": "fuel-plant",
       "material": "power-generator-thermal-effect",
       "albedo": "power generator/power-generator-effect.png",
       "stem": null,

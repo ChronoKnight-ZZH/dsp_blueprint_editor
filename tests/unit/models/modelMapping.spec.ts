@@ -13,20 +13,20 @@ describe('GLB 模型解析表', () => {
         expect(modelNameCandidates('mining-drill-mk2')).toEqual(['mining-drill-mk2']);
     });
 
-    test('制造台 Mk.I：文件名与 icon 同名，缺失时回退汇编命名 assembler', () => {
-        expect(modelNameCandidates('assembler-1')).toEqual(['assembler-1', 'assembler']);
+    test('制造台 Mk.I：文件名与 icon 同名（旧的 assembler.glb 副本已清理）', () => {
+        expect(modelNameCandidates('assembler-1')).toEqual(['assembler-1']);
     });
 
     test('共用模型：蓄电器（满）复用 accumulator', () => {
         expect(modelNameCandidates('accumulator-full')).toEqual(['accumulator']);
     });
 
-    test('四向分流器：三种变形按 Item.models 下标取 splitter-1/2/3', () => {
-        expect(modelNameCandidates('splitter-4dir', 0)).toEqual(['splitter-1']);
-        expect(modelNameCandidates('splitter-4dir', 1)).toEqual(['splitter-2']);
-        expect(modelNameCandidates('splitter-4dir', 2)).toEqual(['splitter-3']);
+    test('四向分流器：三种变形按 Item.models 下标取 splitter-a/b/c', () => {
+        expect(modelNameCandidates('splitter-4dir', 0)).toEqual(['splitter-a']);
+        expect(modelNameCandidates('splitter-4dir', 1)).toEqual(['splitter-b']);
+        expect(modelNameCandidates('splitter-4dir', 2)).toEqual(['splitter-c']);
         // 下标越界时钳制到最后一个变形，避免 undefined
-        expect(modelNameCandidates('splitter-4dir', 9)).toEqual(['splitter-3']);
+        expect(modelNameCandidates('splitter-4dir', 9)).toEqual(['splitter-c']);
     });
 
     test('分流器的三种变形与 itemsData 的 models 顺序一一对应', () => {
@@ -34,7 +34,7 @@ describe('GLB 模型解析表', () => {
         expect(splitter).toBeDefined();
         expect(splitter!.models).toEqual([38, 39, 40]);
         expect(splitter!.models.map((_m, i) => modelNameCandidates(splitter!.icon, i)[0]))
-            .toEqual(['splitter-1', 'splitter-2', 'splitter-3']);
+            .toEqual(['splitter-a', 'splitter-b', 'splitter-c']);
     });
 
     test('别名表结构自检：每条都给了说明，variants 与 primary 不冲突', () => {

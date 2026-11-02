@@ -17,6 +17,7 @@
 
 import type { Object3D, Texture } from 'three';
 import { getBuildingEnvironment } from './envMap';
+import { missingAlbedoTexture } from './textureFallback';
 import type { LoadedGlbModel } from './glbLoader';
 import { METALNESS_WITHOUT_SPEC_MAP, resolveModelMaterialTuning } from './modelMaterialTuning';
 import { materialMapUrls } from './textureManifest';
@@ -123,6 +124,7 @@ function applyToMaterial(
     tuning: { emissiveIntensity: number; envMapIntensity: number; metalness: number },
     textures: MaterialTextureSet | null,
     settings: TextureSettings,
+    fallbackAlbedo: Texture | null,
 ): void {
     const base = snapshotOf(material);
     // settings 由调用方传入（编辑器注入的是「已生效」快照）：本函数随建场景在 Vue
@@ -130,8 +132,9 @@ function applyToMaterial(
     // 改设置会立即重建整个场景
     const useTextures = settings.texturesEnabled;
 
-    // 0) -a 反照率：关闭后只保留材质基础色（GLB 内嵌的底色图）
-    material.map = useTextures && settings.textures.albedo ? base.map : null;
+    // 0) -a 反照率：关闭后只保留材质基础色（GLB 内嵌的底色图）；
+    //    GLB 里压根没有底色图的材质（*-black / DefaultMaterial / 无材质网格）用纯色兜底
+    material.map = useTextures && settings.textures.albedo ? (base.map ?? fallbackAlbedo) : null;
 
     // 1) 环境反射强度：给所有标准材质都设，金属/玻璃都有反射可吃，避免发黑
     material.envMap = getBuildingEnvironment();
@@ -177,6 +180,9 @@ function applyToMaterial(
     material.needsUpdate = true;
 }
 
+/** 已经打过「缺底色」日志的材质，避免设置变化重跑时刷屏 */
+const fallbackLogged = new WeakSet<StandardMaterialLike>();
+
 /**
  * 给一个已加载的 GLB 模型套用通道贴图与调参。
  * **永不 reject**；返回真正挂上了通道贴图的材质数量（便于日志/测试）。
@@ -191,21 +197,31 @@ export async function applyModelMaterialTextures(model: LoadedGlbModel, settings
 
     let textured = 0;
     await Promise.all(materials.map(async material => {
+        // GLB 里没有内嵌底色图的材质 → 按材质名解析纯色兜底。
+        // 注意用快照里的原始 map 判断：重跑时 material.map 可能已被上次改成兜底贴图
+        const originalMap = snapshotOf(material).map;
+        const fallbackAlbedo = originalMap === null
+            ? missingAlbedoTexture(model.name, material.name)
+            : null;
+        if (fallbackAlbedo !== null && !fallbackLogged.has(material)) {
+            fallbackLogged.add(material);
+            console.info(`[tex] 材质 ${model.name}::${material.name} 缺少底色贴图，使用纯色兜底 #${fallbackAlbedo.name.replace('fallback-albedo-', '')}`);
+        }
         const urls = materialMapUrls[`${model.name}::${material.name}`];
         if (urls === undefined) {
             // 没有通道图（特效/玻璃材质，或该模型本身没导出通道图）：只套参数
-            applyToMaterial(material, tuning, null, settings);
+            applyToMaterial(material, tuning, null, settings, fallbackAlbedo);
             return;
         }
         try {
             const textures = await loadMaterialTextureSet(urls);
-            applyToMaterial(material, tuning, textures, settings);
+            applyToMaterial(material, tuning, textures, settings, fallbackAlbedo);
             if (textures.normal !== null || textures.emissive !== null || textures.orm !== null)
                 textured++;
         }
         catch (e) {
             console.warn(`[tex] 材质 ${model.name}::${material.name} 贴图接入失败（保留底色）`, e);
-            applyToMaterial(material, tuning, null, settings);
+            applyToMaterial(material, tuning, null, settings, fallbackAlbedo);
         }
     }));
     return textured;
