@@ -34,7 +34,7 @@ import {
  *   因此把升档阈值设在 1.0R（近距离才能看清细节），降档阈值设在 2.0R（远观不需要）。
  */
 const FINE_GRID_DISTANCE_IN = PLANET_RADIUS * 1.2;
-const FINE_GRID_DISTANCE_OUT = PLANET_RADIUS * 1.5;
+const FINE_GRID_DISTANCE_OUT = PLANET_RADIUS * 1.3;
 
 /** 构建结果：粗+细网格整体 Group，以及可选的细线子 Group（供 LOD 切换） */
 export interface PlanetGridResult {

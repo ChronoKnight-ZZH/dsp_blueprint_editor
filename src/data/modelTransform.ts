@@ -1,5 +1,5 @@
 /**
- * 建筑模型变换表：逐模型设置「偏移 + 旋转」。
+ * 建筑模型变换表：逐模型设置「偏移 + 旋转」，并可选给真实模型着色。
  *
  * 与 `@/data/building` 的 `buildingMeta` **同键**（modelIndex），一条建筑一行，
  * 默认全部为 0 = 不做任何额外变换（模型按元数据盒自动居中、按高度等比缩放）。
@@ -22,6 +22,8 @@
  * 即偏移**不受旋转影响**，永远沿建筑格子的 x/y/z 走（`z: -10` 就是往下 10 格）。
  *
  * ── 可选高级字段 ─────────────────────────────────────────────────────────
+ *   color ：真实模型（GLB）的着色，十六进制 0xRRGGBB，渲染时乘到材质上；
+ *           缺省 = 不着色。目前制造台 4 个 + 熔炉 3 个先沿用了元数据表的配色。
  *   upAxis：GLB 的「上」方向轴，glTF 标准是 'y'（默认），个别模型可能是 'z'
  *   align ：'height'（默认，按元数据盒高度等比缩放）| 'none'（保持原始比例）
  */
@@ -44,6 +46,11 @@ export interface ModelTransform {
     roll: number;
     /** 大小：等比缩放系数（默认 1 = 原始大小；>1 放大，<1 缩小） */
     scale: number;
+    /**
+     * 真实模型（GLB）的着色，十六进制 `0xRRGGBB`，渲染时乘到模型材质上。
+     * 缺省 = 不着色（保留模型自身的材质/贴图颜色）。
+     */
+    color?: number;
 
     /** 高级：GLB 的“上”方向轴，默认 'y' */
     upAxis?: ModelUpAxis;
@@ -91,47 +98,47 @@ export const modelTransform: Readonly<Record<number, ModelTransform>> = {
     // ── 物流设备 ──────────────────────────────────────────────────────
     257: { x: 0, y: 0, z: -0.5, pitch: 0, yaw: 0, roll: 0, scale: 1.4 }, // 自动集装机 · piler.glb
     208: { x: 0, y: 0, z: -0.1, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 流速监测器 · monitor.glb
-    120: { x: -0, y: -0.3, z: -0.4, pitch: 0, yaw: -180, roll: 0, scale: 1 }, // 喷涂机 · spray-coater.glb
-    371: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 物流配送器 · delivery-machine.glb
+    120: { x: -0, y: -0.3, z: -0.4, pitch: 0, yaw: -180, roll: 0, scale: 1.3 }, // 喷涂机 · spray-coater.glb
+    371: { x: 0, y: 0, z: -0.5, pitch: 0, yaw: 0, roll: 0, scale: 1.2 }, // 物流配送器 · delivery-machine.glb
     49: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 物流运输站 · logistic-station.glb
     50: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 星际物流运输站 · interstellar-logistic-station.glb
 
     // ── 仓储 ─────────────────────────────────────────────────────────
-    51: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1.2 }, // 小型储物仓 · storage-1.glb
-    52: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1.2 }, // 大型储物仓 · storage-2.glb
+    51: { x: 0, y: 0, z: -0.3, pitch: 0, yaw: 0, roll: 0, scale: 1.2 }, // 小型储物仓 · storage-1.glb
+    52: { x: 0, y: 0, z: -0.3, pitch: 0, yaw: 0, roll: 0, scale: 1.2 }, // 大型储物仓 · storage-2.glb
     121: { x: 0, y: 0, z: -0.5, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 储液罐 · storage-tank.glb
 
     // ── 制造台 ───────────────────────────────────────────────────────
-    65: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 制造台 Mk.I · assembler-1.glb
-    66: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 制造台 Mk.II · assembler-2.glb
-    67: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 制造台 Mk.III · assembler-3.glb
-    456: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 制造台 Mk.IV · assembler-4.glb
+    65: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1, color: 0xedab5c }, // 制造台 Mk.I · assembler-1.glb
+    66: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1, color: 0x38e5e1 }, // 制造台 Mk.II · assembler-2.glb
+    67: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1, color: 0x45c6e5 }, // 制造台 Mk.III · assembler-3.glb
+    456: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1, color: 0x365258 }, // 制造台 Mk.IV · assembler-4.glb
 
     // ── 电力 ─────────────────────────────────────────────────────────
     44: { x: 0, y: 0, z: -0.1, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 电力感应塔 · tesla-coil.glb
-    71: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 无线输电塔 · charging-pole.glb
-    68: { x: 0, y: 0, z: -8, pitch: 0, yaw: 0, roll: 0, scale: 2 }, // 卫星配电站 · orbital-substation.glb
-    53: { x: 0, y: 0, z: -3, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 风力涡轮机 · wind-turbine.glb
+    71: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 0.5 }, // 无线输电塔 · charging-pole.glb
+    68: { x: 0, y: 0, z: -13.5, pitch: 0, yaw: 0, roll: 0, scale: 1.8 }, // 卫星配电站 · orbital-substation.glb
+    53: { x: 0, y: 0, z: -3, pitch: 0, yaw: 0, roll: 0, scale: 2 }, // 风力涡轮机 · wind-turbine.glb
     54: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 火力发电厂 · fuel-plant.glb
     118: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 微型聚变发电站 · fusion-power-station.glb
-    255: { x: 0, y: 0, z: -8, pitch: 0, yaw: 0, roll: 0, scale: 2 }, // 地热发电站 · geothermal-power-station.glb
+    255: { x: 0, y: 0, z: -12.5, pitch: 0, yaw: 0, roll: 0, scale: 2 }, // 地热发电站 · geothermal-power-station.glb
     45: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 能量枢纽 · energy-exchanger.glb
     46: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 蓄电器 · accumulator.glb
-    55: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 0.5 }, // 太阳能板 · solar-panel.glb
+    55: { x: 0, y: 0, z: -1, pitch: 0, yaw: 0, roll: 0, scale: 0.5 }, // 太阳能板 · solar-panel.glb
     72: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 电磁轨道弹射器 · em-rail-ejector.glb
     73: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 射线接收站 · ray-receiver.glb
     74: { x: 0, y: 0, z: -4, pitch: 0, yaw: 0, roll: 0, scale: 2 }, // 垂直发射井 · vertical-launching-silo.glb
     56: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 人造恒星 · fusion-reactor.glb
 
     // ── 采集 / 冶炼 / 化工 ─────────────────────────────────────────────
-    57: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 采矿机 · mining-drill.glb
-    256: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 大型采矿机 · mining-drill-mk2.glb
+    57: { x: 0, y: 0, z: -1, pitch: 0, yaw: 0, roll: 0, scale: 0.8 }, // 采矿机 · mining-drill.glb
+    256: { x: 0, y: 0, z: 0.5, pitch: 0, yaw: 0, roll: 0, scale: 1.2 }, // 大型采矿机 · mining-drill-mk2.glb
     60: { x: 0, y: 0, z: -1, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 抽水站 · water-pump.glb
     61: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1.2 }, // 原油萃取站 · oil-extractor.glb
     63: { x: 0, y: 0, z: 0, pitch: 0, yaw: -180, roll: 0, scale: 1.2 }, // 原油精炼厂 · oil-refinery.glb
-    62: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 电弧熔炉 · smelter.glb
-    194: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 位面熔炉 · smelter-2.glb
-    457: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 熔炉 Mk.III · smelter-3.glb
+    62: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1, color: 0x739ce5 }, // 电弧熔炉 · smelter.glb
+    194: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1, color: 0xc84f58 }, // 位面熔炉 · smelter-2.glb
+    457: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1, color: 0x365258 }, // 熔炉 Mk.III · smelter-3.glb
     64: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 化工厂 · chemical-plant.glb
     376: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 化工厂 Mk.II · chemical-plant-2.glb
     119: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 分馏塔 · fractionator.glb
@@ -139,7 +146,7 @@ export const modelTransform: Readonly<Record<number, ModelTransform>> = {
     // ── 研究 / 大型设施 ───────────────────────────────────────────────
     69: { x: 0, y: 0, z: 0, pitch: 0, yaw: 180, roll: 0, scale: 1.5 }, // 微型粒子对撞机 · hadron-collider.glb
     70: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 2 }, // 矩阵研究站 · lab.glb
-    455: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 2 }, // 矩阵研究站 Mk.II · lab-2.glb
+    455: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 2, color: 0x365258 }, // 矩阵研究站 Mk.II · lab-2.glb
 
     // ── 防御 ─────────────────────────────────────────────────────────
     374: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 高斯机枪塔 · turret-gauss.glb
@@ -150,11 +157,11 @@ export const modelTransform: Readonly<Record<number, ModelTransform>> = {
     403: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 2 }, // 信标 · turret-signal.glb
     402: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 护盾发生器 · turret-shield.glb
     482: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 地面电浆炮 · turret-plasma-ground.glb
-    422: { x: 0, y: 0, z: -2, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 干扰塔 · turret-disturb.glb
+    422: { x: 0, y: 0, z: -2.3, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 干扰塔 · turret-disturb.glb
 
     // ── 战场 / 其他 ───────────────────────────────────────────────────
-    453: { x: 0, y: 0, z: 2, pitch: 0, yaw: -180, roll: 0, scale: 1.5 }, // 战场分析基站 · battle-base.glb
-    664: { x: 0, y: 0, z: -2, pitch: 0, yaw: 0, roll: 0, scale: 2 }, // 全息信标 · lighthouse.glb
+    453: { x: 0, y: 0, z: 1.2, pitch: 0, yaw: -180, roll: 0, scale: 1.6 }, // 战场分析基站 · battle-base.glb
+    664: { x: 0, y: 0, z: -2, pitch: 0, yaw: 0, roll: 0, scale: 2.2 }, // 全息信标 · lighthouse.glb
 };
 
 /** 取某个建筑模型的变换；未登记时返回全 0（不抛错） */

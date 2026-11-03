@@ -243,6 +243,7 @@ export function buildBuildings(
             {
                 model: NonNullable<ResolvedBuildingModel["glb"]>;
                 placement: Matrix4;
+                tint: number | null;
                 buildings: BlueprintBuilding[];
             }
         >();
@@ -271,6 +272,7 @@ export function buildBuildings(
                     group = {
                         model: r.glb,
                         placement: r.placement,
+                        tint: r.tint,
                         buildings: [],
                     };
                     glbGroups.set(r.modelIndex, group);
@@ -301,7 +303,8 @@ export function buildBuildings(
                 instances = new GlbModelInstances(
                     group.model,
                     group.placement,
-                    group.buildings.map((b) => transforms[b.index][0])
+                    group.buildings.map((b) => transforms[b.index][0]),
+                    group.tint
                 );
             } catch (e) {
                 console.warn("[glb] 实例化渲染失败，该模型组回退元数据表", e);

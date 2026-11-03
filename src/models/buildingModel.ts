@@ -46,6 +46,8 @@ export interface ResolvedBuildingModel {
     readonly glb: LoadedGlbModel | null;
     /** 元数据表条目（回退基准） */
     readonly meta: BuildingMeta | undefined;
+    /** 真实模型着色（`modelTransform.color`）；null = 不着色，保留模型自身材质 */
+    readonly tint: number | null;
     /** GLB 模型空间 → 建筑局部空间（z 轴向上）的放置矩阵；无 GLB 时为单位矩阵 */
     readonly placement: Matrix4;
     readonly source: ModelSource;
@@ -242,6 +244,7 @@ export function resolveBuildingModel(
         glbName,
         glb,
         meta,
+        tint: modelTransformOf(modelIndex).color ?? null,
         placement,
         source,
     };

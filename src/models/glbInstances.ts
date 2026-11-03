@@ -8,7 +8,7 @@
  * 每个实例的矩阵 = 建筑世界矩阵 × 放置矩阵 × 子网格在模型内的局部矩阵。
  */
 
-import { Group, InstancedMesh, Matrix4, Mesh } from "three";
+import { Color, Group, InstancedMesh, Matrix4, Mesh } from "three";
 import type { Object3D } from "three";
 import type { LoadedGlbModel } from "./glbLoader";
 
@@ -55,11 +55,13 @@ export class GlbModelInstances extends Group {
      * @param model            已加载的 GLB 原型
      * @param placement        模型空间 → 建筑局部空间的放置矩阵
      * @param buildingTransforms 每个实例的建筑世界矩阵
+     * @param tint             可选的实例着色（`modelTransform.color`）；null/省略 = 不着色
      */
     constructor(
         model: LoadedGlbModel,
         placement: Matrix4,
-        buildingTransforms: readonly Matrix4[]
+        buildingTransforms: readonly Matrix4[],
+        tint: number | null = null
     ) {
         super();
         this.name = `glb:${model.name}`;
@@ -70,6 +72,7 @@ export class GlbModelInstances extends Group {
         const parts = collectParts(model.scene);
         if (parts.length === 0) return;
 
+        const tintColor = tint === null ? null : new Color(tint);
         const instanceMatrix = new Matrix4();
         const partMatrix = new Matrix4();
         for (const part of parts) {
@@ -84,8 +87,10 @@ export class GlbModelInstances extends Group {
                 );
                 partMatrix.multiplyMatrices(instanceMatrix, part.localMatrix);
                 mesh.setMatrixAt(i, partMatrix);
+                if (tintColor !== null) mesh.setColorAt(i, tintColor);
             }
             mesh.instanceMatrix.needsUpdate = true;
+            if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
             this.meshes.push(mesh);
             this.add(mesh);
         }
