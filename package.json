@@ -1,6 +1,6 @@
 {
     "name": "dsp_blueprint_editor",
-    "version": "0.1.0",
+    "version": "1.5.0",
     "private": true,
     "main": "dist-lib/dsp-blueprint-editor.umd.js",
     "module": "dist-lib/dsp-blueprint-editor.esm.js",
@@ -20,7 +20,8 @@
         "cli": "ts-node -r tsconfig-paths/register -O \"{\\\"module\\\": \\\"commonjs\\\"}\" src/cli.ts",
         "i18n:report": "vue-cli-service i18n:report --src \"./src/**/*.?(js|vue)\" --locales \"./src/locales/**/*.json\"",
         "postinstall": "patch-package",
-        "format": "prettier --write \"src/**/*.{js,ts,jsx,tsx,vue,json,css,scss,md}\""
+        "format": "prettier --write \"src/**/*.{js,ts,jsx,tsx,vue,json,css,scss,md}\"",
+        "release": "standard-version --release-type minor --commit-message \"chore: release v%VERSION\""
     },
     "dependencies": {
         "baseline-browser-mapping": "^2.11.29",
