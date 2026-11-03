@@ -896,6 +896,8 @@ export class RenderCore {
 
             const cameraUpdated = this.controls.update();
             this.planet.dirLight.position.copy(this._camera.position);
+            // 网格 LOD：按相机到球心的距离切换细线可见性（双阈值迟滞在 planetScene 内部）
+            this.planet.updateGridLOD(this._camera.position.length());
             this.renderer.render(this.scene, this._camera);
             if (cameraUpdated) {
                 this._cameraVersion++;

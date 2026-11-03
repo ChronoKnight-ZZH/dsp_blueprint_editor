@@ -25,16 +25,32 @@ for (let i = 0; i < segmentArr.length - 1; i++) {
     segmentMap.set(segmentArr[i][1], i);
 }
 
+/**
+ * 把纬度圈的半径（以“段”为单位，赤道处为 `maxSegment`）换算成该纬度圈
+ * 距离赤道的段数。
+ *
+ * 纬度圈半径 r = R·sin(θ)（θ 为从北极起算的极角），因此它到赤道的角距
+ * 为 π/2 − θ = acos(r / R)。每段对应的角度是 2π / maxSegment（同一单位下
+ * 整圈为 maxSegment 段），相除后向上取整即得结果；极点处为 maxSegment / 4 段。
+ */
 function calcLatitudeSeg(seg: number, maxSegment = 200) {
     const latitude = Math.acos(seg / maxSegment);
     const radPerSeg = (2 * Math.PI) / maxSegment;
     return Math.ceil(latitude / radPerSeg);
 }
 
+/**
+ * 取第 i 个纬度带的描述信息（单位均为“段”）：
+ * - `minLatitudeSeg`：该带的起始边界，用距赤道的带符号段数表示，
+ *   正负号决定它落在赤道哪一侧；
+ * - `latitudeSeg`：从起始边界到结束边界的跨度，可为负，表示朝相反方向跨过赤道；
+ * - `longitudeSeg`：该带的经度分段数，越靠近两极分段越少。
+ */
 function planetAreaByIndex(i: number, segment = 200) {
     const [minSeg, longitudeSeg] = segmentArr[i];
     const maxSeg = segmentArr[i + 1][0];
     const maxLatitudeSeg = calcLatitudeSeg(minSeg, segment);
+    // maxSeg >= segment 说明该带已经跨过赤道（到南半球），此时距离取负值
     const minLatitudeSeg =
         maxSeg >= segment ? -maxLatitudeSeg : calcLatitudeSeg(maxSeg, segment);
     const latitudeSeg = maxLatitudeSeg - minLatitudeSeg;
@@ -45,12 +61,19 @@ function planetAreaByIndex(i: number, segment = 200) {
     };
 }
 
+/**
+ * 依次产出星球上每个纬度带的网格参数，供 `buildPlanetGrid` 生成经线。
+ *
+ * 数据表只描述了各纬度带单侧的几何参数，因此对完全位于赤道一侧的带
+ * （`minLatitudeSeg > 0`）额外产出一条符号相反、跨度反向的镜像区间，
+ * 补齐赤道另一侧的经线；跨赤道的带本身已横跨两侧（`minLatitudeSeg < 0`），无需镜像。
+ */
 export function* gridAreas(segment = 200) {
     for (let i = 1; i < segmentArr.length - 1; i++) {
         const seg = planetAreaByIndex(i, segment);
         yield seg;
         if (seg.minLatitudeSeg > 0) {
-            // cross the equator
+            // cross the equator：镜像到赤道另一侧
             yield {
                 minLatitudeSeg: -seg.minLatitudeSeg,
                 latitudeSeg: -seg.latitudeSeg,

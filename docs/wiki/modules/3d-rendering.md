@@ -123,7 +123,7 @@ export class Cargos extends InstancedMesh {
 
 ### PlanetMapControls（参见：src/PlanetMapControls.ts）
 
-星球地图相机（高德地图网页版那一套）。**锚点是球面上的一点**（`anchor`，单位向量），不是球心；相机永远看向 `anchor × R`，因此才能出现真正的俯仰 —— 旧版锚在球心时，屏幕中心的视线永远垂直于球面，怎么拖都只是一张俯视图。
+星球地图相机。**锚点是球面上的一点**（`anchor`，单位向量），不是球心；相机永远看向 `anchor × R`，实现真正的俯仰 —— 旧版锚在球心时，屏幕中心的视线永远垂直于球面，怎么拖都只是一张俯视图。
 
 - 状态：
   - `anchor`（球面单位向量，同时是当地法线）/ `viewDir`（切平面内由锚点指向相机的单位向量，`update()` 保证其与 `anchor` 正交，即平移时的平行移动）。

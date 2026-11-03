@@ -473,6 +473,8 @@ onMounted(() => {
         requestAnimationFrame(animate);
         const cameraUpdated = c.update();
         dirLight.position.copy(camera.position);
+        // 网格 LOD：按相机到球心的距离切换细线可见性
+        planetScene.updateGridLOD(camera.position.length());
         renderer.render(scene, camera);
         if (cameraUpdated) {
             cameraPosVersion.value++;
