@@ -31,6 +31,11 @@ module.exports = defineConfig({
             rules: [
                 {
                     test: /\/assets\//,
+                    // 排除代码文件：本规则在 Linux（正斜杠路径）下会误命中
+                    // src/lib/assets/*.ts，把 TS 模块吞成 asset（只剩 default 导出的
+                    // URL 字符串），导致 assetResolver 在 CI 产物里变成 undefined。
+                    // Windows 上路径是反斜杠，本规则原本就匹配不到任何文件，行为不变。
+                    exclude: /\.[jt]sx?$/,
                     type: 'asset',
                 }, {
                     // 物品/配方图标：独立成文件并归入 img/item_recipe/。
@@ -42,6 +47,7 @@ module.exports = defineConfig({
                     },
                 }, {
                     test: /\/assets\/icons\/(signal|tech)\//,
+                    exclude: /\.[jt]sx?$/,
                     type: 'asset/resource',
                 }, {
                     // 建筑 GLB 模型：强制输出独立文件（不走 <8KB 内联），
