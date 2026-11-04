@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>KTX2 GLB 加载 / 贴图开关 Demo</title>
+<style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #0d1013; color: #e7edf3;
+                 font: 13px/1.6 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; }
+    canvas { display: block; }
+    #panel {
+        position: absolute; top: 12px; left: 12px; width: 320px; max-height: calc(100% - 24px);
+        overflow: auto; padding: 12px 14px; border-radius: 10px;
+        background: rgba(16, 20, 26, .88); border: 1px solid #2a3442;
+        backdrop-filter: blur(6px);
+    }
+    h1 { font-size: 13px; margin: 0 0 10px; letter-spacing: .04em; color: #8fb6e0; font-weight: 600; }
+    fieldset { border: 1px solid #26303d; border-radius: 8px; margin: 0 0 10px; padding: 8px 10px 10px; }
+    legend { padding: 0 4px; color: #7f8c9b; font-size: 11px; }
+    label { display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+    label + label { margin-top: 5px; }
+    input[type="checkbox"] { accent-color: #3f8fd4; }
+    input[type="color"] { width: 34px; height: 22px; padding: 0; border: 1px solid #2c3746; background: none; }
+    input[type="text"], input[type="range"] { width: 100%; }
+    input[type="text"] { background: #11161d; color: #d7e2ed; border: 1px solid #2c3746;
+                         border-radius: 6px; padding: 5px 7px; font-family: inherit; font-size: 12px; }
+    button { background: #1d2b3a; color: #cfe3f5; border: 1px solid #2f4257; border-radius: 6px;
+             padding: 5px 9px; cursor: pointer; font-family: inherit; font-size: 12px; }
+    button:hover { background: #26374a; }
+    .row { display: flex; gap: 6px; align-items: center; }
+    .row > * { flex: 1 1 auto; }
+    .hint { color: #6f7c8a; font-size: 11px; margin-top: 6px; }
+    #log { font: 11px/1.5 ui-monospace, Consolas, monospace; color: #7d8b99; white-space: pre-wrap;
+           max-height: 150px; overflow: auto; }
+    #stats { position: absolute; right: 12px; bottom: 12px; font: 11px/1.5 ui-monospace, Consolas, monospace;
+             color: #66727f; text-align: right; }
+</style>
+</head>
+<body>
+<div id="panel">
+    <h1>KTX2 GLB · 加载与贴图开关</h1>
+
+    <fieldset>
+        <legend>模型</legend>
+        <input type="file" id="file" accept=".glb,.gltf" />
+        <div class="row" style="margin-top:6px">
+            <button id="reload">重载</button>
+            <button id="reset">全部恢复</button>
+        </div>
+        <div class="hint">选本地 .glb 文件（内嵌 KTX2），不经过网络。</div>
+    </fieldset>
+
+    <fieldset>
+        <legend>贴图通道</legend>
+        <label><input type="checkbox" id="t-albedo" checked /> 底色 baseColor（ETC1S）</label>
+        <label><input type="checkbox" id="t-normal" checked /> 法线 normal（UASTC）</label>
+        <label><input type="checkbox" id="t-emissive" checked /> 自发光 emissive（ETC1S）</label>
+        <label><input type="checkbox" id="t-orm" checked /> 粗糙度/金属 ORM（UASTC）</label>
+        <label style="margin-top:8px"><input type="checkbox" id="t-solid" /> 关闭时改用<strong>纯色占位图</strong></label>
+        <div class="row" style="margin-top:8px">
+            <span style="flex:0 0 auto;color:#7f8c9b">底色兜底</span>
+            <input type="color" id="c-albedo" value="#8f9498" />
+        </div>
+        <div class="row" style="margin-top:6px">
+            <span style="flex:0 0 auto;color:#7f8c9b">法线兜底</span>
+            <input type="color" id="c-normal" value="#8080ff" />
+        </div>
+        <div class="hint">勾掉 = 置空该槽位；勾上「纯色占位图」= 换成 1×1 纯色 DataTexture。</div>
+    </fieldset>
+
+    <fieldset>
+        <legend>渲染</legend>
+        <label><input type="checkbox" id="t-auto" checked /> 自动旋转</label>
+        <label><input type="checkbox" id="t-wire" /> 线框</label>
+        <div class="hint" id="materials"></div>
+    </fieldset>
+
+    <fieldset>
+        <legend>日志</legend>
+        <div id="log"></div>
+    </fieldset>
+</div>
+<div id="stats"></div>
+
+<!--
+    three 0.160 走 CDN import map：版本必须与项目 package.json 里的 three 对齐。
+    真实项目里不必用 import map —— 直接 import 本地 three 即可，
+    关键是 setTranscoderPath() 指向 public/basis/。
+-->
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { KTX2Loader } from "three/addons/loaders/KTX2Loader.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+
+// ---------------------------------------------------------------- 日志
+
+const logEl = document.getElementById("log");
+const log = (...parts) => {
+    const line = parts.join(" ");
+    logEl.textContent += `${line}\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+    console.log(...parts);
+};
+
+// ---------------------------------------------------------------- 渲染器 / 场景
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d1013);
+
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 0.7));
+const key = new THREE.DirectionalLight(0xffffff, 2.2);
+key.position.set(3, 5, 4);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x8fc7ff, 1.0);
+rim.position.set(-4, 2, -3);
+scene.add(rim);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 500);
+camera.position.set(2.4, 1.8, 3.0);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+// ---------------------------------------------------------------- KTX2Loader（核心）
+
+/**
+ * 1) transcoderPath 末尾**必须带斜杠**，目录里要有 basis_transcoder.js + .wasm；
+ * 2) 必须 detectSupport(renderer)：否则会把不支持的转码格式当默认（iOS/老安卓黑图）；
+ * 3) 它和 GLTFLoader 是「一对」关系：GLTFLoader 解析到 KHR_texture_basisu 时
+ *    用这里的转码器，缺了会直接 throw（KTX2 是 required 扩展，不会静默降级）。
+ */
+const ktx2Loader = new KTX2Loader()
+    // 真实项目里写成 `${process.env.BASE_URL}basis/`（本项目 public/basis/）
+    .setTranscoderPath("https://unpkg.com/three@0.160.0/examples/jsm/libs/basis/")
+    .detectSupport(renderer);
+
+log("KTX2Loader ready · 已按当前 GPU 能力探测转码目标：ASTC / ETC2 / BC7 / PVRTC");
+
+const gltfLoader = new GLTFLoader().setKTX2Loader(ktx2Loader);
+
+// ---------------------------------------------------------------- 材质槽位工具
+
+/** 本项目运行期用的兜底色（见 src/models/textureFallback.ts） */
+const FALLBACK = {
+    default: 0x8f9498,
+    black: 0x101216,
+    glass: 0xa8bcc4,
+    water: 0x2e6f8e,
+};
+
+/** 材质原始状态快照：开关恢复时用，避免反复 toggle 后状态漂移 */
+const snapshots = new WeakMap();
+function snapshot(material) {
+    let snap = snapshots.get(material);
+    if (snap === undefined) {
+        snap = {
+            map: material.map,
+            normalMap: material.normalMap,
+            emissiveMap: material.emissiveMap,
+            roughnessMap: material.roughnessMap,
+            metalnessMap: material.metalnessMap,
+            emissive: material.emissive.clone(),
+            emissiveIntensity: material.emissiveIntensity,
+            normalScale: material.normalScale.clone(),
+        };
+        snapshots.set(material, snap);
+    }
+    return snap;
+}
+
+/** 1×1 纯色贴图：DataTexture 而不是 KTX2 —— 纯色压成 KTX2 是纯浪费 */
+const solidCache = new Map();
+function solidTexture(hex, { srgb = false } = {}) {
+    const key = `${hex}:${srgb}`;
+    const hit = solidCache.get(key);
+    if (hit) return hit;
+    const r = (hex >> 16) & 0xff;
+    const g = (hex >> 8) & 0xff;
+    const b = hex & 0xff;
+    const texture = new THREE.DataTexture(new Uint8Array([r, g, b, 255]), 1, 1);
+    texture.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    texture.flipY = false;          // glTF 的 UV 约定：v 轴朝下
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+    texture.name = `solid-${hex.toString(16).padStart(6, "0")}`;
+    texture.needsUpdate = true;
+    solidCache.set(key, texture);
+    return texture;
+}
+
+/** 遍历模型，收集所有标准材质（真实项目里就是 materialTextures.ts 的 collectStandardMaterials） */
+function collectMaterials(root) {
+    const found = new Map();
+    root.traverse((object) => {
+        if (!object.isMesh) return;
+        const list = Array.isArray(object.material) ? object.material : [object.material];
+        for (const material of list) {
+            if (!material || !material.isMeshStandardMaterial) continue;
+            found.set(material.uuid, material);
+        }
+    });
+    return [...found.values()];
+}
+
+// ---------------------------------------------------------------- 开关状态
+
+const state = {
+    albedo: true,
+    normal: true,
+    emissive: true,
+    orm: true,
+    solid: false,
+    albedoHex: 0x8f9498,
+    normalHex: 0x8080ff,
+};
+
+let materials = [];
+
+/**
+ * 把当前 state 套到全部材质上。
+ * 三种改法都演示：置 null / 换成纯色 DataTexture / 恢复快照。
+ * 改完必须 material.needsUpdate = true（program 里贴图槽的数量变了）。
+ */
+function applyTextureSwitches() {
+    for (const material of materials) {
+        const base = snapshot(material);
+
+        // ---- 底色
+        if (state.albedo) {
+            material.map = base.map;
+        } else {
+            material.map = state.solid ? solidTexture(state.albedoHex, { srgb: true }) : null;
+        }
+
+        // ---- 法线
+        if (state.normal) {
+            material.normalMap = base.normalMap;
+            material.normalScale.copy(base.normalScale);
+        } else {
+            material.normalMap = state.solid ? solidTexture(state.normalHex) : null;
+            // 没有法线图时 normalScale 不起作用，留着即可
+        }
+
+        // ---- 自发光（three: 自发光 = emissive 颜色 × emissiveMap）
+        if (state.emissive) {
+            material.emissiveMap = base.emissiveMap;
+            material.emissive.copy(base.emissive);
+            material.emissiveIntensity = base.emissiveIntensity;
+            // GLB 里烘的是 emissiveFactor=(0,0,0)（配合运行时开关），开启时要自己点亮
+            if (material.emissiveMap !== null && material.emissive.getHex() === 0x000000) {
+                material.emissive.setRGB(1, 1, 1);
+                material.emissiveIntensity = 1.0;
+            }
+        } else {
+            material.emissiveMap = null;
+            material.emissive.setRGB(0, 0, 0);   // 关键：没有图但 factor=1 会整块发白光
+            material.emissiveIntensity = 0;
+        }
+
+        // ---- 粗糙度/金属（同一张 ORM：G=粗糙度、B=金属度）
+        if (state.orm) {
+            material.roughnessMap = base.roughnessMap;
+            material.metalnessMap = base.metalnessMap;
+        } else {
+            // 关掉贴图后必须同时给标量值，否则会沿用 GLB 里烘的 1.0（全金属全镜面）
+            material.roughnessMap = null;
+            material.metalnessMap = null;
+            material.roughness = 0.65;
+            material.metalness = 0.15;
+        }
+
+        material.needsUpdate = true;
+    }
+    document.getElementById("materials").textContent =
+        materials.length === 0 ? "" : `${materials.length} 个标准材质已应用`;
+}
+
+// ---------------------------------------------------------------- 加载
+
+let currentRoot = null;
+
+function frameObject(object) {
+    const box = new THREE.Box3().setFromObject(object);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const radius = Math.max(size.x, size.y, size.z) || 1;
+    controls.target.copy(center);
+    camera.position.copy(center).add(new THREE.Vector3(radius * 1.6, radius * 1.1, radius * 1.9));
+    camera.near = radius / 100;
+    camera.far = radius * 100;
+    camera.updateProjectionMatrix();
+    controls.update();
+}
+
+function useGltf(gltf, label) {
+    if (currentRoot !== null) {
+        scene.remove(currentRoot);
+        // 释放：几何 + 材质 + 贴图（KTX2 贴图同样是 GPU 资源，不释放会漏显存）
+        currentRoot.traverse((object) => {
+            if (!object.isMesh) return;
+            object.geometry?.dispose();
+            const list = Array.isArray(object.material) ? object.material : [object.material];
+            for (const material of list) {
+                if (!material) continue;
+                for (const value of Object.values(material)) {
+                    if (value && value.isTexture && value.userData.shared !== true) value.dispose();
+                }
+                material.dispose();
+            }
+        });
+    }
+
+    currentRoot = gltf.scene ?? gltf.scenes?.[0] ?? null;
+    if (currentRoot === null) {
+        log("模型里没有场景");
+        return;
+    }
+    scene.add(currentRoot);
+    frameObject(currentRoot);
+
+    materials = collectMaterials(currentRoot);
+    snapshotsWeakFix();
+    applyTextureSwitches();
+
+    // 统计：贴图数量 / 是否真的走了 KTX2
+    const textures = new Set();
+    let ktx2 = 0;
+    let png = 0;
+    currentRoot.traverse((object) => {
+        if (!object.isMesh) return;
+        const list = Array.isArray(object.material) ? object.material : [object.material];
+        for (const material of list) {
+            if (!material) continue;
+            for (const value of Object.values(material)) {
+                if (!value || !value.isTexture || textures.has(value)) continue;
+                textures.add(value);
+                if (value.isCompressedTexture) ktx2++;
+                else png++;
+            }
+        }
+    });
+    log(`✔ ${label} · 材质 ${materials.length} · 贴图 ${textures.size}（KTX2 ${ktx2} / 非压缩 ${png}）`);
+    updateStats();
+}
+
+/** 材质被 snapshot 之前先登记：确保快照拿到的是「GLB 原始状态」 */
+function snapshotsWeakFix() {
+    for (const material of materials) snapshot(material);
+}
+
+function loadFile(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+        // parse 而不是 load：直接吃 ArrayBuffer，不依赖服务器/相对路径
+        gltfLoader.parse(reader.result, "", (gltf) => useGltf(gltf, file.name), (error) => {
+            log("✘ 解析失败:", error?.message ?? error);
+            console.error(error);
+        });
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+document.getElementById("file").addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    if (file) loadFile(file);
+});
+
+document.getElementById("reload").addEventListener("click", () => {
+    const file = document.getElementById("file").files?.[0];
+    if (file) loadFile(file);
+    else log("先选一个 .glb 文件");
+});
+
+document.getElementById("reset").addEventListener("click", () => {
+    for (const key of ["albedo", "normal", "emissive", "orm"]) {
+        state[key] = true;
+        document.getElementById(`t-${key}`).checked = true;
+    }
+    state.solid = false;
+    document.getElementById("t-solid").checked = false;
+    applyTextureSwitches();
+});
+
+for (const key of ["albedo", "normal", "emissive", "orm"]) {
+    document.getElementById(`t-${key}`).addEventListener("change", (event) => {
+        state[key] = event.target.checked;
+        applyTextureSwitches();
+        if (renderer.info.memory.textures > 0) updateStats();
+    });
+}
+
+document.getElementById("t-solid").addEventListener("change", (event) => {
+    state.solid = event.target.checked;
+    applyTextureSwitches();
+});
+document.getElementById("c-albedo").addEventListener("input", (event) => {
+    state.albedoHex = parseInt(event.target.value.slice(1), 16);
+    if (!state.albedo || state.solid) applyTextureSwitches();
+});
+document.getElementById("c-normal").addEventListener("input", (event) => {
+    state.normalHex = parseInt(event.target.value.slice(1), 16);
+    if (!state.normal || state.solid) applyTextureSwitches();
+});
+
+let autoRotate = true;
+document.getElementById("t-auto").addEventListener("change", (event) => {
+    autoRotate = event.target.checked;
+});
+document.getElementById("t-wire").addEventListener("change", (event) => {
+    for (const material of materials) {
+        material.wireframe = event.target.checked;
+        material.needsUpdate = true;
+    }
+});
+
+// ---------------------------------------------------------------- 循环
+
+function updateStats() {
+    const info = renderer.info;
+    document.getElementById("stats").textContent =
+        `draw calls ${info.render.calls} · tris ${info.render.triangles.toLocaleString()} · ` +
+        `textures ${info.memory.textures} · geometries ${info.memory.geometries}`;
+}
+
+let last = 0;
+renderer.setAnimationLoop((time) => {
+    if (autoRotate && currentRoot !== null) currentRoot.rotation.y += 0.004;
+    controls.update();
+    renderer.render(scene, camera);
+    if (time - last > 500) {
+        last = time;
+        updateStats();
+    }
+});
+
+addEventListener("resize", () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+});
+
+log("就绪：选择一个内嵌 KTX2 的 .glb 文件");
+</script>
+</body>
+</html>

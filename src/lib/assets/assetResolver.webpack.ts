@@ -8,8 +8,8 @@
  * 里各写一份）的行为保持一致：
  * - GLB 走**同步** `require.context`（进 bundle 的只有 URL 字符串，`.glb` 文件本身由
  *   `vue.config.js` 的 asset/resource 规则输出成独立文件）；
- * - 通道贴图走**递归** `require.context`（目录里 161 张 PNG 与改造前逐个 `require`
- *   的是同一批文件，输出路径 / contenthash 全都不变）；
+ * - 通道贴图**不再由 webpack 打包**：法线 / 自发光 / spec 已全部内嵌进 GLB（KTX2），
+ *   所以这里既不 `require.context` 扫 PNG，`modelTextureUrl()` 也恒返回 null；
  * - 图标走 `eager` 模板字符串 `import()`（沿用改造前的写法）。
  */
 
@@ -50,25 +50,6 @@ function createGlbContext(): RequireContext | null {
     }
 }
 
-function createTextureContext(): RequireContext | null {
-    try {
-        const context = require.context(
-            "../../assets/icons/models",
-            true,
-            /\.png$/i
-        );
-        return typeof context === "function"
-            ? (context as unknown as RequireContext)
-            : null;
-    } catch (e) {
-        console.warn(
-            "[tex] require.context 不可用，全部贴图退回 GLB 内嵌底色",
-            e
-        );
-        return null;
-    }
-}
-
 /** 从 require.context 返回的模块导出里取出 URL：既支持字符串，也支持 `{ default }`。 */
 function pickUrl(mod: unknown): string | null {
     if (typeof mod === "string") return mod.length > 0 ? mod : null;
@@ -84,17 +65,9 @@ function modelNameFromKey(key: string): string {
 }
 
 const glbContext = createGlbContext();
-const textureContext = createTextureContext();
 
 const glbKeys = new Set(
     (glbContext?.keys() ?? []).map((key) => key.replace(/^\.\//, ""))
-);
-
-/** `assets/icons/models/<建筑目录>/<文件>.png` → `<建筑目录>/<文件>.png` */
-const MODEL_TEXTURE_KEY = /^.*assets\/icons\/models\//i;
-
-const textureKeys = new Set(
-    (textureContext?.keys() ?? []).map((key) => key.replace(/^\.\//, ""))
 );
 
 const glbModelNames: readonly string[] = (glbContext?.keys() ?? []).map(
@@ -121,17 +94,12 @@ export const assetResolver: AssetResolver = {
         }
     },
 
-    modelTextureUrl(srcRelativePath: string): string | null {
-        if (textureContext === null) return null;
-        const normalized = srcRelativePath.replace(/\\/g, "/");
-        const relative = normalized.replace(MODEL_TEXTURE_KEY, "");
-        if (relative === normalized || !textureKeys.has(relative)) return null;
-        try {
-            return pickUrl(textureContext(`./${relative}`));
-        } catch (e) {
-            console.warn(`[tex] 贴图 ${srcRelativePath} 的资源解析失败`, e);
-            return null;
-        }
+    /**
+     * 通道贴图已内嵌进 GLB（KTX2），编辑器构建不再打包 `models/**.png`，所以恒返回 null。
+     * 方法本身保留只为满足 `AssetResolver` 接口（库构建的同名实现仍按 assetBaseUrl 拼 URL）。
+     */
+    modelTextureUrl(): string | null {
+        return null;
     },
 
     async itemRecipeIconUrl(name: string): Promise<string> {

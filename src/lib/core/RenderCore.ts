@@ -20,6 +20,7 @@ import {
     reapplyLoadedModelMaterials,
     setSettingsProvider,
 } from "@/models/glbLoader";
+import { setKtx2Renderer } from "@/models/ktx2";
 import { IconTexture } from "@/iconTexture";
 import type { TextureSink } from "@/iconTexture";
 import { createSkyGradient } from "@/skyGradient";
@@ -227,6 +228,9 @@ export class RenderCore {
                       canvas,
                   }) as unknown as WebGLRendererLike);
         this.renderer.setPixelRatio(this.pixelRatio);
+        // GLB 贴图已改为 KTX2：把渲染器交给 ktx2 模块，GLTFLoader 解析时
+        // 才有按本机 GPU 能力配置好的转码器（见 src/models/ktx2.ts）。
+        setKtx2Renderer(this.renderer);
 
         // 场景 + 星球
         this.scene = new Scene();

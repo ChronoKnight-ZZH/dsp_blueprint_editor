@@ -10,8 +10,7 @@ dsp-blueprint-editor.umd.js   UMD（内联 three，全局名 DSPBlueprintEditor�
 index.d.ts                    公共类型声明（内容同 ESM 版，供 package.json#types）
 host-test.html                宿主验证页（UMD / 纯静态，Network 零 404 自检）
 esm-test.html                 宿主验证页（ESM / 故意用 <base> 干扰，验证 import.meta.url 资产探测）
-models/<name>.glb             建筑模型
-img/models/<建筑>/<贴图>.png   法线 / 自发光 / spec-gloss 通道贴图
+models/<name>.glb             建筑模型（法线/自发光/spec 已内嵌为 KTX2，无需额外贴图）
 img/item_recipe/*.png         物品与配方图标
 img/tech/*.png                科技图标
 img/signal/*.png              信号图标

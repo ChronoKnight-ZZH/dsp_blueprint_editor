@@ -5,6 +5,8 @@ node_modules
 /data
 /dist-lib
 /lib-build
+# KTX2 流水线中间产物（GLB/贴图/日志/备份，可随时重建）
+/temp
 # local env files
 .env.local
 .env.*.local
