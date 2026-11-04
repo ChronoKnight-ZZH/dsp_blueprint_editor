@@ -12,6 +12,7 @@
  *   host-test.html                  纯静态宿主验证页（UMD 形态，Network 零 404 验收用）
  *   esm-test.html                   纯静态宿主验证页（ESM + import.meta.url 资产探测验收用）
  *   models/<name>.glb               建筑模型（法线/自发光/spec 已内嵌为 KTX2）
+ *   basis/                          Basis Universal 转码器（basis_transcoder.js + .wasm）
  *   img/item_recipe/*.png           物品与配方图标
  *   img/tech/*.png                  科技图标
  *   img/signal/*.png                信号图标
@@ -317,6 +318,19 @@ function copyStaticFiles() {
         copyFile(fixture, path.join(OUT, 'fixtures', 'sample_blueprint.txt'));
     else
         log('警告：public/demo/sample_throughput.txt 不存在，host-test.html 只能手工粘贴蓝图');
+
+    // Basis 转码器：public/basis/ → dist-lib/basis/
+    // 运行时 `resolveAssetUrl("basis/")` 或 `${BASE_URL}basis/` 都会命中这里。
+    const basisIn = path.join(ROOT, 'public', 'basis');
+    const basisOut = path.join(OUT, 'basis');
+    if (fs.existsSync(basisIn)) {
+        for (const file of fs.readdirSync(basisIn)) {
+            copyFile(path.join(basisIn, file), path.join(basisOut, file));
+        }
+    }
+    else {
+        fail('缺少 public/basis/（先跑 node scripts/glb-ktx2/copy-basis-transcoder.mjs）');
+    }
 }
 
 // ---------------------------------------------------------------- 产物自检
@@ -394,13 +408,20 @@ function verify(statsByKind, inventory, copied) {
     if (modelCount !== inventory.models.length)
         problems.push(`models 下 GLB 数量 ${modelCount} ≠ 清单 ${inventory.models.length}`);
 
-    // 通道贴图已内嵌进 GLB（KTX2），dist-lib 不该再有 img/models
     const legacyTextureDir = path.join(OUT, 'img', 'models');
     const legacyTextureCount = fs.existsSync(legacyTextureDir)
         ? walkFiles(legacyTextureDir, file => /\.png$/i.test(file)).length
         : 0;
     if (legacyTextureCount > 0)
         problems.push(`dist-lib 仍含 ${legacyTextureCount} 张 img/models 通道贴图（应已内嵌进 GLB）`);
+
+    // Basis 转码器必须随产物一起走（resolveAssetUrl("basis/") 会命中 dist-lib/basis/）
+    const basisDir = path.join(OUT, 'basis');
+    const basisFiles = fs.existsSync(basisDir) ? fs.readdirSync(basisDir) : [];
+    const requiredBasis = ['basis_transcoder.js', 'basis_transcoder.wasm'];
+    const missingBasis = requiredBasis.filter(name => !basisFiles.includes(name));
+    if (missingBasis.length > 0)
+        problems.push(`dist-lib/basis/ 缺少：${missingBasis.join(', ')}`);
 
     if (problems.length > 0)
         fail(`产物自检失败：\n- ${problems.join('\n- ')}`);

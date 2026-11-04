@@ -12,18 +12,21 @@
  * 1. **`setTranscoderPath()`** 必须指向 `basis_transcoder.js` + `basis_transcoder.wasm`
  *    所在目录，**末尾带斜杠**。本项目把它们放在 `public/basis/`（用
  *    `scripts/glb-ktx2/copy-basis-transcoder.mjs` 从 three 里拷），所以运行期路径是
- *    `${BASE_URL}basis/`（publicPath 是 `/dsp_blueprint_editor/`）。
+ *    编辑器：`${BASE_URL}basis/`；库构建：`resolveAssetUrl("basis/")`（跟随
+ *    `configureAssetBaseUrl` / `import.meta.url` / `<script src>` 自动探测）。
  * 2. **`detectSupport(renderer)`** 必须调，且必须在渲染器创建之后。它决定把 KTX2 转成
  *    哪个 GPU 格式（ASTC / ETC2 / BC7 / PVRTC / RGBA32），猜错在 iOS 和部分安卓上
  *    会得到黑图。所以这里需要宿主注入渲染器（`setKtx2Renderer`）。
  *
  * 为什么渲染器要外部注入：`glbLoader.parseGlb()` 手里只有 `ArrayBuffer`，没有渲染器；
- * 而本项目有三个 `new WebGLRenderer()` 的位置（编辑器、物品信息面板、库模式 RenderCore）。
+ * 而本项目有多个 `new WebGLRenderer()` 的位置（编辑器、库模式 RenderCore）。
  *
  * 契约：**永不 throw、永不 reject**。没注册渲染器或转码器文件缺失时返回 `null`，
  * 调用方照常解析（老 GLB 不受影响；带 KTX2 的 GLB 会由 GLTFLoader 自己报错，
  * 再由 `glbLoader` 的既有兜底逻辑降级成元数据盒）。
  */
+
+import { resolveAssetUrl } from "@/lib/assets/assetBaseUrl";
 
 /** `KTX2Loader` 里我们真正用到的两个方法（避免依赖 @types/three 的完整形状） */
 interface Ktx2LoaderLike {
@@ -35,20 +38,31 @@ interface Ktx2LoaderModule {
     KTX2Loader: new () => Ktx2LoaderLike;
 }
 
-/** 转码器所在目录（相对 publicPath），`setTranscoderPath` 要求末尾带斜杠 */
+/**
+ * 转码器所在目录，`setTranscoderPath` 要求末尾带斜杠。
+ *
+ * 两级回退：
+ * 1. 编辑器构建（vue-cli）：`process.env.BASE_URL` 形如 `/dsp_blueprint_editor/`，
+ *    `public/basis/` 直接被拷贝到 `dist/basis/`，所以拼成 `${BASE_URL}basis/`。
+ * 2. 库构建（UMD / ESM）：没有 `process.env`，走 `resolveAssetUrl("basis/")`，
+ *    跟随 `configureAssetBaseUrl(...)`、`import.meta.url` 或 `<script src>` 自动探测，
+ *    保证宿主把 `dist-lib/` 整个搬到任何子目录、任何 CDN 下都能命中 `basis/basis_transcoder.js`。
+ */
 function transcoderPath(): string {
-    // vue-cli 会注入 process.env.BASE_URL（形如 `/dsp_blueprint_editor/`）；
-    // 库构建里可能没有这个变量，兜底成根路径。
-    let base = "/";
+    // 编辑器构建优先走 BASE_URL（精确匹配 vue-cli 的 publicPath）
     try {
         if (typeof process !== "undefined" && typeof process.env === "object") {
             const value = process.env.BASE_URL;
-            if (typeof value === "string" && value.length > 0) base = value;
+            if (typeof value === "string" && value.length > 0) {
+                const base = value.endsWith("/") ? value : `${value}/`;
+                return `${base}basis/`;
+            }
         }
     } catch {
-        /* 保持 / */
+        /* 忽略，走下一级 */
     }
-    return `${base.endsWith("/") ? base : `${base}/`}basis/`;
+    // 库构建：跟随资产配置
+    return resolveAssetUrl("basis/");
 }
 
 let rendererRef: unknown = null;

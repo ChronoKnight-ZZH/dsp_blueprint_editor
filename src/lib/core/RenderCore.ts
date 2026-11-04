@@ -20,7 +20,7 @@ import {
     reapplyLoadedModelMaterials,
     setSettingsProvider,
 } from "@/models/glbLoader";
-import { setKtx2Renderer } from "@/models/ktx2";
+import { disposeKtx2Loader, setKtx2Renderer } from "@/models/ktx2";
 import { IconTexture } from "@/iconTexture";
 import type { TextureSink } from "@/iconTexture";
 import { createSkyGradient } from "@/skyGradient";
@@ -722,6 +722,10 @@ export class RenderCore {
             this.bundle.buildings.dispose();
             this.bundle = null;
         }
+        // KTX2 转码器缓存：必须在 renderer.dispose() 之前清掉，否则
+        // getKtx2Loader 还会拿着一个已失效的 GPU 能力引用。
+        disposeKtx2Loader();
+
         // 只释放自己创建的图集；宿主注入的由宿主负责（避免误销毁他人资源）
         if (this.ownsIconTexture) this.iconTexture.dispose();
         // 选中高亮用的是本实例自建的几何体与材质（池内 Mesh 只是共享引用）
