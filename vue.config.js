@@ -4,8 +4,11 @@ const path = require('path')
 const fs = require('fs')
 const { execSync } = require('child_process')
 
+/** 部署根路径：GitHub Pages 项目页 /<repo>/。改这里等于同时改 publicPath 与 KTX2 转码器目录。 */
+const PUBLIC_PATH = '/dsp_blueprint_editor/'
+
 module.exports = defineConfig({
-    publicPath: '/dsp_blueprint_editor/',
+    publicPath: PUBLIC_PATH,
     transpileDependencies: false,
     // BlueprintViewer demo 页（开发验证用）：http://localhost:8080/dsp_blueprint_editor/demo.html
     // ⚠️ `demo/main.ts` / `demo/index.html` 在合并进来的两个分支里都没有被提交
@@ -73,6 +76,11 @@ module.exports = defineConfig({
         plugins: [
             new webpack.DefinePlugin({
                 VERSION: JSON.stringify(execSync('git describe --tags --always --dirty', { encoding: 'utf8' }).trim()),
+                // Basis 转码器目录（`public/basis/` 会被拷到 dist 根，所以要按 publicPath 拼）。
+                // 不能靠运行时 `process.env.BASE_URL`：webpack 5 不注入 process，
+                // 那条分支会被常量折叠掉，最后退化成「相对当前 JS chunk」的
+                // `/js/basis/`（404）—— 这就是模型全部退回元数据盒的根因。
+                __DSP_TRANSCODER_BASE__: JSON.stringify(PUBLIC_PATH + 'basis/'),
             }),
         ],
     },
@@ -104,6 +112,22 @@ module.exports = defineConfig({
             appleTouchIcon: null,
             maskIcon: null,
             msTileImage: null,
+        },
+        // Workbox 默认会把 dist 下所有 <2 MB 的文件塞进 precache —— 包括
+        // 45 个建筑 GLB（约 40 MB）。后果：首次访问 service worker 装装时就
+        // 把这 40 MB 全下一遍（用户可能一栋楼都没看），移动端还会撑爆缓存配额。
+        // 建筑模型由 `glbLoader` 自己懒加载（并发闸门 + 负缓存），不需要 precache；
+        // 这里显式排除 models/，其余默认排除项必须原样保留（plugin 的
+        // Object.assign 会用本数组整体覆盖默认值）。
+        workboxOptions: {
+            exclude: [
+                /\.map$/,
+                /img\/icons\//,
+                /favicon\.ico$/,
+                /^manifest.*\.js?$/,
+                /models\//,
+                /demo\//,
+            ],
         },
     },
 

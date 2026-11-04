@@ -28,6 +28,12 @@
 
 import { resolveAssetUrl } from "@/lib/assets/assetBaseUrl";
 
+/**
+ * 构建期注入的转码器目录（编辑器构建走 vue.config.js 的 `publicPath`，
+ * 见 `__DSP_TRANSCODER_BASE__` 的 DefinePlugin）。UMD/ESM 库构建里没有这个常量。
+ */
+declare const __DSP_TRANSCODER_BASE__: string | undefined;
+
 /** `KTX2Loader` 里我们真正用到的两个方法（避免依赖 @types/three 的完整形状） */
 interface Ktx2LoaderLike {
     setTranscoderPath(path: string): Ktx2LoaderLike;
@@ -41,27 +47,27 @@ interface Ktx2LoaderModule {
 /**
  * 转码器所在目录，`setTranscoderPath` 要求末尾带斜杠。
  *
- * 两级回退：
- * 1. 编辑器构建（vue-cli）：`process.env.BASE_URL` 形如 `/dsp_blueprint_editor/`，
- *    `public/basis/` 直接被拷贝到 `dist/basis/`，所以拼成 `${BASE_URL}basis/`。
- * 2. 库构建（UMD / ESM）：没有 `process.env`，走 `resolveAssetUrl("basis/")`，
- *    跟随 `configureAssetBaseUrl(...)`、`import.meta.url` 或 `<script src>` 自动探测，
- *    保证宿主把 `dist-lib/` 整个搬到任何子目录、任何 CDN 下都能命中 `basis/basis_transcoder.js`。
+ * 三级回退，顺序不能换：
+ * 1. **构建期常量**（编辑器构建）：`/dsp_blueprint_editor/basis/`。
+ *    不能用 `process.env.BASE_URL`：webpack 5 不再注入 `process`，
+ *    `typeof process !== 'undefined'` 会被常量折叠成 false、整段分支被删掉，
+ *    最后落到第 3 级 → 得到「相对当前 JS chunk」的 `/dsp_blueprint_editor/js/basis/`
+ *    → 404 → 所有模型的贴图全部加载失败、退回元数据盒（已实测踩到过）。
+ * 2. 库构建（UMD / ESM）：`resolveAssetUrl("basis/")` 跟随 `configureAssetBaseUrl(...)`、
+ *    `import.meta.url` 或 `<script src>` 自动探测，宿主把 `dist-lib/` 搬到任何
+ *    子目录、任何 CDN 下都能命中 `basis/basis_transcoder.js`。
+ * 3. 最后兜底：同样走 `resolveAssetUrl`。
  */
 function transcoderPath(): string {
-    // 编辑器构建优先走 BASE_URL（精确匹配 vue-cli 的 publicPath）
     try {
-        if (typeof process !== "undefined" && typeof process.env === "object") {
-            const value = process.env.BASE_URL;
-            if (typeof value === "string" && value.length > 0) {
-                const base = value.endsWith("/") ? value : `${value}/`;
-                return `${base}basis/`;
-            }
+        if (typeof __DSP_TRANSCODER_BASE__ === "string" && __DSP_TRANSCODER_BASE__.length > 0) {
+            return __DSP_TRANSCODER_BASE__.endsWith("/")
+                ? __DSP_TRANSCODER_BASE__
+                : `${__DSP_TRANSCODER_BASE__}/`;
         }
     } catch {
-        /* 忽略，走下一级 */
+        /* 常量不存在（库构建 / 单测）：走下一级 */
     }
-    // 库构建：跟随资产配置
     return resolveAssetUrl("basis/");
 }
 

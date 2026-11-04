@@ -76,6 +76,9 @@ const CONCURRENCY = Math.max(1, Number(argValue("concurrency", 2)) || 2);
 /** 单个文件内 ktx 的并发线程数（每个线程会 spawn 一个 ktx 进程） */
 const JOBS = Math.max(1, Number(argValue("jobs", 4)) || 4);
 const FORCE = hasFlag("force");
+/** 贴图最大尺寸（像素）；0 或 null 表示不 resize */
+const RESIZE = argValue("resize", null);
+const RESIZE_NUM = RESIZE ? Math.max(0, Number(RESIZE)) : 0;
 
 // ---------------------------------------------------------------- 编码参数（唯一手调入口）
 
@@ -84,6 +87,7 @@ const ETC1S_ARGS = [
     "--quality", "128", // → ktx create --qlevel 128（默认值，写出来自证）
     "--compression", "2", // → ktx create --clevel 2（默认 1，2 更慢但更细）
     "--mipmaps",
+    ...(RESIZE_NUM ? ["--resize", String(RESIZE_NUM)] : []),
 ];
 
 /** 数据贴图（normal / metallicRoughness / occlusion）：UASTC */
@@ -93,6 +97,7 @@ const UASTC_ARGS = [
     "--rdo-lambda", "4", // → --uastc-rdo-l 4
     "--zstd", "18", // → --zstd 18（双遍超压缩，默认值；0 可关闭）
     "--mipmaps",
+    ...(RESIZE_NUM ? ["--resize", String(RESIZE_NUM)] : []),
 ];
 
 const COLOR_SLOTS = "{baseColorTexture,emissiveTexture}";
