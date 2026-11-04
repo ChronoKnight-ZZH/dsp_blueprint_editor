@@ -184,10 +184,13 @@
         const hasImages = assetRequests.some(function (url) {
             return url.indexOf('/img/') !== -1 && url.indexOf('/img/models/') === -1;
         });
-        const hasTextures = assetRequests.some(function (url) { return url.indexOf('/img/models/') !== -1; });
+        const legacyTextures = assetRequests.filter(function (url) {
+            return url.indexOf('/img/models/') !== -1;
+        });
         check('命中 GLB 模型请求', hasModels, '');
         check('命中图标请求', hasImages, '');
-        check('命中通道贴图请求', hasTextures, '');
+        check('通道贴图已内嵌进 GLB，无 img/models 请求', legacyTextures.length === 0,
+            legacyTextures.length === 0 ? '' : legacyTextures.slice(0, 5).join(' | '));
 
         // Chromium 109+：Resource Timing 带 HTTP 状态；只统计本目录资源
         const httpFailures = resourceEntries.filter(function (entry) {

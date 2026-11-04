@@ -11,8 +11,7 @@
  *   index.d.ts                      手写公共类型（`package.json#types` 指向它，内容同 ESM 版）
  *   host-test.html                  纯静态宿主验证页（UMD 形态，Network 零 404 验收用）
  *   esm-test.html                   纯静态宿主验证页（ESM + import.meta.url 资产探测验收用）
- *   models/<name>.glb               建筑模型
- *   img/models/<建筑>/<贴图>.png      法线 / 自发光 / spec-gloss 通道贴图
+ *   models/<name>.glb               建筑模型（法线/自发光/spec 已内嵌为 KTX2）
  *   img/item_recipe/*.png           物品与配方图标
  *   img/tech/*.png                  科技图标
  *   img/signal/*.png                信号图标
@@ -250,16 +249,7 @@ function copyAssets(inventory) {
         copied++;
     }
 
-    // 2) 通道贴图：src/assets/icons/models/<建筑>/<文件>.png → dist-lib/img/models/<建筑>/<文件>.png
-    const textureRoot = path.join(iconsIn, 'models');
-    const textureFiles = walkFiles(textureRoot, file => /\.png$/i.test(file));
-    for (const from of textureFiles) {
-        const rel = path.relative(textureRoot, from).split(path.sep).join('/');
-        copyFile(from, path.join(imgOut, 'models', ...rel.split('/')));
-        copied++;
-    }
-
-    // 3) 三类图标：src/assets/icons/{item_recipe,tech,signal}/... → dist-lib/img/{item_recipe,tech,signal}/...
+    // 2) 三类图标：src/assets/icons/{item_recipe,tech,signal}/... → dist-lib/img/{item_recipe,tech,signal}/...
     const iconGroups = [
         ['item_recipe', inventory.itemRecipe],
         ['tech', inventory.tech],
@@ -278,7 +268,7 @@ function copyAssets(inventory) {
         }
     }
 
-    // 4) 其他 logo 图片：src/assets/icons/ 下除 models/ 以外的所有图片
+    // 3) 其他 logo 图片：src/assets/icons/ 下除 models/ 以外的所有图片
     //    - icons/<子目录>/... → dist-lib/img/icons/<子目录>/...
     //    - icons/<文件>      → dist-lib/img/<文件>
     const otherFiles = walkFiles(iconsIn, file => {
@@ -303,7 +293,7 @@ function copyAssets(inventory) {
         copied++;
     }
 
-    return { copied, textures: textureFiles.length };
+    return { copied };
 }
 
 
@@ -404,14 +394,18 @@ function verify(statsByKind, inventory, copied) {
     if (modelCount !== inventory.models.length)
         problems.push(`models 下 GLB 数量 ${modelCount} ≠ 清单 ${inventory.models.length}`);
 
-    const textureCount = walkFiles(path.join(OUT, 'img', 'models'), file => /\.png$/i.test(file)).length;
-    if (textureCount === 0)
-        problems.push('img/models 下没有任何贴图');
+    // 通道贴图已内嵌进 GLB（KTX2），dist-lib 不该再有 img/models
+    const legacyTextureDir = path.join(OUT, 'img', 'models');
+    const legacyTextureCount = fs.existsSync(legacyTextureDir)
+        ? walkFiles(legacyTextureDir, file => /\.png$/i.test(file)).length
+        : 0;
+    if (legacyTextureCount > 0)
+        problems.push(`dist-lib 仍含 ${legacyTextureCount} 张 img/models 通道贴图（应已内嵌进 GLB）`);
 
     if (problems.length > 0)
         fail(`产物自检失败：\n- ${problems.join('\n- ')}`);
 
-    return { modelCount, textureCount, copied };
+    return { modelCount, copied };
 }
 
 // ---------------------------------------------------------------- 主流程
@@ -476,7 +470,7 @@ async function main() {
 
     const summary = verify(statsByKind, inventory, copyResult.copied);
 
-    log(`完成：${summary.modelCount} 个模型、${summary.textureCount} 张贴图、共 ${summary.copied} 个资产文件，`
+    log(`完成：${summary.modelCount} 个模型、共 ${summary.copied} 个资产文件，`
         + `耗时 ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
     log(`宿主验证页：${path.join(OUT, 'host-test.html')}`);
 }

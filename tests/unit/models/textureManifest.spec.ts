@@ -1,5 +1,5 @@
 /// <reference types="node" />
-import { existsSync, readdirSync } from 'fs';
+import { readdirSync } from 'fs';
 import { join } from 'path';
 import {
     DEFAULT_MODEL_MATERIAL_TUNING,
@@ -7,7 +7,6 @@ import {
     modelMaterialTunings,
     resolveModelMaterialTuning,
 } from '@/models/modelMaterialTuning';
-import { manifestTextureFiles, materialMapUrls } from '@/models/textureManifest';
 
 const REPO_ROOT = join(__dirname, '..', '..', '..');
 const MODELS_DIR = join(REPO_ROOT, 'src', 'assets', 'icons', 'models');
@@ -17,38 +16,9 @@ const diskModelNames = readdirSync(MODELS_DIR)
     .map(f => f.replace(/\.glb$/i, ''))
     .sort();
 
-describe('建筑材质贴图清单 textureManifest', () => {
-    it('清单里引用的贴图文件都还在磁盘上（清理贴图时不许误删正在用的）', () => {
-        const missing = manifestTextureFiles.filter(rel => !existsSync(join(REPO_ROOT, 'src', rel)));
-        expect(missing).toEqual([]);
-    });
-
-    it('清单键的模型名都能对上磁盘上真实存在的 .glb', () => {
-        const known = new Set(diskModelNames);
-        const unknown = Object.keys(materialMapUrls)
-            .map(key => key.split('::')[0])
-            .filter(name => !known.has(name));
-        expect(unknown).toEqual([]);
-    });
-
-    it('每个条目至少带一张通道贴图，且 URL 非空字符串', () => {
-        for (const [key, urls] of Object.entries(materialMapUrls)) {
-            const values = [urls.normal, urls.emissive, urls.spec].filter(v => v !== undefined);
-            expect(`${key} maps=${values.length}`).not.toBe(`${key} maps=0`);
-            for (const value of values)
-                expect(typeof value).toBe('string');
-        }
-    });
-
-    it('清单规模与当前资产一致（法线/自发光/spec 覆盖 67 个材质、161 张图）', () => {
-        const entries = Object.values(materialMapUrls);
-        expect(entries).toHaveLength(67);
-        expect(entries.filter(e => e.normal !== undefined)).toHaveLength(65);
-        expect(entries.filter(e => e.emissive !== undefined)).toHaveLength(59);
-        expect(entries.filter(e => e.spec !== undefined)).toHaveLength(67);
-        expect(manifestTextureFiles).toHaveLength(161);
-    });
-});
+// 通道贴图（-n/-e/-s）已全部内嵌进 GLB（KTX2），textureManifest 现为空清单，
+// 对应断言已移除；如需灰度回滚到「外部贴图」方案，从
+// tests/unit/scripts/texture-mapping.json 重新生成即可。
 
 describe('建筑材质参数表 modelMaterialTuning', () => {
     it('每个真实存在的 .glb 都有一条可调参数（不留默认兜底的黑盒模型）', () => {
