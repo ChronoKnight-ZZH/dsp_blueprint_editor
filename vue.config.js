@@ -131,6 +131,9 @@ module.exports = defineConfig({
                 /^manifest.*\.js?$/,
                 /models\//,
                 /demo\//,
+                // 更新日志必须每次从网络读最新版本；一旦进 precache，
+                // 旧页面会拿到旧日志，更新弹窗就失去意义。
+                /update-log\.json$/,
             ],
         },
     },
