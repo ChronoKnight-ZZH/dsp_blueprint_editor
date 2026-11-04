@@ -33,8 +33,8 @@ export interface LoadGlbOptions {
     timeoutMs?: number;
 }
 
-const DEFAULT_TIMEOUT_MS = 8000;
-const MAX_CONCURRENT_LOADS = 3;
+const DEFAULT_TIMEOUT_MS = 30000;
+const MAX_CONCURRENT_LOADS = 10;
 
 const loaded = new Map<string, LoadedGlbModel>();
 const pending = new Map<string, Promise<LoadedGlbModel | null>>();
