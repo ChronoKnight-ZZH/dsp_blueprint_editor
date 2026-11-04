@@ -12,6 +12,11 @@
 import { Box3, Group, Object3D, Texture } from "three";
 import type { Material } from "three";
 import { modelUrl } from "./glbAssets";
+import {
+    readCachedModel,
+    removeCachedModel,
+    storeCachedModel,
+} from "./modelCache";
 import { getKtx2Loader } from "./ktx2";
 import { applyModelMaterialTextures } from "./materialTextures";
 import type { TextureSettings } from "@/renderSettingsTypes";
@@ -222,15 +227,34 @@ async function runLoad(
         const url = await modelUrl(name);
         if (url === null) return null;
 
-        const response = await fetch(
-            url,
-            controller === null ? undefined : { signal: controller.signal }
-        );
+        // 本地持久化缓存优先：命中就**完全不走网络**（断网也能渲染），
+        // 见 modelCache.ts —— 键是带内容哈希的 URL，内容变了自然换键。
+        const local = await readCachedModel(url);
+        const response =
+            local ??
+            (await fetch(
+                url,
+                controller === null ? undefined : { signal: controller.signal }
+            ));
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const buffer = await response.arrayBuffer();
+        if (local === null) {
+            // 首次从网络拿到就落盘，下次直接命中。必须复制一份：KTX2 转码会把
+            // bufferView 交给 worker，原 ArrayBuffer 可能被 transfer（detach）。
+            void storeCachedModel(url, buffer.slice(0));
+        }
+
         const baseUrl = url.slice(0, url.lastIndexOf("/") + 1);
-        const gltf = await parseGlb(buffer, baseUrl);
+        let gltf: GltfLike;
+        try {
+            gltf = await parseGlb(buffer, baseUrl);
+        } catch (e) {
+            // 本地副本坏了（写入时截断 / 磁盘损坏）：删掉它，下次重新下载，
+            // 否则坏数据会一直命中，用户看到的就是「这个模型永远是白模」
+            if (local !== null) void removeCachedModel(url);
+            throw e;
+        }
 
         const scene = gltf.scene ?? gltf.scenes?.[0];
         if (scene === undefined) throw new Error("GLB 中没有可用场景");

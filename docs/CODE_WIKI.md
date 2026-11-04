@@ -1266,7 +1266,9 @@ cat blueprint.txt | yarn cli > bp.json
 | 文件 | 职责 |
 | --- | --- |
 | `models/glbAssets.ts` | GLB 资源注册表：`require.context` 编译期索引、`availableModelNames`、别名/变形表、`modelUrl()`（Promise 缓存）。 |
-| `models/glbLoader.ts` | 加载器：懒加载、`loaded/pending/failed` 三层缓存、并发闸门、8s 超时、错误吞掉、释放；**契约「永不 reject」**。 |
+| `models/glbLoader.ts` | 加载器：懒加载、`loaded/pending/failed` 三层缓存、并发闸门、8s 超时、错误吞掉、释放；**契约「永不 reject」**；取模型时**本地缓存优先**（见 §16.13）。 |
+| `models/modelCache.ts` | 模型文件的浏览器本地持久化缓存（Cache Storage，缓存名 `dsp-models-v1`）：`readCachedModel / storeCachedModel / removeCachedModel / cachedModelUrls / clearModelCache`，不可用时全部退化为空操作。 |
+| `models/modelPack.ts` | 「离线模型包」：`resolvePackFiles / inspectPack / downloadPack / clearPack`——按缺失补齐、文件粒度进度、`AbortController` 可取消。 |
 | `models/buildingModel.ts` | 解析器：`modelIndex → Item → icon → GLB`、放置矩阵、按需请求、变更订阅、映射报告。 |
 | `models/glbInstances.ts` | `GlbModelInstances`：每个 GLB 子网格一个 `InstancedMesh`，几何/材质复用一份。 |
 | `models/textureManifest.ts` | **自动生成**的材质→通道贴图 URL 清单（`模型名::材质名 → {normal, emissive, spec}`）。 |
@@ -1315,6 +1317,9 @@ modelIndex → itemsMap 中的 Item.models 下标 → Item.icon
 | 并发请求多个模型 | 信号量闸门，`MAX_CONCURRENT_LOADS = 3`。 |
 | 失败后再次请求 | 负缓存直接返回 `null`；重试调用 `resetGlbFailure(name?)`。 |
 | 释放 | `releaseGlbModel / releaseAllGlbModels`：释放几何、材质与材质上的非共享贴图。 |
+| 本地已有（看过的 / 离线包下载过） | `readCachedModel(url)` 命中就直接用，**一个网络请求都不发**（断网也成立）。 |
+| 首次从网络拿到 | 解析前把原始字节复制一份落盘（`storeCachedModel`），下次直接命中；复制是必须的，KTX2 转码会把 bufferView transfer 给 worker。 |
+| 本地副本解析失败 | 删掉该条缓存（`removeCachedModel`）并照常记负缓存 —— 否则坏数据会永久命中「白模」。 |
 
 - `GLTFLoader` 本身也是懒加载（`import(/* webpackChunkName: "gltf-loader" */ 'three/examples/jsm/loaders/GLTFLoader.js')`），首屏不为解析器付费；`BlueprintEditor.vue` 同样在 `renderer` chunk 中。
 - 模型加载成功后会 `void applyModelMaterialTextures(model)`：通道贴图**不 await**，没到之前先显示底色，到了材质原地更新。
@@ -1450,6 +1455,24 @@ modelIndex → itemsMap 中的 Item.models 下标 → Item.icon
 5. 通道贴图必须 `flipY = false`，否则法线/自发光整体上下错位。
 6. 环境反射只挂 `material.envMap`，不要设 `scene.environment`。
 7. 共享几何/贴图在 `dispose` 时要跳过（`userData.sharedResource` / `userData.sharedTexture`），否则会释放其他场景仍在用的资源。
+
+### 16.13 本地持久化缓存与「离线模型包」（`modelCache.ts` + `modelPack.ts`）
+
+**为什么要它**：模型是懒加载的，只下载真的出现在蓝图里的那几个；用户想「断网翻任意蓝图」时要把 73 个 GLB（合计约 128 MB）预先备齐。这份成本必须由用户**主动点击**承担（设置 › 操作 › 高级 › 离线模型包），不做启动预取。
+
+| 环节 | 实现 |
+| --- | --- |
+| 存储 | Cache Storage，缓存名 `dsp-models-v1`；键是**绝对 URL**（`modelCacheKey()` 归一化）。编辑器构建的 URL 带 `[contenthash:8]`，内容一变键就变——**不需要版本表**，也不会读到旧模型。 |
+| 读 | `glbLoader` 取模型前先 `readCachedModel(url)`：命中则完全不发网络请求（离线同样成立）。 |
+| 写 | ① 每个模型首次加载成功就顺手落盘（看过的模型天然可离线）；② 用户点「下载全部模型」时按缺失补齐。 |
+| 进度 / 取消 | 文件粒度进度（`completed / total` + 已收字节）；`AbortController` 取消，**半成品不落盘**、已完成文件保留 → 再点是续传。 |
+| 降级 | `caches` 不可用（老浏览器 / 非安全上下文）时 `isPackSupported() === false`，按钮置灰，加载器退回纯网络且不抛错。 |
+| 清理 | 「清除离线模型」清空整个缓存；下载时顺带调 `navigator.storage.persist()`，降低被浏览器按配额回收的概率。 |
+
+- 与 service worker 的关系：两者都基于 Cache Storage，但这份缓存由**页面**直接读写，不依赖 SW 是否已接管页面（首访、隐私模式同样有效）。
+- 下载期间「展示真实模型 / 开启贴图」两个开关被禁用（`packBusy`），避免一半模型按新设置、一半按旧设置。
+- 已知取舍：取消保留已完成文件（续传语义），不是整包丢弃；缓存不设条数上限——天然上限是模型总数（约 128 MB）。
+- 单测：`tests/unit/models/modelPack.spec.ts`，用 `caches` / `fetch` / `document` 的最小假实现覆盖命中、只补缺失、进度单调、取消、HTTP 失败与降级。
 
 ***
 

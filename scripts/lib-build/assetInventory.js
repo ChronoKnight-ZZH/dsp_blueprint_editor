@@ -45,4 +45,26 @@ function buildInventory(rootDir) {
     };
 }
 
-module.exports = { buildInventory };
+/**
+ * 扫描建筑 GLB，产出「模型名 → 字节数」清单。
+ *
+ * 编辑器构建的 GLB 规则是 `asset/resource`（原样拷贝，不改写内容），
+ * 所以源文件大小就是产物大小，构建期读一次即可，运行时无需 HEAD 请求。
+ *
+ * @param {string} rootDir 仓库根目录
+ * @returns {Record<string, number>} 例如 `{ smelter: 123456, ... }`
+ */
+function buildModelBytes(rootDir) {
+    const modelsDir = path.join(rootDir, 'src', 'assets', 'icons', 'models');
+    const files = listFiles(modelsDir, name => /\.glb$/i.test(name), '建筑模型');
+    /** @type {Record<string, number>} */
+    const bytes = {};
+    for (const file of files) {
+        const name = path.basename(file).replace(/\.glb$/i, '');
+        bytes[name] = fs.statSync(path.join(modelsDir, file)).size;
+    }
+    return bytes;
+}
+
+module.exports = { buildInventory, buildModelBytes };
+

@@ -293,6 +293,7 @@
                                             v-model="
                                                 renderSettings.showRealModels
                                             "
+                                            :disabled="packBusy"
                                         />
                                         <span class="switch-track"></span>
                                     </label>
@@ -305,6 +306,7 @@
                                             v-model="
                                                 renderSettings.texturesEnabled
                                             "
+                                            :disabled="packBusy"
                                         />
                                         <span class="switch-track"></span>
                                     </label>
@@ -341,7 +343,8 @@
                                                     ]
                                                 "
                                                 :disabled="
-                                                    !renderSettings.texturesEnabled
+                                                    !renderSettings.texturesEnabled ||
+                                                    packBusy
                                                 "
                                             />
                                             <span class="switch-track"></span>
@@ -385,6 +388,56 @@
                                             : t("修改后需重新导入蓝图才能生效")
                                     }}
                                 </div>
+                                <div class="pack-block">
+                                    <div class="option-row">
+                                        <span>{{ t("离线模型包") }}</span>
+                                        <span class="pack-status">{{
+                                            packStatusText
+                                        }}</span>
+                                    </div>
+                                    <div class="pack-actions">
+                                        <button
+                                            type="button"
+                                            class="pack-action"
+                                            :class="{
+                                                'is-downloading': packBusy,
+                                                'is-checking': packChecking,
+                                            }"
+                                            :disabled="packDisabled"
+                                            @click="
+                                                packBusy
+                                                    ? cancelPackDownload()
+                                                    : startPackDownload()
+                                            "
+                                        >
+                                            <span
+                                                v-if="
+                                                    packBusy || packChecking
+                                                "
+                                                class="pack-action-fill"
+                                                :style="
+                                                    packChecking
+                                                        ? undefined
+                                                        : {
+                                                              width:
+                                                                  packPercent +
+                                                                  '%',
+                                                          }
+                                                "
+                                            ></span>
+                                            <span class="pack-action-label">
+                                                {{
+                                                    packBusy
+                                                        ? t("取消下载")
+                                                        : packActionText
+                                                }}
+                                            </span>
+                                        </button>
+                                    </div>
+                                    <div class="settings-hint">
+                                        {{ packHint }}
+                                    </div>
+                                </div>
                             </div>
                         </section>
                     </li>
@@ -412,6 +465,7 @@
             <footer>
                 {{ version }}
                 <SWStatus />
+                <span class="footer-links"><a href="https://github.com/ChronoKnight-ZZH/dsp_blueprint_editor" target="_blank">{{ t("GitHub") }}</a> · <a href="https://wj.qq.com/s2/27881383/xef3/" target="_blank">{{ t("反馈") }}</a></span>
             </footer>
         </div>
         <button
@@ -589,6 +643,233 @@ watch(
     },
     { deep: true }
 );
+
+// ---------- 离线模型包（可选资源的一次性持久化） ----------
+
+/**
+ * 模型是懒加载的：只有真的出现在蓝图里的才会下载。用户若想「断网也能翻任意
+ * 蓝图」，就要把全部模型（73 个、约 128 MB）预先存到本地——这份成本必须由
+ * 用户主动点击才承担，所以入口是「高级」里的一个按钮，不做启动时预取。
+ *
+ * 落盘位置见 `@/models/modelCache`（Cache Storage，键是带内容哈希的 URL），
+ * 下载流程见 `@/models/modelPack`。
+ */
+type PackState =
+    | "idle"
+    | "checking"
+    | "downloading"
+    | "complete"
+    | "partial"
+    | "unsupported"
+    | "error";
+
+const packState = ref<PackState>("idle");
+/** 离线包总文件数（磁盘上真实存在的 GLB 数） */
+const packTotal = ref(0);
+/** 已经在本地缓存里的文件数 */
+const packCached = ref(0);
+/** 本次下载已完成的文件数 */
+const packDone = ref(0);
+/** 本次下载已接收的字节数 */
+const packBytes = ref(0);
+/** 尚未缓存模型的总字节数；null = 构建期清单不可用 */
+const packMissingBytes = ref<number | null>(null);
+const packError = ref("");
+/** 进行中的下载；null = 空闲 */
+let packAbort: AbortController | null = null;
+
+/** 下载期间禁止改动渲染设置（避免一半模型走新设置、一半走旧设置） */
+const packBusy = computed(() => packState.value === "downloading");
+const packChecking = computed(() => packState.value === "checking");
+const packDisabled = computed(
+    () => packState.value === "checking" || packState.value === "unsupported"
+);
+
+const packPercent = computed(() => {
+    if (packTotal.value <= 0) return 0;
+    return Math.min(
+        100,
+        Math.round((packDone.value / packTotal.value) * 100)
+    );
+});
+
+const formatSize = (bytes: number): string => {
+    if (bytes <= 0) return "0 KB";
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const packStatusText = computed(() => {
+    switch (packState.value) {
+        case "unsupported":
+            return t("不支持");
+        case "checking":
+            return t("检查中…");
+        case "downloading":
+            return `${t("下载中")} ${packPercent.value}%`;
+        case "error":
+            return t("下载失败");
+        case "complete":
+            return `${t("已下载")} ${packCached.value}/${packTotal.value}`;
+        case "partial":
+            return `${packCached.value}/${packTotal.value}`;
+        default:
+            // 还没检查过（面板没展开过）时不显示 0/0，避免误导
+            return packTotal.value > 0
+                ? `${packCached.value}/${packTotal.value}`
+                : "";
+    }
+});
+
+const packActionText = computed(() => {
+    switch (packState.value) {
+        case "complete":
+            return t("已是离线状态");
+        case "partial":
+            return `${t("继续下载")}（${packCached.value}/${packTotal.value}）`;
+        case "error":
+            return t("重试下载");
+        case "checking":
+            return t("检查中…");
+        case "unsupported":
+            return t("下载全部模型");
+        default:
+            return packTotal.value > 0
+                ? `${t("下载全部模型")}（${packTotal.value}）`
+                : t("下载全部模型");
+    }
+});
+
+const packHint = computed(() => {
+    const missingSize =
+        packMissingBytes.value !== null && packMissingBytes.value > 0
+            ? `${t("待下载")} ${formatSize(packMissingBytes.value)}`
+            : "";
+    switch (packState.value) {
+        case "unsupported":
+            return t("当前浏览器不支持本地缓存，模型仍可在联网时加载");
+        case "checking":
+            return t("正在检查本地已缓存的模型…");
+        case "downloading":
+            return `${packDone.value}/${packTotal.value} · ${formatSize(
+                packBytes.value
+            )}/${formatSize(packMissingBytes.value!)} · ${t("下载完成前无法切换渲染设置")}`;
+        case "error":
+            return `${t("下载失败")}：${packError.value}`;
+        case "complete":
+            return t("已缓存到本地，断网也能查看这些模型");
+        case "partial":
+            return missingSize !== ""
+                ? missingSize
+                : t("可选：下载模型到本地");
+        default:
+            return missingSize !== ""
+                ? missingSize
+                : t("可选：下载模型到本地");
+    }
+});
+
+function loadPackModule(): Promise<typeof import("@/models/modelPack")> {
+    return import(
+        /* webpackChunkName: "model-pack" */ "@/models/modelPack"
+    );
+}
+
+function isAbortError(error: unknown): boolean {
+    return (error as { name?: unknown } | null)?.name === "AbortError";
+}
+
+/** 只统计，不下载：刷新「已缓存多少」 */
+const refreshPackState = async (): Promise<void> => {
+    if (packState.value === "downloading") return;
+    packState.value = "checking";
+    try {
+        const pack = await loadPackModule();
+        if (!pack.isPackSupported()) {
+            packState.value = "unsupported";
+            return;
+        }
+        const status = await pack.inspectPack();
+        packTotal.value = status.total;
+        packCached.value = status.cached;
+        packMissingBytes.value = status.missingBytes;
+        packDone.value = status.cached;
+        packBytes.value = 0;
+        if (status.total > 0 && status.cached >= status.total)
+            packState.value = "complete";
+        else if (status.cached > 0) packState.value = "partial";
+        else packState.value = "idle";
+    } catch (e) {
+        packState.value = "error";
+        packError.value = e instanceof Error ? e.message : String(e);
+    }
+};
+
+const startPackDownload = async (): Promise<void> => {
+    if (packState.value === "downloading") return;
+    packError.value = "";
+    // 先切到「检查中」：清点缓存可能耗时，进度条会以不确定动画立即反馈
+    packState.value = "checking";
+    try {
+        const pack = await loadPackModule();
+        if (!pack.isPackSupported()) {
+            packState.value = "unsupported";
+            return;
+        }
+        const status = await pack.inspectPack();
+        packTotal.value = status.total;
+        packCached.value = status.cached;
+        packMissingBytes.value = status.missingBytes;
+        packDone.value = status.cached;
+        packBytes.value = 0;
+        if (status.missing === 0 && status.total > 0) {
+            packState.value = "complete";
+            return;
+        }
+
+        packAbort = new AbortController();
+        packState.value = "downloading";
+        await pack.downloadPack({
+            signal: packAbort.signal,
+            onProgress: (progress) => {
+                packDone.value = status.cached + progress.completed;
+                packBytes.value = progress.bytes;
+            },
+        });
+        packCached.value = packDone.value;
+        packMissingBytes.value = 0;
+        packState.value = "complete";
+        // 之前加载失败（网络抖动等）的模型现在本地有了：清掉负缓存，
+        // 下次重建场景 / 重新导入蓝图就能用上
+        void import("@/models/glbLoader").then((glb) => glb.resetGlbFailure());
+    } catch (e) {
+        if (isAbortError(e)) {
+            // 取消：已完成的文件保留（下次点是续传），半成品不落盘
+            packCached.value = packDone.value;
+            // 已下载部分的组成未知，不再展示可能过期的剩余大小
+            packMissingBytes.value = null;
+            packState.value =
+                packCached.value >= packTotal.value && packTotal.value > 0
+                    ? "complete"
+                    : "partial";
+        } else {
+            packState.value = "error";
+            packMissingBytes.value = null;
+            packError.value = e instanceof Error ? e.message : String(e);
+        }
+    } finally {
+        packAbort = null;
+    }
+};
+
+const cancelPackDownload = (): void => {
+    packAbort?.abort();
+};
+
+// 展开「高级」时才去数一遍本地缓存（不对首屏产生任何请求或耗时）
+watch(advancedOpen, (open) => {
+    if (open) void refreshPackState();
+});
 
 const working = ref(false);
 const codeExpired = ref(false);
@@ -1470,6 +1751,142 @@ ul.operations > li.render-settings-li {
         color: #ffcf6b;
     }
 }
+
+/* ---------- 离线模型包 ---------- */
+.pack-block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 2px;
+    padding-top: 8px;
+    border-top: 1px dashed rgba(255, 255, 255, 0.16);
+}
+
+.pack-status {
+    flex: none;
+    font-size: 0.78rem;
+    color: #9ec4e8;
+}
+
+.pack-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.render-settings .pack-action {
+    position: relative;
+    flex: auto;
+    overflow: hidden;
+    padding: 5px 10px;
+    border: 1px solid rgba(100, 160, 220, 0.6);
+    border-radius: 4px;
+    background: rgba(100, 160, 220, 0.18);
+    color: inherit;
+    font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+
+    &:hover:not([disabled]) {
+        background: rgba(100, 160, 220, 0.32);
+    }
+
+    &[disabled] {
+        opacity: 0.45;
+        cursor: default;
+    }
+
+    &.is-downloading .pack-action-fill {
+        background: linear-gradient(
+            90deg,
+            rgba(77, 143, 204, 0.55),
+            rgba(143, 214, 255, 0.85),
+            rgba(77, 143, 204, 0.55)
+        );
+        background-size: 200% 100%;
+        animation: pack-action-flow 1.2s linear infinite;
+    }
+
+    &.is-checking .pack-action-fill {
+        width: 35%;
+        background: rgba(100, 160, 220, 0.45);
+        animation: pack-action-slide 1.1s ease-in-out infinite;
+    }
+}
+
+.pack-action-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 0;
+    pointer-events: none;
+    transition: width 0.25s ease-out;
+}
+
+.pack-action-label {
+    position: relative;
+    z-index: 1;
+}
+
+@keyframes pack-action-flow {
+    from {
+        background-position: 0 0;
+    }
+    to {
+        background-position: -200% 0;
+    }
+}
+
+@keyframes pack-action-slide {
+    from {
+        transform: translateX(-100%);
+    }
+    to {
+        transform: translateX(290%);
+    }
+}
+
+.footer-links {
+    display: inline-block;
+    margin-left: 10px;
+    font-size: 0.78rem;
+    color: gray;
+    white-space: nowrap;
+
+    a {
+        color: #64a0dc;
+        text-decoration: underline;
+        text-decoration-color: rgba(100, 160, 220, 0.35);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 2px;
+        transition:
+            color 0.15s ease,
+            text-decoration-color 0.15s ease;
+
+        &::after {
+            content: "↗";
+            margin-left: 2px;
+            font-size: 0.9em;
+            opacity: 0.55;
+        }
+
+        &:hover {
+            color: #8fd6ff;
+            text-decoration-color: rgba(143, 214, 255, 0.7);
+
+            &::after {
+                opacity: 1;
+            }
+        }
+
+        &:focus-visible {
+            outline: 1px solid #64a0dc;
+            outline-offset: 2px;
+            border-radius: 2px;
+        }
+    }
+}
 </style>
 
 <i18n>
@@ -1509,7 +1926,27 @@ ul.operations > li.render-settings-li {
         "无限": "无限",
         "修改后需重新导入蓝图才能生效": "修改后需重新导入蓝图才能生效",
         "设置已修改，重新导入蓝图后生效": "设置已修改，重新导入蓝图后生效",
-        "当前素材包未提供该通道贴图": "当前素材包未提供该通道贴图"
+        "当前素材包未提供该通道贴图": "当前素材包未提供该通道贴图",
+        "GitHub": "GitHub",
+        "反馈": "反馈",
+
+        "离线模型包": "离线模型包",
+        "下载全部模型": "下载全部模型",
+        "继续下载": "继续下载",
+        "重试下载": "重试下载",
+        "取消下载": "取消下载",
+        "已下载": "已下载",
+        "已是离线状态": "已是离线状态",
+        "下载中": "下载中",
+        "待下载": "待下载",
+        "检查中…": "检查中…",
+        "下载失败": "下载失败",
+        "不支持": "不支持",
+        "下载完成前无法切换渲染设置": "下载完成前无法切换渲染设置",
+        "已缓存到本地，断网也能查看这些模型": "已缓存到本地，断网也能查看这些模型",
+        "可选：把全部模型存到本地，断网也能看 3D 模型": "可选：把全部模型存到本地，断网也能看 3D 模型",
+        "当前浏览器不支持本地缓存，模型仍可在联网时加载": "当前浏览器不支持本地缓存，模型仍可在联网时加载",
+        "正在检查本地已缓存的模型…": "正在检查本地已缓存的模型…"
     },
     en: {
         "复制": "Copy",
@@ -1546,7 +1983,27 @@ ul.operations > li.render-settings-li {
         "无限": "Unlimited",
         "修改后需重新导入蓝图才能生效": "Re-import the blueprint for changes to take effect",
         "设置已修改，重新导入蓝图后生效": "Settings changed — re-import the blueprint to apply",
-        "当前素材包未提供该通道贴图": "This texture channel is not available in the asset pack"
+        "当前素材包未提供该通道贴图": "This texture channel is not available in the asset pack",
+        "GitHub": "GitHub",
+        "反馈": "Feedback",
+
+        "离线模型包": "Offline models",
+        "下载全部模型": "Download all models",
+        "继续下载": "Resume",
+        "重试下载": "Retry download",
+        "取消下载": "Cancel",
+        "已下载": "Downloaded",
+        "已是离线状态": "Already offline",
+        "下载中": "Downloading",
+        "待下载": "To download",
+        "检查中…": "Checking…",
+        "下载失败": "Download failed",
+        "不支持": "Unsupported",
+        "下载完成前无法切换渲染设置": "Rendering settings are locked until the download finishes",
+        "已缓存到本地，断网也能查看这些模型": "Stored locally — these models now work offline",
+        "可选：把全部模型存到本地，断网也能看 3D 模型": "Optional: store every model locally to view 3D models offline",
+        "当前浏览器不支持本地缓存，模型仍可在联网时加载": "This browser does not support local caching; models still load while online",
+        "正在检查本地已缓存的模型…": "Checking locally cached models…"
     },
 }
 </i18n>
