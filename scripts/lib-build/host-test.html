@@ -393,9 +393,9 @@
                 ? '成功请求 ' + okCount + ' 个，失败 0 个'
                 : errors.length + ' 个失败：' + errors.slice(0, 8).join(' | '));
 
-        /** 模型请求：models/ 下，且不是 img/models/ 的贴图 */
+        /** 模型请求：models/ 下 */
         function isModel(u) {
-            return u.indexOf('/models/') !== -1 && u.indexOf('/img/models/') === -1;
+            return u.indexOf('/models/') !== -1;
         }
         /** 图标请求：img/{item_recipe,tech,signal}/ 下 */
         function isIcon(u) {
@@ -416,9 +416,10 @@
             assets.ok.some(isIcon),
             '命中 ' + assets.ok.filter(isIcon).length + ' 个图标请求',
             true);
-        check('通道贴图从 img/models/ 加载成功',
-            assets.ok.some(isTexture),
-            '命中 ' + assets.ok.filter(isTexture).length + ' 个贴图请求',
+        check('通道贴图已内嵌进 GLB，不应再有 img/models/ 请求',
+            assets.ok.every(function (u) { return !isTexture(u); })
+                && assets.bad.every(function (u) { return !isTexture(u); }),
+            '命中 ' + assets.ok.filter(isTexture).length + ' 个 img/models 请求（期望 0）',
             true);
     }
 

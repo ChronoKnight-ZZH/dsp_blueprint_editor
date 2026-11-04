@@ -12,6 +12,7 @@
 import { Box3, Group, Object3D, Texture } from "three";
 import type { Material } from "three";
 import { modelUrl } from "./glbAssets";
+import { getKtx2Loader } from "./ktx2";
 import { applyModelMaterialTextures } from "./materialTextures";
 import type { TextureSettings } from "@/renderSettingsTypes";
 
@@ -192,6 +193,15 @@ async function parseGlb(
         /* webpackChunkName: "gltf-loader" */ "three/examples/jsm/loaders/GLTFLoader.js"
     )) as unknown as GltfLoaderModule;
     const loader = new mod.GLTFLoader();
+    // 优化后的 GLB 把贴图换成了 KTX2（KHR_texture_basisu）：这是 required 扩展，
+    // 没挂转码器时 GLTFLoader 会直接抛错，而不是静默降级。
+    // 未注册渲染器时 getKtx2Loader() 返回 null —— 此时行为与未改造前完全一致。
+    const ktx2 = await getKtx2Loader();
+    if (ktx2 !== null) {
+        (
+            loader as unknown as { setKTX2Loader(loader: unknown): void }
+        ).setKTX2Loader(ktx2);
+    }
     return new Promise<GltfLike>((resolve, reject) => {
         loader.parse(buffer, baseUrl, resolve, (error) => {
             reject(error instanceof Error ? error : new Error(String(error)));

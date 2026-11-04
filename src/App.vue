@@ -270,6 +270,124 @@
                         </li>
                     </template>
                     <div v-else class="empty-hint">{{ t("请先打开蓝图") }}</div>
+                    <li class="render-settings-li">
+                        <section class="render-settings">
+                            <button
+                                type="button"
+                                class="advanced-toggle"
+                                :class="{ open: advancedOpen }"
+                                @click="advancedOpen = !advancedOpen"
+                            >
+                                <span>{{ t("高级") }}</span>
+                                <span
+                                    class="switch-track decorative"
+                                    :class="{ on: advancedOpen }"
+                                ></span>
+                            </button>
+                            <div v-show="advancedOpen" class="advanced-body">
+                                <div class="option-row">
+                                    <span>{{ t("展示真实模型") }}</span>
+                                    <label class="switch">
+                                        <input
+                                            type="checkbox"
+                                            v-model="
+                                                renderSettings.showRealModels
+                                            "
+                                        />
+                                        <span class="switch-track"></span>
+                                    </label>
+                                </div>
+                                <div class="option-row">
+                                    <span>{{ t("开启贴图") }}</span>
+                                    <label class="switch">
+                                        <input
+                                            type="checkbox"
+                                            v-model="
+                                                renderSettings.texturesEnabled
+                                            "
+                                        />
+                                        <span class="switch-track"></span>
+                                    </label>
+                                </div>
+                                <div
+                                    class="channel-list"
+                                    :class="{
+                                        disabled:
+                                            !renderSettings.texturesEnabled,
+                                    }"
+                                >
+                                    <div
+                                        v-for="channel in textureChannels"
+                                        :key="channel.key"
+                                        class="channel-row"
+                                        :title="
+                                            channel.unavailable
+                                                ? t(
+                                                      '当前素材包未提供该通道贴图'
+                                                  )
+                                                : undefined
+                                        "
+                                    >
+                                        <span class="channel-name">
+                                            {{ t(channel.label)
+                                            }}<code>{{ channel.suffix }}</code>
+                                        </span>
+                                        <label class="switch">
+                                            <input
+                                                type="checkbox"
+                                                v-model="
+                                                    renderSettings.textures[
+                                                        channel.key
+                                                    ]
+                                                "
+                                                :disabled="
+                                                    !renderSettings.texturesEnabled
+                                                "
+                                            />
+                                            <span class="switch-track"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="field-row">
+                                    <label for="max-model-instances">{{
+                                        t("渲染最大模型")
+                                    }}</label>
+                                    <input
+                                        id="max-model-instances"
+                                        type="text"
+                                        :value="maxModelText"
+                                        @change="commitMaxModel"
+                                    />
+                                </div>
+                                <div class="slider-row">
+                                    <input
+                                        type="range"
+                                        min="1"
+                                        :max="limitSliderMax + 1"
+                                        step="1"
+                                        :value="limitSliderValue"
+                                        @input="onLimitSliderInput"
+                                    />
+                                    <div class="slider-ticks">
+                                        <span>1</span>
+                                        <span>{{ t("无限") }}</span>
+                                    </div>
+                                </div>
+                                <div
+                                    class="settings-hint"
+                                    :class="{ dirty: settingsDirty }"
+                                >
+                                    {{
+                                        settingsDirty
+                                            ? t(
+                                                  "设置已修改，重新导入蓝图后生效"
+                                              )
+                                            : t("修改后需重新导入蓝图才能生效")
+                                    }}
+                                </div>
+                            </div>
+                        </section>
+                    </li>
                     <li style="margin-top: auto">
                         <div class="select-li">
                             <label for="select-language">
@@ -349,7 +467,12 @@ import ProductionStats from "./components/ProductionStats.vue";
 import { CommandQueue } from "./command";
 import BuildingOverview from "./components/BuildingOverview.vue";
 import { useLang } from "./i18n";
-import { captureRenderSettings } from "@/renderSettings";
+import {
+    renderSettings,
+    persistRenderSettings,
+    captureRenderSettings,
+} from "@/renderSettings";
+import type { TextureChannel } from "@/renderSettings";
 // 仅用于类型标注，编译时擦除，不影响 defineAsyncComponent 的异步分包
 import type BlueprintEditorImpl from "./components/BlueprintEditor.vue";
 const BlueprintEditor = defineAsyncComponent(
@@ -390,6 +513,82 @@ const togglePin = () => {
     }
 };
 const activeTab = ref<"info" | "operations" | "stats">("info");
+
+// ---------- 渲染高级设置 ----------
+const advancedOpen = ref(false);
+const settingsDirty = ref(false);
+
+const textureChannels: {
+    key: TextureChannel;
+    suffix: string;
+    label: string;
+    unavailable?: boolean;
+}[] = [
+    { key: "albedo", suffix: "-a", label: "反照率" },
+    { key: "normal", suffix: "-n", label: "法线" },
+    { key: "spec", suffix: "-s", label: "高光/粗糙" },
+    { key: "emissive", suffix: "-e", label: "自发光" },
+    { key: "effect", suffix: "-eff", label: "特效", unavailable: true },
+    { key: "dirt", suffix: "-dirt", label: "污渍", unavailable: true },
+    { key: "glass", suffix: "-glass", label: "玻璃", unavailable: true },
+];
+
+/** 滑动条数值上限；再往右那一档代表「无限」 */
+const limitSliderMax = 2048;
+
+const limitSliderValue = computed(() => {
+    const limit = renderSettings.maxInstancesPerModel;
+    if (!Number.isFinite(limit)) return limitSliderMax + 1;
+    return Math.min(limitSliderMax, Math.max(1, Math.round(limit)));
+});
+
+const maxModelText = computed(() =>
+    Number.isFinite(renderSettings.maxInstancesPerModel)
+        ? String(renderSettings.maxInstancesPerModel)
+        : t("无限")
+);
+
+const parseLimitText = (text: string): number => {
+    const normalized = text.trim().toLowerCase();
+    if (
+        normalized === "无限" ||
+        normalized === "∞" ||
+        normalized === "inf" ||
+        normalized === "infinite" ||
+        normalized === "infinity"
+    )
+        return Infinity;
+    const value = Number(normalized);
+    // 非法输入：保持原值
+    if (normalized === "" || !Number.isFinite(value))
+        return renderSettings.maxInstancesPerModel;
+    return Math.max(1, Math.floor(value));
+};
+
+const onLimitSliderInput = (e: Event) => {
+    const value = Number((e.target as HTMLInputElement).value);
+    renderSettings.maxInstancesPerModel =
+        value > limitSliderMax ? Infinity : value;
+};
+
+const commitMaxModel = (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    renderSettings.maxInstancesPerModel = parseLimitText(input.value);
+    // 输入不合法时回显当前值（无限显示为「无限」）
+    input.value = Number.isFinite(renderSettings.maxInstancesPerModel)
+        ? String(renderSettings.maxInstancesPerModel)
+        : t("无限");
+};
+
+// 设置变化后立即写入 sessionStorage，并提示「需重新导入蓝图」
+watch(
+    renderSettings,
+    () => {
+        persistRenderSettings();
+        settingsDirty.value = true;
+    },
+    { deep: true }
+);
 
 const working = ref(false);
 const codeExpired = ref(false);
@@ -611,6 +810,8 @@ const parseBp = (s: string) => {
     codeExpired.value = false;
     // 导入蓝图：把面板设置固化为「已生效」快照，本次及之后的中途重建都按它渲染
     captureRenderSettings();
+    // 重新导入后场景已按最新设置重建，清掉「待生效」提示
+    settingsDirty.value = false;
 };
 
 // 拖拽状态

@@ -152,6 +152,7 @@ import {
     setBuildingEnvironment,
 } from "@/models/envMap";
 import { setTextureMaxAnisotropy } from "@/models/textureMaps";
+import { setKtx2Renderer } from "@/models/ktx2";
 import { getAppliedRenderSettings } from "@/renderSettings";
 import { setSettingsProvider } from "@/models/glbLoader";
 import { IconTexture } from "@/iconTexture";
@@ -187,6 +188,9 @@ attachRenderer(root, renderer);
 // 环境反射只挂到建筑材质（material.envMap），不设 scene.environment，
 // 免得行星本体、网格线跟着泛白。
 setTextureMaxAnisotropy(renderer.capabilities.getMaxAnisotropy());
+// KTX2 转码目标要按当前 GPU 能力挑（ASTC / ETC2 / BC7 / PVRTC），
+// 所以必须把渲染器交给 ktx2 模块，GLTFLoader 解析 GLB 时才有转码器可用。
+setKtx2Renderer(renderer);
 setBuildingEnvironment(createNeutralEnvironment(renderer));
 
 const camera = new PerspectiveCamera(50);

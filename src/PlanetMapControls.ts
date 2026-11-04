@@ -50,6 +50,7 @@ export interface CameraHome {
  *   左键拖     → 沿球面平移锚点
  *   滚轮       → 改相机到锚点的距离（唯一的缩放入口，中键不承担任何操作）
  *   WASD       → 上下左右平移（与左键拖拽同一套换算）
+ *   触屏       → 单指平移（同左键）；双指开合缩放 + 双指拖动旋转（同右键）
  *
  * **不再固定 N 极朝上**：相机的 up 取锚点处的球面法线，这样地平线永远是水平的、
  * 建筑永远竖着，但 N 极在画面上的位置随锚点自然变化，不再往正北做吸附。
@@ -121,7 +122,8 @@ export class PlanetMapControls extends EventDispatcher<{
         RIGHT: MOUSE.ROTATE,
     };
 
-    touches = { ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_ROTATE };
+    /** 触屏：单指平移（同左键）；双指开合缩放 + 双指拖动旋转（同右键） */
+    touches = { ONE: TOUCH.PAN, TWO: TOUCH.DOLLY_ROTATE };
 
     constructor(
         public object: PerspectiveCamera,
@@ -616,6 +618,20 @@ export class PlanetMapControls extends EventDispatcher<{
         }
     }
 
+    handleTouchStartPan() {
+        this.panStart.set(this.pointers[0].pageX, this.pointers[0].pageY);
+    }
+
+    handleTouchMovePan(event: PointerEvent) {
+        this.panEnd.set(event.pageX, event.pageY);
+        this.panDelta.subVectors(this.panEnd, this.panStart);
+        if (!this.passDragThreshold(this.panDelta)) return;
+
+        this.pan(this.panDelta.x, this.panDelta.y);
+
+        this.panStart.copy(this.panEnd);
+    }
+
     handleTouchStartRotate() {
         if (this.pointers.length === 1) {
             this.rotateStart.set(
@@ -816,6 +832,11 @@ export class PlanetMapControls extends EventDispatcher<{
                         this.state = STATE.TOUCH_ROTATE;
                         break;
 
+                    case TOUCH.PAN:
+                        this.handleTouchStartPan();
+                        this.state = STATE.TOUCH_PAN;
+                        break;
+
                     default:
                         this.state = STATE.NONE;
                 }
@@ -845,6 +866,9 @@ export class PlanetMapControls extends EventDispatcher<{
             case STATE.TOUCH_ROTATE:
                 if (!this.enableRotate) return;
                 this.handleTouchMoveRotate(event);
+                break;
+            case STATE.TOUCH_PAN:
+                this.handleTouchMovePan(event);
                 break;
             case STATE.TOUCH_DOLLY_ROTATE:
                 if (!this.enableDolly && !this.enableRotate) return;

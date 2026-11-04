@@ -134,7 +134,7 @@ export class Cargos extends InstancedMesh {
   `height = minHeight + sin(tilt) × effectiveDistance`，`horizontal = cos(tilt) × effectiveDistance`；
   `camera.position = anchor × (R + height) + viewDir × horizontal`；`camera.up = anchor`；`camera.lookAt(anchor × R)`。
   相机 up 取当地法线 → 地平线永远水平、建筑永远竖着，但**不吸附正北**。
-- 输入：右键拖拽（`MOUSE.ROTATE`：水平 → 方位，竖直 → 仰角）、左键拖拽（`MOUSE.PAN`：锚点沿球面平移，`anchor += 切向位移 / R` 后归一化）、滚轮（`wheelDollyBase = 0.999` 乘性改距离，唯一缩放入口）、`WASD`（上下左右平移，`keyPanSpeed = 240 px/s`，与拖拽同一套像素→世界换算）、触屏单指旋转 / 双指缩放+旋转。**中键不绑定任何动作**（`mouseButtons.MIDDLE = -1`）。拖拽有 `dragThreshold = 3px` 死区，避免单击时抖视角。
+- 输入：右键拖拽（`MOUSE.ROTATE`：水平 → 方位，竖直 → 仰角）、左键拖拽（`MOUSE.PAN`：锚点沿球面平移，`anchor += 切向位移 / R` 后归一化）、滚轮（`wheelDollyBase = 0.999` 乘性改距离，唯一缩放入口）、`WASD`（上下左右平移，`keyPanSpeed = 240 px/s`，与拖拽同一套像素→世界换算）、触屏单指平移（`TOUCH.PAN`，同左键）/ 双指开合缩放 + 双指拖动旋转（`TOUCH.DOLLY_ROTATE`，同右键：水平 → 方位，竖直 → 仰角）。**中键不绑定任何动作**（`mouseButtons.MIDDLE = -1`）。拖拽有 `dragThreshold = 3px` 死区，避免单击时抖视角。
 - **地平线联动**：站在离地 h 处只能看到 `R·acos(R/(R+h))` 以内的目标。`setDistance()` 拉远到锚点会被挡住时自动抬高 `tilt`；`setTilt()` 只夹范围，距离由 `effectiveDistance` 收。实现在 `maxDistanceForTilt` / `minTiltForDistance`（二分）。
 - `setHome(anchor, viewDir, tilt, distance)` / `reset()`：入场姿态。`BlueprintEditor.applyHome()` 按建筑质心的球面点作锚点、图纸长边横向摆正、外接圆半径定距离；蓝图替换时重置，`N` 键也调它。
 - 配套：`camera.near = 0.5`（再往小会让 24 位深度缓冲在 z≈200 处的精度低于地基 `REFORM_LIFT = 0.015` 的抬升量）；`src/skyGradient.ts` 的天光背景（见下节）按 `camera.up`（当地法线）取色，俯瞰时星球铺满画面看不见，平视时地平线上一条大气雾带、抬头是星空。

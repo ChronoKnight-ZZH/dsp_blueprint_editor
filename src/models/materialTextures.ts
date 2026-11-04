@@ -153,6 +153,15 @@ function applyToMaterial(
     // 改设置会立即重建整个场景
     const useTextures = settings.texturesEnabled;
 
+    // 通道贴图的**权威来源优先 GLB 内嵌**（KTX2 化之后的形态），没有再回退外置 PNG
+    // （改造前的形态）。这样迁移是逐模型、可灰度的：
+    // 某个 GLB 一旦烘进了通道图，运行期就不再多下载/解码任何 PNG，且材质切换照旧。
+    const normalTexture = base.normalMap ?? textures?.normal ?? null;
+    const emissiveTexture = base.emissiveMap ?? textures?.emissive ?? null;
+    // glTF 的 metallicRoughnessTexture 会同时挂到 roughnessMap / metalnessMap
+    const ormTexture =
+        base.roughnessMap ?? base.metalnessMap ?? textures?.orm ?? null;
+
     // 0) -a 反照率：关闭后只保留材质基础色（GLB 内嵌的底色图）；
     //    GLB 里压根没有底色图的材质（*-black / DefaultMaterial / 无材质网格）用纯色兜底
     material.map =
@@ -165,17 +174,12 @@ function applyToMaterial(
     material.envMapIntensity = tuning.envMapIntensity;
 
     // 2) -s 高光/粗糙：金属度 / 粗糙度
-    if (
-        useTextures &&
-        settings.textures.spec &&
-        textures !== null &&
-        textures.orm !== null
-    ) {
+    if (useTextures && settings.textures.spec && ormTexture !== null) {
         // 有 -s 图：完全交给贴图（G=粗糙度、B=金属度），tuning.metalness 作为乘数
         material.metalness = clamp01(tuning.metalness);
-        material.metalnessMap = textures.orm;
+        material.metalnessMap = ormTexture;
         material.roughness = 1;
-        material.roughnessMap = textures.orm;
+        material.roughnessMap = ormTexture;
     } else {
         // 关闭或没有 -s 图：恢复 GLB 原始值，并按基准给个偏绝缘体的金属度
         material.metalness = clamp01(
@@ -187,14 +191,9 @@ function applyToMaterial(
     }
 
     // 3) -e 自发光：emissive 必须是白色，emissiveMap 才会按图发光
-    if (
-        useTextures &&
-        settings.textures.emissive &&
-        textures !== null &&
-        textures.emissive !== null
-    ) {
+    if (useTextures && settings.textures.emissive && emissiveTexture !== null) {
         material.emissive.setRGB(1, 1, 1);
-        material.emissiveMap = textures.emissive;
+        material.emissiveMap = emissiveTexture;
         material.emissiveIntensity = tuning.emissiveIntensity;
     } else {
         material.emissiveMap = base.emissiveMap;
@@ -207,13 +206,8 @@ function applyToMaterial(
     }
 
     // 4) -n 法线
-    if (
-        useTextures &&
-        settings.textures.normal &&
-        textures !== null &&
-        textures.normal !== null
-    ) {
-        material.normalMap = textures.normal;
+    if (useTextures && settings.textures.normal && normalTexture !== null) {
+        material.normalMap = normalTexture;
         material.normalScale.set(NORMAL_SCALE_X, NORMAL_SCALE_Y);
     } else {
         material.normalMap = base.normalMap;
@@ -273,7 +267,19 @@ export async function applyModelMaterialTextures(
                 return;
             }
             try {
-                const textures = await loadMaterialTextureSet(urls);
+                // GLB 已经烘进通道图（KTX2 化后的常态）时不再下载/解码任何 PNG，
+                // 只有老 GLB 缺通道才走外置图这条老路。
+                const baked = snapshotOf(material);
+                const bakedCovers =
+                    (urls.normal === undefined || baked.normalMap !== null) &&
+                    (urls.emissive === undefined ||
+                        baked.emissiveMap !== null) &&
+                    (urls.spec === undefined ||
+                        baked.roughnessMap !== null ||
+                        baked.metalnessMap !== null);
+                const textures = bakedCovers
+                    ? null
+                    : await loadMaterialTextureSet(urls);
                 applyToMaterial(
                     material,
                     tuning,
@@ -282,9 +288,13 @@ export async function applyModelMaterialTextures(
                     fallbackAlbedo
                 );
                 if (
-                    textures.normal !== null ||
-                    textures.emissive !== null ||
-                    textures.orm !== null
+                    baked.normalMap !== null ||
+                    baked.emissiveMap !== null ||
+                    baked.roughnessMap !== null ||
+                    (textures !== null &&
+                        (textures.normal !== null ||
+                            textures.emissive !== null ||
+                            textures.orm !== null))
                 )
                     textured++;
             } catch (e) {
