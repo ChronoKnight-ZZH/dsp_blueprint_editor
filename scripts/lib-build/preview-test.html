@@ -21,7 +21,12 @@
       · 事件顺序零错乱（重复/过期序号必须被拒）；
       · 事件停后收敛（moving → 0），不堆积；
       · 帧间隔 > 33ms 的比例 < 1%；
-      · 末态存活对象数与数据净增量一致。
+      · 末态存活对象数与数据净增量一致；
+      · 回放结束后预览层保留（画面即验收对象，不自动清除）。
+
+    模型：GLB 由库按需懒加载（未加载时盒子占位，加载完成后自动换成真模型，
+          见 PreviewLayer.resyncModels），无需手动开启；若长时间只有盒子，
+          检查 dist-lib/models/ 是否随产物一起被访问到。
 -->
 <style>
     * { box-sizing: border-box; }
@@ -50,6 +55,13 @@
     }
     button:hover:not(:disabled) { border-color: #58a6ff; }
     button:disabled { opacity: .5; cursor: not-allowed; }
+    .file-import {
+        background: #21262d; color: #e6edf3; border: 1px solid #30363d;
+        border-radius: 6px; padding: 5px 12px; font-size: 13px; cursor: pointer;
+    }
+    .file-import:hover { border-color: #58a6ff; }
+    .file-import input { display: none; }
+    .fixture-name { color: #8b949e; font-size: 12px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #viewer { height: 460px; border: 1px solid #30363d; border-radius: 6px; overflow: hidden; background: #000; margin-top: 14px; }
     .grid {
         display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
@@ -79,13 +91,19 @@
 <p class="hint">
     本页动态 <code>import()</code> 同目录的 <code>dsp-blueprint-editor.esm.js</code>，
     用 <code>beginPreview()</code> + <code>applyPreviewDelta()</code> 按实测节拍
-    （<strong>20ms / 条，250 条约 5 秒</strong>）回放 <code>preview-fixture.json</code>。
+    （<strong>20ms / 条，250 条约 5 秒</strong>）回放 fixture。
+    默认加载同目录 <code>preview-fixture.json</code>，也可点「导入 fixture…」换任意
+    <code>build-fixture.mjs</code> 产物。回放结束后画面保留，再播或停止时才清除。
     看画面：模型应当"流式长出、边生成边挪位、被撤销的试放不闪烁"。
 </p>
 
 <div class="toolbar">
-    <button id="play">▶ 回放</button>
-    <button id="stop">■ 停止</button>
+    <button id="play" disabled>▶ 回放</button>
+    <button id="stop" disabled>■ 停止</button>
+    <label class="file-import">导入 fixture…
+        <input id="file" type="file" accept=".json,application/json" />
+    </label>
+    <span id="fixtureName" class="fixture-name">未加载</span>
     <label>速度
         <select id="speed">
             <option value="1">1x（20ms/条，与实测一致）</option>
@@ -151,6 +169,8 @@
     const projectorSel = document.getElementById('projector');
     const animationSel = document.getElementById('animation');
     const thrashSel = document.getElementById('thrash');
+    const fileInput = document.getElementById('file');
+    const fixtureNameEl = document.getElementById('fixtureName');
 
     /** @type {any} */ let viewer = null;
     /** @type {any[]} */ let events = [];
@@ -287,7 +307,7 @@
     }
 
     async function replay() {
-        if (viewer === null) return;
+        if (viewer === null || events.length === 0) return;
         const token = ++runToken;
         playBtn.disabled = true;
         stopBtn.disabled = false;
@@ -389,8 +409,10 @@
         check('事件流用时与实测节拍一致', Math.abs(streamMs - (events.length * STEP_MS) / (Number(speedSel.value) || 1)) < 1500,
             streamMs.toFixed(0) + 'ms');
 
-        viewer.discardPreview();
-        check('discardPreview 后预览层已释放', viewer.previewing === false);
+        // 回放结束后保留预览层：画面就是验收对象，播完不能清空。
+        // 再次回放（replay 开头）/ 点「■ 停止」/ 导入新 fixture 时会先 discard 再开始。
+        check('回放结束后预览层保留（不自动清除）', viewer.previewing === true,
+            '存活 ' + s.alive + ' 个对象');
         check('canvas 仍在（正式场景未受影响）',
             !!viewer.getCanvas() && document.querySelector('#viewer canvas') !== null);
 
@@ -401,6 +423,33 @@
 
     // ---------------------------------------------------------------- 启动
 
+    /** 加载一份 fixture（默认文件 / 手工导入共用）：校验 + 重置状态 + 更新界面 */
+    function loadFixture(data, name) {
+        if (data === null || typeof data !== 'object' || !Array.isArray(data.events) || data.events.length === 0)
+            throw new Error('fixture 里没有 events');
+        if (data.stats === undefined || typeof data.stats.expectedAlive !== 'number')
+            throw new Error('fixture 缺少 stats（请用 scripts/preview/build-fixture.mjs 生成）');
+        // 仅在替换旧数据时清空报告行；首次加载要保留上面的启动检查结果
+        if (fixture !== null) {
+            reportEl.innerHTML = '';
+            checks.length = 0;
+            failures.length = 0;
+        }
+        fixture = data;
+        events = data.events;
+        fixtureNameEl.textContent = name;
+        fixtureNameEl.title = name;
+        log('已加载 fixture：' + name + '（' + fixture.stats.events + ' 条事件 / '
+            + fixture.stats.operations + ' 个操作 / ' + fixture.stats.expectedAlive + ' 个终态对象）');
+        if (fixture.source) log('数据来源：' + fixture.source + '（version ' + fixture.version + '）');
+        if (Array.isArray(fixture.stats.switchSequences))
+            log('坐标切换发生在 sequence=' + (fixture.stats.switchSequences.join(',') || '无'));
+        bannerEl.className = 'banner running';
+        bannerEl.textContent = '就绪：点「▶ 回放」开始（' + events.length + ' 条事件 ≈ '
+            + ((events.length * STEP_MS) / 1000).toFixed(1) + 's）';
+        playBtn.disabled = false;
+    }
+
     requestAnimationFrame(frameLoop);
     renderStats([['状态', '加载中…', '']]);
 
@@ -410,12 +459,6 @@
         const previewApi = ['beginPreview', 'applyPreviewDelta', 'commitPreview', 'discardPreview', 'previewStats'];
         for (const name of required) check('导出 ' + name, typeof api[name] === 'function');
 
-        const response = await fetch(fixtureUrl);
-        if (!response.ok) throw new Error('preview-fixture.json → HTTP ' + response.status);
-        fixture = await response.json();
-        events = Array.isArray(fixture.events) ? fixture.events : [];
-        if (events.length === 0) throw new Error('fixture 里没有 events');
-
         viewer = new api.BlueprintViewer(
             { container: '#viewer', theme: 'dark', previewAnimation: 'on' },
             { onError: (error) => log('onError ' + error.code + ': ' + error.message) },
@@ -424,20 +467,41 @@
             check('BlueprintViewer.' + name, typeof viewer[name] !== 'undefined');
         check('canvas 已挂载', !!viewer.getCanvas() && document.querySelector('#viewer canvas') !== null);
 
-        check('数据已加载',
-            true,
-            fixture.stats.events + ' 条事件 / ' + fixture.stats.operations + ' 个操作 / '
-            + (fixture.stats.expectedAlive) + ' 个终态对象');
-
-        log('数据来源：' + fixture.source + '（version ' + fixture.version + '）');
-        log('坐标切换发生在 sequence=' + (fixture.stats.switchSequences.join(',') || '无'));
-
-        bannerEl.className = 'banner running';
-        bannerEl.textContent = '就绪：点「▶ 回放」开始（' + events.length + ' 条事件 ≈ '
-            + ((events.length * STEP_MS) / 1000).toFixed(1) + 's）';
-        playBtn.disabled = false;
         playBtn.addEventListener('click', () => { replay().catch((e) => { log('回放异常：' + e); finish(); }); });
         stopBtn.addEventListener('click', () => { stop(); log('已停止'); });
+        fileInput.addEventListener('change', () => {
+            const file = fileInput.files && fileInput.files[0];
+            fileInput.value = ''; // 允许重复选同一文件
+            if (!file) return;
+            file.text()
+                .then((text) => {
+                    stop();
+                    log('已停止（导入新 fixture）');
+                    loadFixture(JSON.parse(text), file.name);
+                })
+                .catch((e) => {
+                    log('fixture 读取失败：' + String((e && e.message) || e));
+                    bannerEl.className = 'banner fail';
+                    bannerEl.textContent = 'fixture 读取失败：' + String((e && e.message) || e);
+                    playBtn.disabled = fixture === null; // 从未加载成功过则保持禁用
+                });
+        });
+
+        // 默认 fixture：加载失败不阻断页面，提示手工导入
+        try {
+            const response = await fetch(fixtureUrl);
+            if (!response.ok) throw new Error('preview-fixture.json → HTTP ' + response.status);
+            loadFixture(await response.json(), 'preview-fixture.json（默认）');
+            check('数据已加载',
+                true,
+                fixture.stats.events + ' 条事件 / ' + fixture.stats.operations + ' 个操作 / '
+                + fixture.stats.expectedAlive + ' 个终态对象');
+        }
+        catch (e) {
+            log('默认 fixture 未加载：' + String((e && e.message) || e));
+            bannerEl.className = 'banner running';
+            bannerEl.textContent = '未找到默认 preview-fixture.json，请点「导入 fixture…」选择 build-fixture.mjs 的产物';
+        }
     }
     catch (error) {
         check('启动未抛异常', false, String((error && error.stack) || error));
