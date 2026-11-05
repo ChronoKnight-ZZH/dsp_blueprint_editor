@@ -35,6 +35,15 @@ export type {
     ViewerErrorCode,
     ViewerErrorPhase,
     SettingsPort,
+    // 增量预览（preview-delta）：宿主可原样转发自己的事件对象
+    PreviewAnimationMode,
+    PreviewBeginOptions,
+    PreviewBuildingLike,
+    PreviewCoordinateSystem,
+    PreviewDeltaEvent,
+    PreviewOperation,
+    PreviewStats,
+    PreviewVec3,
     // 选中 / 定位 / 查询
     BuildingPickPayload,
     BuildingInfoPayload,

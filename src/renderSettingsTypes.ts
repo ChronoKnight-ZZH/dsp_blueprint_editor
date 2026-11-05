@@ -9,6 +9,8 @@
  * `TextureSettings` 与 `ViewerRenderSettings`，因此 reactive 单例可以直接当参数传。
  */
 
+import type { PreviewAnimationMode } from "@/lib/preview/types";
+
 /** 贴图通道开关（与 `src/renderSettings.ts` 的 `TextureChannel` 一致） */
 export interface TextureChannelSwitches {
     readonly albedo: boolean;
@@ -26,11 +28,20 @@ export interface TextureSettings {
     readonly textures: TextureChannelSwitches;
 }
 
-/** Viewer 暴露的三个设置（`BlueprintViewer` / `RenderCore` 用） */
+/** Viewer 暴露的设置（`BlueprintViewer` / `RenderCore` 用） */
 export interface ViewerRenderSettings {
     readonly showRealModels: boolean;
     readonly texturesEnabled: boolean;
     readonly maxInstancesPerModel: number;
+    /**
+     * 增量预览动画（外部端 / MES 端的**运行时**开关，见 `src/lib/preview/types.ts`）。
+     *
+     * - `auto`（默认）：按设备能力判定（`prefers-reduced-motion` / 核数）；
+     * - `on` / `off`：强制开关。`off` 时事件照常应用，只是不插值（直接跳到目标）。
+     *
+     * 声明为可选：宿主用旧类型定义构造的对象仍然合法，省略等价于 `auto`。
+     */
+    readonly previewAnimation?: PreviewAnimationMode;
 }
 
 /** 渲染内核与 Viewer 都能用的完整设置（编辑器传的就是 `@/renderSettings` 的 reactive 单例） */

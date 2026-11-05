@@ -1,6 +1,7 @@
 import type { Matrix4 } from "three";
 import type { BlueprintArea, BlueprintData } from "@/blueprint/parser";
 import type { ViewerRenderSettings } from "@/renderSettingsTypes";
+import type { PreviewAnimationMode } from "./preview/types";
 
 /**
  * 公开类型定义。
@@ -9,6 +10,18 @@ import type { ViewerRenderSettings } from "@/renderSettingsTypes";
  * 保证 `src/lib/**` 整体不依赖 Vue（方案 D1）。
  */
 export type { ViewerRenderSettings } from "@/renderSettingsTypes";
+
+/** 增量预览（preview-delta）的公开类型，宿主可原样转发自己的事件对象 */
+export type {
+    PreviewAnimationMode,
+    PreviewBeginOptions,
+    PreviewBuildingLike,
+    PreviewCoordinateSystem,
+    PreviewDeltaEvent,
+    PreviewOperation,
+    PreviewStats,
+    PreviewVec3,
+} from "./preview/types";
 
 /** 容器解析与初始化选项 */
 export interface ViewerOptions {
@@ -22,6 +35,13 @@ export interface ViewerOptions {
     showRealModels?: boolean;
     texturesEnabled?: boolean;
     maxInstancesPerModel?: number;
+    /**
+     * 增量预览动画开关（外部端 / MES 端的运行时控制）。
+     *
+     * `'auto'`（默认）按设备能力判定；`'on'` / `'off'` 强制。
+     * 与 `initialSettings.previewAnimation` 等价，同时给出时本字段优先。
+     */
+    previewAnimation?: PreviewAnimationMode;
     /** 是否用 ResizeObserver 跟随容器尺寸。default true */
     autoResize?: boolean;
     /** 像素比。default: min(devicePixelRatio, 2) */

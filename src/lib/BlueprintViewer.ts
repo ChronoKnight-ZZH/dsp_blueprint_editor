@@ -4,6 +4,11 @@ import { fromStr } from "@/blueprint/parser";
 import type { ViewerRenderSettings } from "@/renderSettingsTypes";
 import { RenderCore, RenderPhaseError } from "./core/RenderCore";
 import type { RebuildReason } from "./core/RenderCore";
+import type {
+    PreviewBeginOptions,
+    PreviewDeltaEvent,
+    PreviewStats,
+} from "./preview/types";
 import {
     JSONImportError,
     parseBlueprintJSON,
@@ -32,6 +37,7 @@ const DEFAULT_SETTINGS: ViewerRenderSettings = {
     showRealModels: true,
     texturesEnabled: true,
     maxInstancesPerModel: Infinity,
+    previewAnimation: "auto",
 };
 
 /** 进程内存中的默认 SettingsPort（单实例使用） */
@@ -145,6 +151,9 @@ export class BlueprintViewer {
                 : {}),
             ...(options.maxInstancesPerModel !== undefined
                 ? { maxInstancesPerModel: options.maxInstancesPerModel }
+                : {}),
+            ...(options.previewAnimation !== undefined
+                ? { previewAnimation: options.previewAnimation }
                 : {}),
         };
 
@@ -262,6 +271,75 @@ export class BlueprintViewer {
     /** 最近一次**成功**加载的数据；失败不影响它 */
     getBlueprintData(): BlueprintData | null {
         return this.data;
+    }
+
+    // ------------------------------------------------------------ 增量预览（preview-delta）
+
+    /**
+     * 开始一次增量预览。
+     *
+     * 时序（指南 §2）：**先开始预览，再提交生成请求**，否则会漏掉开头的消息。
+     * 预览层是独立临时层：`beginPreview` 不会清空当前正式场景（保留上一次成功结果）。
+     */
+    beginPreview(options?: PreviewBeginOptions): void {
+        const guard = this.guard();
+        if (guard !== null) return;
+        this.core?.beginPreview(options);
+    }
+
+    /**
+     * 同步摄入一条 `preview-delta`（在宿主的 `onProgress` 回调里直接调用）。
+     *
+     * - 返回 `true` 表示应用了内容；序号过期 / 非差量 / 已销毁时返回 `false`；
+     * - **绝不抛错**（渲染异常在预览层内部吞掉，符合指南"不要让预览把生成流程搞挂"）。
+     */
+    applyPreviewDelta(event: PreviewDeltaEvent): boolean {
+        if (this.disposed) return false;
+        return this.core?.applyPreviewDelta(event) ?? false;
+    }
+
+    /**
+     * 预览收尾：用正式蓝图串替换。
+     *
+     * 顺序是**先建后换**——先构建正式场景（此时预览层仍在显示），成功后再丢弃预览层，
+     * 否则 3 万级蓝图会出现"预览消失 → 空场景 → 正式场景"的闪断。
+     */
+    commitPreview(blueprint: string): BlueprintLoadOutcome {
+        const guard = this.guard();
+        if (guard !== null) return guard;
+
+        let data: BlueprintData;
+        try {
+            data = fromStr(blueprint.trim());
+        } catch (e) {
+            // 生成成功但蓝图串无效：按失败处理，同时丢弃预览（不留半截画面）
+            this.core?.discardPreview();
+            return this.fail(classifyError(e, "parse"));
+        }
+        const outcome = this.applyData(data);
+        this.core?.discardPreview();
+        return outcome;
+    }
+
+    /** 丢弃预览层（生成失败 / 中止 / 用户离开页面时调用） */
+    discardPreview(): void {
+        if (this.disposed) return;
+        this.core?.discardPreview();
+    }
+
+    /** 是否正在预览 */
+    get previewing(): boolean {
+        return this.core?.previewing ?? false;
+    }
+
+    /**
+     * 预览运行期统计（诊断用；未预览时为 `null`）。
+     *
+     * 字段覆盖验收口径：`lastIngestMs` / `maxIngestMs`（≤50ms 预算）、
+     * `moving`（稳态应回落到 0）、`unknownRemoves`（中途订阅时的正常现象）。
+     */
+    previewStats(): PreviewStats | null {
+        return this.core?.getPreviewStats() ?? null;
     }
 
     resetCamera(): void {

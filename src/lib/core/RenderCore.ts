@@ -37,6 +37,13 @@ import type { PlanetSceneParts } from "./planetScene";
 import { buildBuildings } from "./buildBuildings";
 import { buildBVH } from "./buildBVH";
 import { AllBuildings } from "./AllBuildings";
+import { PreviewLayer } from "../preview/PreviewLayer";
+import { resolvePreviewAnimation } from "../preview/mode";
+import type {
+    PreviewBeginOptions,
+    PreviewDeltaEvent,
+    PreviewStats,
+} from "../preview/types";
 
 /** 渲染器最小接口：真实 `WebGLRenderer` 结构上满足，单测可注入 stub */
 export interface WebGLRendererLike extends TextureSink {
@@ -145,6 +152,8 @@ export class RenderCore {
 
     private bundle: SceneBundle | null = null;
     private data: BlueprintData | null = null;
+    /** 增量预览层（独立于 `bundle`：`commit` 时整层丢弃，正式场景走全量重建） */
+    private preview: PreviewLayer | null = null;
 
     private rafId: number | null = null;
     private disposed = false;
@@ -374,6 +383,52 @@ export class RenderCore {
         this.rebuildScene("data");
     }
 
+    // ------------------------------------------------------------ 增量预览
+
+    /**
+     * 开始一次增量预览（对应宿主 `generateFactory` 之前/同时调用）。
+     *
+     * 语义（对齐指南 §2 的时序）：先 `beginPreview`，再提交生成请求；
+     * 失败/中止走 `discardPreview`，成功则用 `result.blueprint` 走全量 `setBlueprintData`。
+     * 预览层是**独立临时层**，与正式场景（`bundle`）互不影响。
+     */
+    beginPreview(options?: PreviewBeginOptions): void {
+        this.assertAlive();
+        this.discardPreview();
+        const layer = new PreviewLayer(options);
+        layer.setAnimate(resolvePreviewAnimation(this.settings.previewAnimation) === "on");
+        this.scene.add(layer.object3d);
+        this.preview = layer;
+    }
+
+    /**
+     * 同步摄入一条 `preview-delta`。
+     *
+     * **同步返回、绝不抛错**：宿主在 `onProgress` 回调里直接调用即可满足
+     * "收到数据流后立即执行，延迟不超过 50ms"（实测摄入 ≤2ms/事件）。
+     */
+    applyPreviewDelta(event: PreviewDeltaEvent): boolean {
+        if (this.disposed) return false;
+        return this.preview?.apply(event) ?? false;
+    }
+
+    /** 丢弃预览层（失败 / 中止 / commit 后都要调用） */
+    discardPreview(): void {
+        if (this.preview === null) return;
+        this.preview.discard();
+        this.preview = null;
+    }
+
+    /** 预览是否在进行中 */
+    get previewing(): boolean {
+        return this.preview !== null && !this.preview.isDisposed;
+    }
+
+    /** 预览运行期统计（诊断用；未开始时为 null） */
+    getPreviewStats(): PreviewStats | null {
+        return this.preview?.stats ?? null;
+    }
+
     setRenderSettings(patch: Partial<ViewerRenderSettings>): void {
         this.assertAlive();
         const before = this.settings;
@@ -382,6 +437,7 @@ export class RenderCore {
         // 生效路径（方案 §4.1）：
         //   showRealModels / maxInstancesPerModel → 分组决策在构建期，必须重建
         //   texturesEnabled → 材质是共享对象，原地重挂即可，不重建（省掉纹理重分配与图标重请求）
+        //   previewAnimation → 只是预览层的插值开关，改一个布尔，不动场景
         const needsRebuild =
             before.showRealModels !== this.settings.showRealModels ||
             before.maxInstancesPerModel !== this.settings.maxInstancesPerModel;
@@ -389,6 +445,10 @@ export class RenderCore {
             this.rebuildScene("settings");
             return;
         }
+        if (before.previewAnimation !== this.settings.previewAnimation)
+            this.preview?.setAnimate(
+                resolvePreviewAnimation(this.settings.previewAnimation) === "on"
+            );
         if (before.texturesEnabled !== this.settings.texturesEnabled)
             reapplyLoadedModelMaterials(this.textureSettingsProvider());
     }
@@ -722,6 +782,8 @@ export class RenderCore {
             this.bundle.buildings.dispose();
             this.bundle = null;
         }
+        // 预览层：材质/几何都是自己克隆的，必须自己释放
+        this.discardPreview();
         // KTX2 转码器缓存：必须在 renderer.dispose() 之前清掉，否则
         // getKtx2Loader 还会拿着一个已失效的 GPU 能力引用。
         disposeKtx2Loader();
@@ -752,12 +814,23 @@ export class RenderCore {
         if (this.disposed || this.modelTimer !== null) return;
         this.modelTimer = window.setTimeout(() => {
             this.modelTimer = null;
-            if (this.disposed || this.data === null) return;
-            try {
-                this.rebuildScene("models");
-            } catch (e) {
-                // 定时器里的异常不能外抛，否则会变成未处理错误；保留旧场景即可
-                console.warn("[core] 模型到达后的重建失败（保留旧场景）", e);
+            if (this.disposed) return;
+            if (this.data !== null) {
+                try {
+                    this.rebuildScene("models");
+                } catch (e) {
+                    // 定时器里的异常不能外抛，否则会变成未处理错误；保留旧场景即可
+                    console.warn("[core] 模型到达后的重建失败（保留旧场景）", e);
+                }
+            }
+            // 预览层里的"盒占位"也要换成真模型（GLB 是异步到达的）。
+            // 注意：纯预览阶段 `data === null`，这里也必须执行。
+            if (this.preview !== null) {
+                try {
+                    this.preview.resyncModels();
+                } catch (e) {
+                    console.warn("[core] 预览层模型同步失败（已忽略）", e);
+                }
             }
         }, 150);
     }
@@ -906,6 +979,8 @@ export class RenderCore {
             this.planet.dirLight.position.copy(this._camera.position);
             // 网格 LOD：按相机到球心的距离切换细线可见性（双阈值迟滞在 planetScene 内部）
             this.planet.updateGridLOD(this._camera.position.length());
+            // 增量预览：每帧一次"跟随收敛"（无预览时是空操作）
+            this.preview?.tick(time);
             this.renderer.render(this.scene, this._camera);
             if (cameraUpdated) {
                 this._cameraVersion++;

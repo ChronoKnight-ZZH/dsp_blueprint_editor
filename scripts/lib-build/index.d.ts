@@ -19,11 +19,129 @@ import type { Matrix4, PerspectiveCamera } from 'three';
 
 // ---------------------------------------------------------------- 渲染设置
 
-/** Viewer 暴露的三个渲染设置 */
+/**
+ * 增量预览动画模式。
+ *
+ * - `'auto'`（默认）：按设备能力判定（`prefers-reduced-motion` / 逻辑核数）；
+ * - `'on'` / `'off'`：强制开关。`'off'` 时事件照常应用，只是不插值（直接跳到目标）。
+ */
+export type PreviewAnimationMode = 'auto' | 'on' | 'off';
+
+/** 预览期坐标语义（后端 `coordinateSystem`） */
+export type PreviewCoordinateSystem =
+    | 'layout-grid-v1'
+    | 'blueprint-area-local-v1'
+    | (string & Record<never, never>);
+
+/** 三维向量 */
+export interface PreviewVec3 {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+}
+
+/**
+ * Area 的两种历史形态（后端 T1 改为嵌套后，扁平字段仍在过渡期内兼容）：
+ * 扁平 `anchorLocalOffsetX/Y` + `width/height`，或嵌套 `anchorLocalOffset{x,y}` + `size{x,y}`。
+ */
+export interface PreviewAreaLike {
+    readonly index: number;
+    readonly parentIndex?: number;
+    readonly tropicAnchor?: number;
+    readonly areaSegments: number;
+    readonly anchorLocalOffsetX?: number;
+    readonly anchorLocalOffsetY?: number;
+    readonly width?: number;
+    readonly height?: number;
+    readonly anchorLocalOffset?: { readonly x: number; readonly y: number };
+    readonly size?: { readonly x: number; readonly y: number };
+}
+
+/** 预览建筑：只依赖渲染必需字段，宿主可原样传自己的事件对象 */
+export interface PreviewBuildingLike {
+    readonly index?: number;
+    /** 后端 T2 新增：是否为临时对象（缺失时按 `index === -1` 推断） */
+    readonly isTemporary?: boolean;
+    readonly itemId: number;
+    readonly modelIndex: number;
+    readonly areaIndex?: number;
+    readonly localOffset: PreviewVec3;
+    readonly localOffset2?: PreviewVec3;
+    readonly yaw: number;
+    readonly yaw2?: number;
+    readonly tilt?: number;
+    readonly tilt2?: number;
+    readonly pitch?: number;
+    readonly pitch2?: number;
+    readonly inputObjectId?: string | null;
+    readonly outputObjectId?: string | null;
+    readonly inputFromSlot?: number;
+    readonly outputToSlot?: number;
+    readonly productionIndex?: number;
+}
+
+/** 三类操作；`remove` 不携带 building */
+export type PreviewOperation =
+    | { readonly type: 'add' | 'replace'; readonly objectId: string; readonly building: PreviewBuildingLike }
+    | { readonly type: 'remove'; readonly objectId: string };
+
+/** 一条增量事件（其余字段按需忽略） */
+export interface PreviewDeltaEvent {
+    readonly kind?: string;
+    readonly protocolVersion?: number;
+    readonly taskId?: string;
+    readonly sequence?: number;
+    readonly stage?: string;
+    readonly message?: string;
+    readonly coordinateSystem?: PreviewCoordinateSystem;
+    readonly operations?: readonly PreviewOperation[];
+    readonly areas?: readonly PreviewAreaLike[];
+    readonly primaryAreaIndex?: number;
+    readonly previewBatch?: unknown;
+}
+
+/** `beginPreview` 选项 */
+export interface PreviewBeginOptions {
+    /**
+     * layout 阶段的投影方式：
+     * - `'sphere'`（默认）：格坐标 → 经纬度投影到球面，按 bbox 自动居中/缩放（跨度 ≤ ~63°）
+     * - `'plane'`：贴在锚点处的切平面（不绕球，永不穿极点）
+     */
+    projector?: 'sphere' | 'plane';
+    /** 收敛时间常数 τ（毫秒）。默认 100 */
+    settleMs?: number;
+    /** 抖动抑制：新对象延迟多久才淡入（毫秒）。默认 120；`0` = 关闭 */
+    enterDelayMs?: number;
+    /** 抖动抑制：存活短于该值即被撤销的对象不出场（毫秒）。默认 120 */
+    minLifeMs?: number;
+}
+
+/** 预览运行期统计（验收/诊断口径） */
+export interface PreviewStats {
+    readonly events: number;
+    readonly operations: number;
+    readonly droppedEvents: number;
+    readonly unknownRemoves: number;
+    readonly unknownReplaces: number;
+    readonly alive: number;
+    readonly fading: number;
+    readonly peakAlive: number;
+    readonly moving: number;
+    readonly slots: number;
+    readonly filteredByThrash: number;
+    readonly coordinateSystem: PreviewCoordinateSystem | null;
+    readonly lastIngestMs: number;
+    readonly maxIngestMs: number;
+    readonly disposed: boolean;
+}
+
+/** Viewer 暴露的渲染设置 */
 export interface ViewerRenderSettings {
     readonly showRealModels: boolean;
     readonly texturesEnabled: boolean;
     readonly maxInstancesPerModel: number;
+    /** 增量预览动画开关（运行时；省略等价 `'auto'`） */
+    readonly previewAnimation?: PreviewAnimationMode;
 }
 
 /**
@@ -42,8 +160,7 @@ export interface SettingsPort {
 
 // ---------------------------------------------------------------- 构造参数 / 回调
 
-/**
- * 3D 主题名。
+/** 3D 主题名。
  * `'editor'` 复刻编辑器当前观感（默认）；`'auto'` 跟随系统在 dark / light 间切换。
  */
 export type ThemeName = 'dark' | 'light' | 'editor' | 'auto';
@@ -66,11 +183,13 @@ export interface ThemeColors {
 export interface ViewerOptions {
     /** 必填。元素或 CSS 选择器；选择器解析失败返回 `no-container` 错误 */
     container: HTMLElement | string;
-    /** 初始设置；下面三个平铺字段是它的语法糖，同时给出时平铺字段优先 */
+    /** 初始设置；下面几个平铺字段是它的语法糖，同时给出时平铺字段优先 */
     initialSettings?: Partial<ViewerRenderSettings>;
     showRealModels?: boolean;
     texturesEnabled?: boolean;
     maxInstancesPerModel?: number;
+    /** 增量预览动画开关（`'auto'` 默认 / `'on'` / `'off'`） */
+    previewAnimation?: PreviewAnimationMode;
     /** 是否用 ResizeObserver 跟随容器尺寸。default true */
     autoResize?: boolean;
     /** 像素比。default min(devicePixelRatio, 2) */
@@ -344,6 +463,32 @@ export class BlueprintViewer {
     setRenderSettings(patch: Partial<ViewerRenderSettings>): void;
     /** 更新事件回调（默认**整体替换**；`{ merge: true }` 合并） */
     setCallbacks(cbs: ViewerCallbacks, opts?: { merge?: boolean }): void;
+
+    // ---- 增量预览（preview-delta）
+
+    /**
+     * 开始一次增量预览（**先开始预览，再提交生成请求**，否则会漏开头的消息）。
+     *
+     * 预览层是独立临时层：不会清空当前正式场景（保留上一次成功结果）。
+     */
+    beginPreview(options?: PreviewBeginOptions): void;
+    /**
+     * 同步摄入一条 `preview-delta`（在 `onProgress` 回调里直接调用）。
+     *
+     * 返回 `true` 表示应用了内容；序号过期 / 非差量 / 已销毁返回 `false`。
+     * **绝不抛错**——渲染异常在预览层内部吞掉，不影响生成流程。
+     */
+    applyPreviewDelta(event: PreviewDeltaEvent): boolean;
+    /**
+     * 预览收尾：用正式蓝图串替换（内部**先建后换**，避免大蓝图闪白）。
+     */
+    commitPreview(blueprint: string): BlueprintLoadOutcome;
+    /** 丢弃预览层（生成失败 / 中止 / 用户离开页面时调用） */
+    discardPreview(): void;
+    /** 是否正在预览 */
+    readonly previewing: boolean;
+    /** 预览运行期统计（未预览时为 `null`） */
+    previewStats(): PreviewStats | null;
 
     /** 销毁实例，释放资源（幂等） */
     dispose(): void;

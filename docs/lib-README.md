@@ -107,7 +107,46 @@ const dataUrl = viewer.toDataURL();
 viewer.dispose();
 ```
 
-### 2. 蓝图解析（parseBlueprint）
+### 2. 增量预览（preview-delta）
+
+后端生成蓝图时会持续推送「增加 / 替换 / 删除」的差量对象。预览层把事件**同步摄入**、
+每帧向目标位置收敛，并支持外部端 / MES 端的运行时开关。
+
+```javascript
+const viewer = new BlueprintViewer({
+    container: '#canvas',
+    previewAnimation: 'auto',   // 'auto'（默认）| 'on' | 'off'
+});
+
+// 1) 先开始预览，再提交生成请求（顺序不能反，否则漏开头的消息）
+viewer.beginPreview({ projector: 'sphere', enterDelayMs: 120 });
+
+// 2) 在 onProgress 回调里把事件原样交进来（同步执行、绝不抛错）
+const result = await generateFactory(request, event => {
+    if (event.kind === 'preview-delta') viewer.applyPreviewDelta(event);
+});
+
+// 3) 成功：用正式蓝图串收尾（内部"先建后换"，不会闪白）
+viewer.commitPreview(result.blueprint);
+//    失败：viewer.discardPreview();
+
+// 诊断（验收口径）：摄入耗时是否 ≤50ms、是否收敛、丢没丢对象
+console.log(viewer.previewStats());
+// { events, operations, alive, peakAlive, moving, slots,
+//   unknownRemoves, unknownReplaces, filteredByThrash,
+//   lastIngestMs, maxIngestMs, ... }
+```
+
+要点：
+
+- **不要自己做队列播放**。实测 250 条事件 ≈ 5 秒到齐（≈50 条/秒），逐条播放会让总时长
+  变成分钟级；预览层是"逻辑立即生效 + 视觉持续收敛"，指南 §4 也明确允许跳过中间视觉过渡。
+- **健壮性内建**：序号重复/过期整条忽略；`remove` 不存在的对象静默忽略；
+  `replace` 不存在的对象按 `add` 处理；抖动抑制默认开（存活 <120ms 即被撤销的对象不出场）。
+- **关闭动画**：`previewAnimation: 'off'`（或 `setRenderSettings({ previewAnimation: 'off' })`）
+  后事件照常应用，只是不做插值（直接跳到目标）——适合低端机排障，不需要重新出包。
+
+### 3. 蓝图解析（parseBlueprint）
 
 ```javascript
 import { parseBlueprint, serializeBlueprint } from '@/lib';
@@ -121,7 +160,7 @@ console.log(data.areas);       // 区域数组
 const text = serializeBlueprint(data);
 ```
 
-### 3. 完整编辑器
+### 4. 完整编辑器
 
 编辑器是独立应用（`src/App.vue` + `src/components/BlueprintEditor.vue`），不是库导出：
 

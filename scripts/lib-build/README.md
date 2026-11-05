@@ -10,6 +10,7 @@ dsp-blueprint-editor.umd.js   UMD（内联 three，全局名 DSPBlueprintEditor�
 index.d.ts                    公共类型声明（内容同 ESM 版，供 package.json#types）
 host-test.html                宿主验证页（UMD / 纯静态，Network 零 404 自检）
 esm-test.html                 宿主验证页（ESM / 故意用 <base> 干扰，验证 import.meta.url 资产探测）
+preview-test.html             增量预览效果与验收页（回放 preview-fixture.json）
 models/<name>.glb             建筑模型（法线/自发光/spec 已内嵌为 KTX2，无需额外贴图）
 basis/                        Basis Universal 转码器（KTX2 解码必需：basis_transcoder.js + .wasm）
 img/item_recipe/*.png         物品与配方图标
@@ -107,6 +108,14 @@ npx serve dist-lib     # 或 python -m http.server -d dist-lib 8000
 - `esm-test.html`：动态 `import()` ESM 产物，并且**故意把 `<base>` 指到不存在的域**；
   只有 `import.meta.url` 资产探测真正生效，`models/`、`img/` 才会全部从产物目录加载成功。
   这一页同时验证「真 ESM、无 UMD 分支、无全局污染」。
+- `preview-test.html`：**增量预览（preview-delta）效果与验收**。它会回放
+  `preview-fixture.json`（252 条事件 / 7,186 个操作，按实测节拍 **20ms/条** 喂），
+  画面上能看到模型"流式长出、边生成边挪位、被撤销的试放不闪烁"，页内同时核对验收口径：
+  首帧可见 ≤50ms、单事件摄入 ≤50ms、序号零错乱、事件停后 `moving → 0`、
+  帧间隔 >33ms 的比例 <1%、末态存活数与数据净增量一致。
+  数据由 `node scripts/preview/build-fixture.mjs` 从 `data/preview-delta-*.json` 改造而来
+  （`areas` 嵌套 + `isTemporary`，并去掉恒 0 的姿态字段，体积约 1/3）。
+  页面顶部可切换投影方式（sphere/plane）、动画开/关、抖动抑制、回放速度。
 
 把整个 `dist-lib/` 换个路径再打开，两页结论都应完全一致。
 

@@ -15,6 +15,7 @@
         "build": "node scripts/generate-update-log.js && vue-cli-service build",
         "build:lib": "node scripts/lib-build/build.js",
         "test:unit": "jest --watchAll",
+        "test:preview": "jest tests/unit/preview",
         "lint": "vue-cli-service lint",
         "build-cli": "tsc --module commonjs --outDir cli",
         "cli": "ts-node -r tsconfig-paths/register -O \"{\\\"module\\\": \\\"commonjs\\\"}\" src/cli.ts",

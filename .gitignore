@@ -7,6 +7,8 @@ node_modules
 /lib-build
 # KTX2 流水线中间产物（GLB/贴图/日志/备份，可随时重建）
 /temp
+# 增量预览测试页的数据：由 `node scripts/preview/build-fixture.mjs` 从 data/ 下的抓包生成
+/scripts/lib-build/preview-fixture.json
 # local env files
 .env.local
 .env.*.local

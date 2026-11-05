@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="data:," />
+<title>增量预览（preview-delta）效果与验收</title>
+<!--
+    用途：回放真实抓包的增量预览事件，肉眼验收"流式增长"的观感，并核对验收口径。
+
+    数据：`preview-fixture.json`（由 `node scripts/preview/build-fixture.mjs` 生成，
+          源文件 `data/preview-delta-044ac41b-1793883142890.json`，
+          已改造成当前需求格式：areas 嵌套 + isTemporary，去掉恒 0 的姿态字段）。
+
+    前置：先跑 `yarn build:lib`（本页与 `dsp-blueprint-editor.esm.js` 同级）。
+    打开：必须用 http(s)（`file://` 下模块会被 CORS 拦住），例如
+          `npx serve dist-lib` 后访问 `/preview-test.html`。
+
+    验收口径（与 data/3. 的实施口径一致）：
+      · 首帧可见 ≤ 50ms；单事件摄入 ≤ 50ms；
+      · 事件顺序零错乱（重复/过期序号必须被拒）；
+      · 事件停后收敛（moving → 0），不堆积；
+      · 帧间隔 > 33ms 的比例 < 1%；
+      · 末态存活对象数与数据净增量一致。
+-->
+<style>
+    * { box-sizing: border-box; }
+    body {
+        margin: 0; padding: 20px; background: #0d1117; color: #e6edf3;
+        font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    h1 { font-size: 18px; margin: 0 0 6px; }
+    .hint { color: #8b949e; margin: 0 0 14px; }
+    code { background: #21262d; padding: 1px 5px; border-radius: 4px; }
+    .banner {
+        padding: 10px 14px; border-radius: 6px; font-weight: 600;
+        margin: 14px 0; border: 1px solid #30363d; background: #161b22;
+    }
+    .banner.running { color: #8b949e; }
+    .banner.ok { color: #3fb950; border-color: #3fb950; }
+    .banner.fail { color: #f85149; border-color: #f85149; }
+    .toolbar {
+        display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+        padding: 10px 12px; background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+    }
+    .toolbar label { color: #8b949e; font-size: 13px; }
+    button, select {
+        background: #21262d; color: #e6edf3; border: 1px solid #30363d;
+        border-radius: 6px; padding: 5px 12px; font: inherit; font-size: 13px;
+    }
+    button:hover:not(:disabled) { border-color: #58a6ff; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    #viewer { height: 460px; border: 1px solid #30363d; border-radius: 6px; overflow: hidden; background: #000; margin-top: 14px; }
+    .grid {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+        gap: 8px; margin-top: 14px;
+    }
+    .cell { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 8px 10px; }
+    .cell .k { color: #8b949e; font-size: 12px; }
+    .cell .v { font: 600 16px/1.3 ui-monospace, Consolas, monospace; }
+    .cell .v.warn { color: #d29922; }
+    .cell .v.bad { color: #f85149; }
+    #log {
+        height: 160px; overflow: auto; margin: 14px 0 0; padding: 10px;
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        font: 12px/1.55 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-all;
+    }
+    table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 13px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #30363d; vertical-align: top; }
+    th { color: #8b949e; font-weight: 500; }
+    td.state { width: 74px; font-weight: 600; }
+    td.state.ok { color: #3fb950; }
+    td.state.fail { color: #f85149; }
+    td.state.skip { color: #8b949e; }
+</style>
+</head>
+<body>
+<h1>增量预览（preview-delta）效果与验收</h1>
+<p class="hint">
+    本页动态 <code>import()</code> 同目录的 <code>dsp-blueprint-editor.esm.js</code>，
+    用 <code>beginPreview()</code> + <code>applyPreviewDelta()</code> 按实测节拍
+    （<strong>20ms / 条，250 条约 5 秒</strong>）回放 <code>preview-fixture.json</code>。
+    看画面：模型应当"流式长出、边生成边挪位、被撤销的试放不闪烁"。
+</p>
+
+<div class="toolbar">
+    <button id="play">▶ 回放</button>
+    <button id="stop">■ 停止</button>
+    <label>速度
+        <select id="speed">
+            <option value="1">1x（20ms/条，与实测一致）</option>
+            <option value="2">2x（10ms/条）</option>
+            <option value="4">4x（5ms/条，压力）</option>
+            <option value="0.5">0.5x（40ms/条，看细节）</option>
+        </select>
+    </label>
+    <label>layout 投影
+        <select id="projector">
+            <option value="sphere">sphere（球面自适应）</option>
+            <option value="plane">plane（锚点切平面）</option>
+        </select>
+    </label>
+    <label>动画
+        <select id="animation">
+            <option value="on">on（插值跟随）</option>
+            <option value="off">off（直接跳变）</option>
+        </select>
+    </label>
+    <label>抖动抑制
+        <select id="thrash">
+            <option value="120">开（120ms）</option>
+            <option value="0">关（忠实回放，会闪）</option>
+        </select>
+    </label>
+</div>
+
+<div id="viewer"></div>
+
+<div class="grid" id="stats"></div>
+
+<div id="banner" class="banner running">准备中…</div>
+
+<table>
+    <thead><tr><th>状态</th><th>检查项</th><th>详情</th></tr></thead>
+    <tbody id="report"></tbody>
+</table>
+
+<pre id="log"></pre>
+
+<script type="module">
+(async function () {
+    'use strict';
+
+    // 与 esm-test.html 同款：产物目录按真实 URL 算（不受 <base> 干扰）
+    const pageUrl = new URL(window.location.href);
+    const libUrl = new URL('dsp-blueprint-editor.esm.js', pageUrl).href;
+    const fixtureUrl = new URL('preview-fixture.json', pageUrl).href;
+
+    // 实测节拍：250 条 ≈ 5s
+    const STEP_MS = 20;
+    // 事件停后再等多久取终态统计（约 3τ）
+    const SETTLE_MS = 1200;
+
+    const bannerEl = document.getElementById('banner');
+    const logEl = document.getElementById('log');
+    const reportEl = document.getElementById('report');
+    const statsEl = document.getElementById('stats');
+    const playBtn = document.getElementById('play');
+    const stopBtn = document.getElementById('stop');
+    const speedSel = document.getElementById('speed');
+    const projectorSel = document.getElementById('projector');
+    const animationSel = document.getElementById('animation');
+    const thrashSel = document.getElementById('thrash');
+
+    /** @type {any} */ let viewer = null;
+    /** @type {any[]} */ let events = [];
+    /** @type {any} */ let fixture = null;
+
+    let runToken = 0;
+    let measuring = false;
+    let firstApplyAt = 0;
+    let firstVisibleMs = null;
+    let maxIngest = 0;
+    let sumIngest = 0;
+    let appliedCount = 0;
+    let frameDeltas = [];
+    let slowFrames = 0;
+    let lastFrameAt = 0;
+    let lastStatsAt = 0;
+
+    function log(message) {
+        const line = '[' + new Date().toLocaleTimeString() + '] ' + message;
+        logEl.textContent = logEl.textContent ? logEl.textContent + '\n' + line : line;
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    const checks = [];
+    const failures = [];
+    function check(name, ok, detail, skipped) {
+        checks.push({ name: name, ok: ok });
+        const row = document.createElement('tr');
+        const state = document.createElement('td');
+        state.className = 'state ' + (skipped ? 'skip' : ok ? 'ok' : 'fail');
+        state.textContent = skipped ? '—' : ok ? '✓' : '✗';
+        const nameCell = document.createElement('td');
+        nameCell.textContent = name;
+        const detailCell = document.createElement('td');
+        detailCell.textContent = detail || '';
+        row.append(state, nameCell, detailCell);
+        reportEl.appendChild(row);
+        log((skipped ? '— ' : ok ? '✓ ' : '✗ ') + name + (detail ? ' — ' + detail : ''));
+        if (!skipped && !ok) failures.push(name);
+        return ok;
+    }
+
+    function finish() {
+        bannerEl.className = 'banner ' + (failures.length === 0 ? 'ok' : 'fail');
+        bannerEl.textContent = failures.length === 0
+            ? '通过：' + checks.filter(c => c.ok).length + ' 项检查全部成功'
+            : '失败 ' + failures.length + ' / ' + checks.length + ' 项：' + failures.join('；');
+    }
+
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    // ---------------------------------------------------------------- 统计面板
+
+    function fmt(value, digits) {
+        return typeof value === 'number' ? value.toFixed(digits === undefined ? 1 : digits) : String(value);
+    }
+
+    function renderStats(patch) {
+        const rows = patch || liveStats();
+        statsEl.innerHTML = '';
+        for (const [key, value, tone] of rows) {
+            const cell = document.createElement('div');
+            cell.className = 'cell';
+            const k = document.createElement('div');
+            k.className = 'k';
+            k.textContent = key;
+            const v = document.createElement('div');
+            v.className = 'v' + (tone ? ' ' + tone : '');
+            v.textContent = value;
+            cell.append(k, v);
+            statsEl.appendChild(cell);
+        }
+    }
+
+    function liveStats() {
+        const s = viewer && viewer.previewStats ? viewer.previewStats() : null;
+        const fps = frameDeltas.length === 0 ? 0
+            : 1000 / (frameDeltas.reduce((a, b) => a + b, 0) / frameDeltas.length);
+        return [
+            ['进度', appliedCount + ' / ' + events.length, ''],
+            ['存活 / 峰值', s ? s.alive + ' / ' + s.peakAlive : '—', ''],
+            ['槽位 / 运动', s ? s.slots + ' / ' + s.moving : '—', s && s.moving > 0 ? 'warn' : ''],
+            ['摄入 最大 / 均值', maxIngest.toFixed(2) + ' / ' + (appliedCount ? (sumIngest / appliedCount).toFixed(2) : '0') + ' ms', maxIngest > 50 ? 'bad' : ''],
+            ['首帧可见', firstVisibleMs === null ? '—' : firstVisibleMs.toFixed(1) + ' ms', firstVisibleMs !== null && firstVisibleMs > 50 ? 'bad' : ''],
+            ['帧率 / 卡顿帧', fps.toFixed(0) + ' fps / ' + slowFrames, slowFrames > 0 ? 'warn' : ''],
+            ['未知 remove / replace', s ? s.unknownRemoves + ' / ' + s.unknownReplaces : '—', ''],
+            ['抖动过滤', s ? s.filteredByThrash : '—', ''],
+            ['坐标语义', s && s.coordinateSystem ? s.coordinateSystem : '—', ''],
+        ];
+    }
+
+    // ---------------------------------------------------------------- 帧率采样
+
+    function frameLoop(t) {
+        requestAnimationFrame(frameLoop);
+        if (measuring) {
+            if (lastFrameAt > 0) {
+                const dt = t - lastFrameAt;
+                frameDeltas.push(dt);
+                if (dt > 33) slowFrames++;
+            }
+            if (firstVisibleMs === null && firstApplyAt > 0) {
+                const s = viewer.previewStats ? viewer.previewStats() : null;
+                if (s && s.slots > 0) firstVisibleMs = t - firstApplyAt;
+            }
+            if (t - lastStatsAt > 200) {
+                lastStatsAt = t;
+                renderStats();
+            }
+        }
+        lastFrameAt = t;
+    }
+
+    // ---------------------------------------------------------------- 回放
+
+    function resetMetrics() {
+        measuring = false;
+        firstApplyAt = 0;
+        firstVisibleMs = null;
+        maxIngest = 0;
+        sumIngest = 0;
+        appliedCount = 0;
+        frameDeltas = [];
+        slowFrames = 0;
+        lastFrameAt = 0;
+    }
+
+    function stop() {
+        runToken++;
+        measuring = false;
+        if (viewer && viewer.previewing) viewer.discardPreview();
+        playBtn.disabled = false;
+        stopBtn.disabled = true;
+    }
+
+    async function replay() {
+        if (viewer === null) return;
+        const token = ++runToken;
+        playBtn.disabled = true;
+        stopBtn.disabled = false;
+        reportEl.innerHTML = '';
+        checks.length = 0;
+        failures.length = 0;
+        resetMetrics();
+        if (viewer.previewing) viewer.discardPreview();
+
+        const speed = Number(speedSel.value) || 1;
+        const thrash = Number(thrashSel.value) || 0;
+        const animationOn = animationSel.value !== 'off';
+        viewer.setRenderSettings({ previewAnimation: animationOn ? 'on' : 'off' });
+
+        const options = {
+            projector: projectorSel.value,
+            enterDelayMs: thrash,
+            minLifeMs: thrash,
+            settleMs: 100,
+        };
+
+        // 预热：先跑一条事件，让材质/着色器编译与槽池分配发生在计时之外，
+        // 否则首帧的编译耗时会全部算进"卡顿帧"统计，把口径搞脏。
+        viewer.beginPreview(options);
+        viewer.applyPreviewDelta(events[0]);
+        await sleep(500);
+        if (token !== runToken) return;
+        viewer.discardPreview();
+        lastFrameAt = 0;
+        frameDeltas = [];
+        slowFrames = 0;
+
+        viewer.beginPreview(options);
+        log('开始回放：' + events.length + ' 条事件，节拍 ' + (STEP_MS / speed).toFixed(1) + 'ms/条');
+
+        measuring = true;
+        const startedAt = performance.now();
+        for (let i = 0; i < events.length; i++) {
+            if (token !== runToken) return;
+            const due = startedAt + (i * STEP_MS) / speed;
+            const wait = due - performance.now();
+            if (wait > 0) await sleep(wait);
+            if (token !== runToken) return;
+            const t0 = performance.now();
+            const applied = viewer.applyPreviewDelta(events[i]);
+            const cost = performance.now() - t0;
+            if (applied) {
+                appliedCount++;
+                sumIngest += cost;
+                if (cost > maxIngest) maxIngest = cost;
+            }
+            if (firstApplyAt === 0) firstApplyAt = t0;
+        }
+        if (token !== runToken) return;
+
+        const streamMs = performance.now() - startedAt;
+        log('事件发完，用时 ' + streamMs.toFixed(0) + 'ms，等待收敛 ' + SETTLE_MS + 'ms…');
+        await sleep(SETTLE_MS);
+        if (token !== runToken) return;
+        measuring = false;
+        renderStats();
+        await evaluate(streamMs);
+    }
+
+    // ---------------------------------------------------------------- 断言
+
+    async function evaluate(streamMs) {
+        const s = viewer.previewStats();
+        const expected = fixture.stats;
+
+        check('事件顺序：全部事件按序接受', appliedCount === events.length,
+            appliedCount + ' / ' + events.length + ' 条');
+        check('序号去重：重复投递最后一条被拒',
+            viewer.applyPreviewDelta(events[events.length - 1]) === false);
+
+        check('单事件摄入 ≤ 50ms', maxIngest <= 50, '最大 ' + maxIngest.toFixed(2) + 'ms');
+        check('首帧可见 ≤ 50ms', firstVisibleMs !== null && firstVisibleMs <= 50,
+            firstVisibleMs === null ? '未观测到槽位' : firstVisibleMs.toFixed(1) + 'ms');
+
+        check('末态存活数 = 数据净增量', s.alive === expected.expectedAlive,
+            s.alive + ' / 期望 ' + expected.expectedAlive);
+        check('峰值存活数 = 数据峰值', s.peakAlive === expected.expectedPeak,
+            s.peakAlive + ' / 期望 ' + expected.expectedPeak);
+
+        check('事件停后收敛（moving = 0）', s.moving === 0, 'moving=' + s.moving);
+
+        const slowRatio = frameDeltas.length === 0 ? 0 : slowFrames / frameDeltas.length;
+        check('帧间隔 > 33ms 的比例 < 1%', slowRatio < 0.01,
+            (slowRatio * 100).toFixed(2) + '%（' + slowFrames + ' / ' + frameDeltas.length + ' 帧）');
+
+        check('坐标语义已切到 area-local', s.coordinateSystem === 'blueprint-area-local-v1',
+            String(s.coordinateSystem));
+
+        if (Number(thrashSel.value) > 0)
+            check('抖动抑制生效（有对象被过滤）', s.filteredByThrash > 0, s.filteredByThrash + ' 个');
+        else
+            check('抖动抑制已关闭（不适用）', true, '按设置跳过', true);
+
+        check('事件流用时与实测节拍一致', Math.abs(streamMs - (events.length * STEP_MS) / (Number(speedSel.value) || 1)) < 1500,
+            streamMs.toFixed(0) + 'ms');
+
+        viewer.discardPreview();
+        check('discardPreview 后预览层已释放', viewer.previewing === false);
+        check('canvas 仍在（正式场景未受影响）',
+            !!viewer.getCanvas() && document.querySelector('#viewer canvas') !== null);
+
+        finish();
+        playBtn.disabled = false;
+        stopBtn.disabled = true;
+    }
+
+    // ---------------------------------------------------------------- 启动
+
+    requestAnimationFrame(frameLoop);
+    renderStats([['状态', '加载中…', '']]);
+
+    try {
+        const api = await import(libUrl);
+        const required = ['BlueprintViewer', 'parseBlueprint', 'serializeBlueprint'];
+        const previewApi = ['beginPreview', 'applyPreviewDelta', 'commitPreview', 'discardPreview', 'previewStats'];
+        for (const name of required) check('导出 ' + name, typeof api[name] === 'function');
+
+        const response = await fetch(fixtureUrl);
+        if (!response.ok) throw new Error('preview-fixture.json → HTTP ' + response.status);
+        fixture = await response.json();
+        events = Array.isArray(fixture.events) ? fixture.events : [];
+        if (events.length === 0) throw new Error('fixture 里没有 events');
+
+        viewer = new api.BlueprintViewer(
+            { container: '#viewer', theme: 'dark', previewAnimation: 'on' },
+            { onError: (error) => log('onError ' + error.code + ': ' + error.message) },
+        );
+        for (const name of previewApi)
+            check('BlueprintViewer.' + name, typeof viewer[name] !== 'undefined');
+        check('canvas 已挂载', !!viewer.getCanvas() && document.querySelector('#viewer canvas') !== null);
+
+        check('数据已加载',
+            true,
+            fixture.stats.events + ' 条事件 / ' + fixture.stats.operations + ' 个操作 / '
+            + (fixture.stats.expectedAlive) + ' 个终态对象');
+
+        log('数据来源：' + fixture.source + '（version ' + fixture.version + '）');
+        log('坐标切换发生在 sequence=' + (fixture.stats.switchSequences.join(',') || '无'));
+
+        bannerEl.className = 'banner running';
+        bannerEl.textContent = '就绪：点「▶ 回放」开始（' + events.length + ' 条事件 ≈ '
+            + ((events.length * STEP_MS) / 1000).toFixed(1) + 's）';
+        playBtn.disabled = false;
+        playBtn.addEventListener('click', () => { replay().catch((e) => { log('回放异常：' + e); finish(); }); });
+        stopBtn.addEventListener('click', () => { stop(); log('已停止'); });
+    }
+    catch (error) {
+        check('启动未抛异常', false, String((error && error.stack) || error));
+        bannerEl.className = 'banner fail';
+        bannerEl.textContent = '启动失败：' + String((error && error.message) || error)
+            + '（确认已跑 yarn build:lib，且用 http(s) 打开本页）';
+        playBtn.disabled = true;
+        stopBtn.disabled = true;
+    }
+})();
+</script>
+</body>
+</html>

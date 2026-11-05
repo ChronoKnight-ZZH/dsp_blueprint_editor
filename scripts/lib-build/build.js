@@ -301,12 +301,20 @@ function copyAssets(inventory) {
 // ---------------------------------------------------------------- 静态文件
 
 function copyStaticFiles() {
-    for (const name of ['index.d.ts', 'host-test.html', 'esm-test.html', 'README.md']) {
+    for (const name of ['index.d.ts', 'host-test.html', 'esm-test.html', 'preview-test.html', 'README.md']) {
         const source = path.join(__dirname, name);
         if (!fs.existsSync(source))
             fail(`缺少模板文件：${source}`);
         copyFile(source, path.join(OUT, name));
     }
+
+    // 增量预览测试页的数据（`node scripts/preview/build-fixture.mjs` 生成）。
+    // 缺了不阻断构建，只警告：该页仅用于人工验收动画效果。
+    const previewFixture = path.join(__dirname, 'preview-fixture.json');
+    if (fs.existsSync(previewFixture))
+        copyFile(previewFixture, path.join(OUT, 'preview-fixture.json'));
+    else
+        log('警告：scripts/lib-build/preview-fixture.json 不存在，preview-test.html 无法回放（先跑 node scripts/preview/build-fixture.mjs）');
 
     // 与 ESM 产物同名的类型声明：宿主 `import('./dsp-blueprint-editor.esm.js')`
     // 时 TS 按「同名 .d.ts」规则命中它，不需要额外包元数据。
@@ -388,7 +396,7 @@ function verify(statsByKind, inventory, copied) {
             problems.push('ESM 产物是 UMD 包装器，output.module 没生效');
     }
 
-    for (const name of ['index.d.ts', ESM_TYPES_FILE, 'host-test.html', 'esm-test.html']) {
+    for (const name of ['index.d.ts', ESM_TYPES_FILE, 'host-test.html', 'esm-test.html', 'preview-test.html']) {
         if (!fs.existsSync(path.join(OUT, name)))
             problems.push(`缺失静态文件：${name}`);
     }
@@ -486,7 +494,7 @@ async function main() {
 
     log('复制资产到 dist-lib（models/ + img/）…');
     const copyResult = copyAssets(inventory);
-    log('复制静态文件（index.d.ts / esm.d.ts / host-test.html / esm-test.html / README.md / fixtures）…');
+    log('复制静态文件（index.d.ts / esm.d.ts / host-test.html / esm-test.html / preview-test.html / README.md / fixtures）…');
     copyStaticFiles();
 
     const summary = verify(statsByKind, inventory, copyResult.copied);
@@ -494,6 +502,7 @@ async function main() {
     log(`完成：${summary.modelCount} 个模型、共 ${summary.copied} 个资产文件，`
         + `耗时 ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
     log(`宿主验证页：${path.join(OUT, 'host-test.html')}`);
+    log(`增量预览测试页：${path.join(OUT, 'preview-test.html')}`);
 }
 
 main().catch(error => {
