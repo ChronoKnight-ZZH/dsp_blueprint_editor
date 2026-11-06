@@ -396,5 +396,5 @@ export function buildPoolSpec(
 /** 该 modelIndex 是否已有可实例化的 GLB */
 export function glbAvailable(modelIndex: number): boolean {
     const resolved = resolveBuildingModel(modelIndex);
-    return resolved.glb !== null && resolved.meta !== undefined;
+    return resolved.glbName !== null && resolved.meta !== undefined;
 }

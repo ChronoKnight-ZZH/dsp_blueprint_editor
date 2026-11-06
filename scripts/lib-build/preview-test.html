@@ -4,30 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="icon" href="data:," />
-<title>增量预览（preview-delta）效果与验收</title>
-<!--
-    用途：回放真实抓包的增量预览事件，肉眼验收"流式增长"的观感，并核对验收口径。
-
-    数据：`preview-fixture.json`（由 `node scripts/preview/build-fixture.mjs` 生成，
-          源文件 `data/preview-delta-044ac41b-1793883142890.json`，
-          已改造成当前需求格式：areas 嵌套 + isTemporary，去掉恒 0 的姿态字段）。
-
-    前置：先跑 `yarn build:lib`（本页与 `dsp-blueprint-editor.esm.js` 同级）。
-    打开：必须用 http(s)（`file://` 下模块会被 CORS 拦住），例如
-          `npx serve dist-lib` 后访问 `/preview-test.html`。
-
-    验收口径（与 data/3. 的实施口径一致）：
-      · 首帧可见 ≤ 50ms；单事件摄入 ≤ 50ms；
-      · 事件顺序零错乱（重复/过期序号必须被拒）；
-      · 事件停后收敛（moving → 0），不堆积；
-      · 帧间隔 > 33ms 的比例 < 1%；
-      · 末态存活对象数与数据净增量一致；
-      · 回放结束后预览层保留（画面即验收对象，不自动清除）。
-
-    模型：GLB 由库按需懒加载（未加载时盒子占位，加载完成后自动换成真模型，
-          见 PreviewLayer.resyncModels），无需手动开启；若长时间只有盒子，
-          检查 dist-lib/models/ 是否随产物一起被访问到。
--->
+<title>增量预览（preview-delta）效果与验收 · 支持进度条 scrubbing</title>
 <style>
     * { box-sizing: border-box; }
     body {
@@ -63,6 +40,62 @@
     .file-import input { display: none; }
     .fixture-name { color: #8b949e; font-size: 12px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #viewer { height: 460px; border: 1px solid #30363d; border-radius: 6px; overflow: hidden; background: #000; margin-top: 14px; }
+
+    /* ── 进度条（scrubber） ───────────────────────────────── */
+    .scrubber {
+        margin-top: 12px;
+        padding: 10px 12px;
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        user-select: none;
+    }
+    .scrubber[hidden] { display: none; }
+    .scrubber-track {
+        position: relative;
+        height: 10px;
+        background: #21262d;
+        border-radius: 5px;
+        cursor: pointer;
+        touch-action: none;
+    }
+    .scrubber-track:hover { background: #262c36; }
+    .scrubber-fill {
+        position: absolute;
+        left: 0; top: 0; bottom: 0;
+        background: linear-gradient(90deg, #1f6feb, #58a6ff);
+        border-radius: 5px;
+        width: 0%;
+        pointer-events: none;
+        transition: none;
+    }
+    .scrubber-thumb {
+        position: absolute;
+        top: 50%;
+        width: 18px; height: 18px;
+        margin-left: -9px;
+        transform: translateY(-50%);
+        background: #e6edf3;
+        border: 2px solid #1f6feb;
+        border-radius: 50%;
+        left: 0%;
+        pointer-events: none;
+        box-shadow: 0 0 0 4px rgba(47,129,247,0.15);
+        transition: box-shadow .15s;
+    }
+    .scrubber.dragging .scrubber-thumb {
+        box-shadow: 0 0 0 6px rgba(47,129,247,0.28);
+    }
+    .scrubber-info {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 8px;
+        font: 12px/1.4 ui-monospace, Consolas, monospace;
+        color: #8b949e;
+    }
+    .scrubber-info .scrubber-pct { color: #58a6ff; font-weight: 600; }
+    .scrubber-info .scrubber-hint { color: #556; }
+
     .grid {
         display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
         gap: 8px; margin-top: 14px;
@@ -87,14 +120,12 @@
 </style>
 </head>
 <body>
-<h1>增量预览（preview-delta）效果与验收</h1>
+<h1>增量预览（preview-delta）效果与验收 · 进度条 scrubbing</h1>
 <p class="hint">
     本页动态 <code>import()</code> 同目录的 <code>dsp-blueprint-editor.esm.js</code>，
-    用 <code>beginPreview()</code> + <code>applyPreviewDelta()</code> 按实测节拍
-    （<strong>20ms / 条，250 条约 5 秒</strong>）回放 fixture。
-    默认加载同目录 <code>preview-fixture.json</code>，也可点「导入 fixture…」换任意
-    <code>build-fixture.mjs</code> 产物。回放结束后画面保留，再播或停止时才清除。
-    看画面：模型应当"流式长出、边生成边挪位、被撤销的试放不闪烁"。
+    用 <code>beginPreview()</code> + <code>applyPreviewDelta()</code> 按实测节拍回放 fixture。
+    <strong>新增底部进度条</strong>：导入 fixture 后可左右拖动，画面会平滑正放 / 倒放追踪，
+    不是直接跳到目标状态。
 </p>
 
 <div class="toolbar">
@@ -134,6 +165,19 @@
 
 <div id="viewer"></div>
 
+<!-- ── 进度条（导入 fixture 后显示） ─────────────────────── -->
+<div class="scrubber" id="scrubber" hidden>
+    <div class="scrubber-track" id="scrubberTrack">
+        <div class="scrubber-fill" id="scrubberFill"></div>
+        <div class="scrubber-thumb" id="scrubberThumb"></div>
+    </div>
+    <div class="scrubber-info">
+        <span><span id="scrubberPos">0</span> / <span id="scrubberTotal">0</span> 条事件</span>
+        <span class="scrubber-hint">拖动进度条 → 平滑正放 / 倒放</span>
+        <span class="scrubber-pct" id="scrubberPct">0%</span>
+    </div>
+</div>
+
 <div class="grid" id="stats"></div>
 
 <div id="banner" class="banner running">准备中…</div>
@@ -172,6 +216,15 @@
     const fileInput = document.getElementById('file');
     const fixtureNameEl = document.getElementById('fixtureName');
 
+    // 进度条元素
+    const scrubberEl = document.getElementById('scrubber');
+    const scrubberTrack = document.getElementById('scrubberTrack');
+    const scrubberFill = document.getElementById('scrubberFill');
+    const scrubberThumb = document.getElementById('scrubberThumb');
+    const scrubberPos = document.getElementById('scrubberPos');
+    const scrubberTotal = document.getElementById('scrubberTotal');
+    const scrubberPct = document.getElementById('scrubberPct');
+
     /** @type {any} */ let viewer = null;
     /** @type {any[]} */ let events = [];
     /** @type {any} */ let fixture = null;
@@ -183,10 +236,24 @@
     let maxIngest = 0;
     let sumIngest = 0;
     let appliedCount = 0;
+    let rejectedCount = 0;
     let frameDeltas = [];
     let slowFrames = 0;
     let lastFrameAt = 0;
     let lastStatsAt = 0;
+
+    /* ── 时间轴 / 播放状态 ────────────────────────────────── */
+    let autoPlaying = false;   // 「▶ 回放」自动推进中
+    let scrubbing = false;     // 用户正在拖动进度条
+    let rafRunning = false;    // 播放 rAF 是否在跑
+    let lastTickAt = 0;
+    let playhead = 0;          // 当前显示位置（浮点 0..events.length）
+    let targetPlayhead = 0;    // 目标位置（自动推进或拖动决定）
+    let appliedIndex = 0;      // 已实际应用到的事件数（整数）
+    let previewOptions = null; // 预览配置，重建时复用
+    let playbackResolve = null;
+    let playbackStartAt = 0;
+    let playbackEndAt = 0;
 
     function log(message) {
         const line = '[' + new Date().toLocaleTimeString() + '] ' + message;
@@ -224,10 +291,6 @@
 
     // ---------------------------------------------------------------- 统计面板
 
-    function fmt(value, digits) {
-        return typeof value === 'number' ? value.toFixed(digits === undefined ? 1 : digits) : String(value);
-    }
-
     function renderStats(patch) {
         const rows = patch || liveStats();
         statsEl.innerHTML = '';
@@ -250,7 +313,7 @@
         const fps = frameDeltas.length === 0 ? 0
             : 1000 / (frameDeltas.reduce((a, b) => a + b, 0) / frameDeltas.length);
         return [
-            ['进度', appliedCount + ' / ' + events.length, ''],
+            ['进度', appliedIndex + ' / ' + events.length, ''],
             ['存活 / 峰值', s ? s.alive + ' / ' + s.peakAlive : '—', ''],
             ['槽位 / 运动', s ? s.slots + ' / ' + s.moving : '—', s && s.moving > 0 ? 'warn' : ''],
             ['摄入 最大 / 均值', maxIngest.toFixed(2) + ' / ' + (appliedCount ? (sumIngest / appliedCount).toFixed(2) : '0') + ' ms', maxIngest > 50 ? 'bad' : ''],
@@ -284,7 +347,210 @@
         lastFrameAt = t;
     }
 
-    // ---------------------------------------------------------------- 回放
+    // ---------------------------------------------------------------- 进度条 UI
+
+    function updateScrubberUI() {
+        const total = events.length || 1;
+        const ratio = Math.max(0, Math.min(1, playhead / total));
+        const pct = ratio * 100;
+        scrubberFill.style.width = pct + '%';
+        scrubberThumb.style.left = pct + '%';
+        scrubberPos.textContent = String(Math.floor(playhead));
+        scrubberPct.textContent = pct.toFixed(0) + '%';
+    }
+
+    function setScrubberVisible(visible) {
+        scrubberEl.hidden = !visible;
+    }
+
+    // ---------------------------------------------------------------- 核心：把预览层推进到指定事件数
+
+    function ensurePreviewOptions() {
+        if (!previewOptions) {
+            previewOptions = {
+                projector: projectorSel.value,
+                enterDelayMs: Number(thrashSel.value) || 0,
+                minLifeMs: Number(thrashSel.value) || 0,
+                settleMs: 100,
+            };
+        }
+        return previewOptions;
+    }
+
+    /**
+     * 把预览层推进到 target 条事件。
+     *  - target > appliedIndex：前向增量，逐条 applyPreviewDelta（平滑正放）
+     *  - target < appliedIndex：库不支持回退，只能 discard + begin + 从 0 重放（视觉上是倒放）
+     */
+    function applyToIndex(target) {
+        if (!viewer) return;
+        target = Math.max(0, Math.min(events.length, target | 0));
+        if (target === appliedIndex) return;
+
+        // 首次应用（用户没点回放直接拖进度条）：先开预览层
+        if (!viewer.previewing && events.length > 0) {
+            try {
+                viewer.beginPreview(ensurePreviewOptions());
+            } catch (e) {
+                log('beginPreview 失败：' + e);
+                return;
+            }
+            appliedIndex = 0;
+        }
+
+        if (target > appliedIndex) {
+            // 前向增量：正放
+            for (let i = appliedIndex; i < target; i++) {
+                const t0 = performance.now();
+                let ok = false;
+                try {
+                    ok = viewer.applyPreviewDelta(events[i]);
+                } catch (e) {
+                    log('applyPreviewDelta 异常 @' + i + '：' + e);
+                    rejectedCount++;
+                    continue;
+                }
+                const cost = performance.now() - t0;
+                if (firstApplyAt === 0) firstApplyAt = t0;
+                if (ok) {
+                    appliedCount++;
+                    sumIngest += cost;
+                    if (cost > maxIngest) maxIngest = cost;
+                } else {
+                    rejectedCount++;
+                }
+            }
+        } else {
+            // 后向重建：倒放（视觉上目标索引逐渐减小，画面随之缩短）
+            try {
+                viewer.discardPreview();
+                viewer.beginPreview(ensurePreviewOptions());
+                for (let i = 0; i < target; i++) {
+                    viewer.applyPreviewDelta(events[i]);
+                }
+            } catch (e) {
+                log('重建预览失败：' + e);
+            }
+        }
+        appliedIndex = target;
+    }
+
+    // ---------------------------------------------------------------- 播放 rAF 循环
+
+    function startRaf() {
+        if (rafRunning) return;
+        rafRunning = true;
+        lastTickAt = performance.now();
+        requestAnimationFrame(rafLoop);
+    }
+
+    function rafLoop(now) {
+        if (!rafRunning) return;
+        const dt = Math.max(0, now - lastTickAt);
+        lastTickAt = now;
+
+        // 1) 自动推进目标位置
+        if (autoPlaying && !scrubbing) {
+            const speed = Number(speedSel.value) || 1;
+            targetPlayhead = Math.min(events.length, targetPlayhead + dt * speed / STEP_MS);
+        }
+
+        // 2) 平滑追踪：playhead 向 targetPlayhead 靠拢
+        const diff = targetPlayhead - playhead;
+        if (Math.abs(diff) > 0.005) {
+            const abs = Math.abs(diff);
+            const baseMove = Math.max(1, abs * 0.15);
+            const frameScale = Math.max(0.5, Math.min(4, dt / 16));
+            const move = Math.min(abs, baseMove * frameScale);
+            playhead += Math.sign(diff) * move;
+        } else {
+            playhead = targetPlayhead;
+        }
+
+        // 3) 应用到预览层
+        applyToIndex(Math.floor(playhead));
+        updateScrubberUI();
+
+        // 4) 完成判断
+        if (autoPlaying && !scrubbing &&
+            targetPlayhead >= events.length && playhead >= events.length - 0.005) {
+            playhead = events.length;
+            targetPlayhead = events.length;
+            applyToIndex(events.length);
+            updateScrubberUI();
+            autoPlaying = false;
+            playbackEndAt = performance.now();
+            finishPlayback();
+        }
+
+        // 5) 是否继续下一帧
+        const stillMoving = Math.abs(targetPlayhead - playhead) > 0.005;
+        const stillAuto = autoPlaying && !scrubbing;
+        if (stillMoving || stillAuto || scrubbing) {
+            requestAnimationFrame(rafLoop);
+        } else {
+            rafRunning = false;
+        }
+    }
+
+    // ---------------------------------------------------------------- 进度条拖动
+
+    function seekFromPointer(clientX) {
+        if (!viewer || events.length === 0) return;
+        // 首次拖动：开预览层
+        if (!viewer.previewing) {
+            try {
+                viewer.beginPreview(ensurePreviewOptions());
+            } catch (e) {
+                log('beginPreview 失败：' + e);
+                return;
+            }
+            appliedIndex = 0;
+        }
+        const rect = scrubberTrack.getBoundingClientRect();
+        const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        targetPlayhead = ratio * events.length;
+        if (!rafRunning) startRaf();
+    }
+
+    scrubberTrack.addEventListener('pointerdown', (e) => {
+        if (!viewer || events.length === 0) return;
+        e.preventDefault();
+        scrubbing = true;
+        scrubberEl.classList.add('dragging');
+        seekFromPointer(e.clientX);
+        try { scrubberTrack.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+
+    scrubberTrack.addEventListener('pointermove', (e) => {
+        if (!scrubbing) return;
+        seekFromPointer(e.clientX);
+    });
+
+    function endScrub(e) {
+        if (!scrubbing) return;
+        scrubbing = false;
+        scrubberEl.classList.remove('dragging');
+        try { scrubberTrack.releasePointerCapture(e.pointerId); } catch (_) {}
+        if (!rafRunning) startRaf();
+    }
+
+    scrubberTrack.addEventListener('pointerup', endScrub);
+    scrubberTrack.addEventListener('pointercancel', endScrub);
+
+    // ---------------------------------------------------------------- 播放控制
+
+    function waitForPlaybackComplete() {
+        return new Promise(resolve => { playbackResolve = resolve; });
+    }
+
+    function finishPlayback() {
+        if (playbackResolve) {
+            const r = playbackResolve;
+            playbackResolve = null;
+            r();
+        }
+    }
 
     function resetMetrics() {
         measuring = false;
@@ -293,6 +559,7 @@
         maxIngest = 0;
         sumIngest = 0;
         appliedCount = 0;
+        rejectedCount = 0;
         frameDeltas = [];
         slowFrames = 0;
         lastFrameAt = 0;
@@ -301,7 +568,15 @@
     function stop() {
         runToken++;
         measuring = false;
+        autoPlaying = false;
+        scrubbing = false;
+        rafRunning = false;
+        playhead = 0;
+        targetPlayhead = 0;
+        appliedIndex = 0;
         if (viewer && viewer.previewing) viewer.discardPreview();
+        finishPlayback();
+        updateScrubberUI();
         playBtn.disabled = false;
         stopBtn.disabled = true;
     }
@@ -322,16 +597,15 @@
         const animationOn = animationSel.value !== 'off';
         viewer.setRenderSettings({ previewAnimation: animationOn ? 'on' : 'off' });
 
-        const options = {
+        previewOptions = {
             projector: projectorSel.value,
             enterDelayMs: thrash,
             minLifeMs: thrash,
             settleMs: 100,
         };
 
-        // 预热：先跑一条事件，让材质/着色器编译与槽池分配发生在计时之外，
-        // 否则首帧的编译耗时会全部算进"卡顿帧"统计，把口径搞脏。
-        viewer.beginPreview(options);
+        // 预热：先跑一条事件，让材质/着色器编译与槽池分配发生在计时之外
+        viewer.beginPreview(previewOptions);
         viewer.applyPreviewDelta(events[0]);
         await sleep(500);
         if (token !== runToken) return;
@@ -340,30 +614,28 @@
         frameDeltas = [];
         slowFrames = 0;
 
-        viewer.beginPreview(options);
+        // 开始
+        viewer.beginPreview(previewOptions);
+        appliedIndex = 0;
+        playhead = 0;
+        targetPlayhead = 0;
+        measuring = true;
+        autoPlaying = true;
+        scrubbing = false;
+        playbackStartAt = performance.now();
+        playbackEndAt = 0;
+        updateScrubberUI();
         log('开始回放：' + events.length + ' 条事件，节拍 ' + (STEP_MS / speed).toFixed(1) + 'ms/条');
 
-        measuring = true;
-        const startedAt = performance.now();
-        for (let i = 0; i < events.length; i++) {
-            if (token !== runToken) return;
-            const due = startedAt + (i * STEP_MS) / speed;
-            const wait = due - performance.now();
-            if (wait > 0) await sleep(wait);
-            if (token !== runToken) return;
-            const t0 = performance.now();
-            const applied = viewer.applyPreviewDelta(events[i]);
-            const cost = performance.now() - t0;
-            if (applied) {
-                appliedCount++;
-                sumIngest += cost;
-                if (cost > maxIngest) maxIngest = cost;
-            }
-            if (firstApplyAt === 0) firstApplyAt = t0;
-        }
+        startRaf();
+
+        await waitForPlaybackComplete();
         if (token !== runToken) return;
 
-        const streamMs = performance.now() - startedAt;
+        autoPlaying = false;
+        const streamMs = playbackEndAt > 0
+            ? (playbackEndAt - playbackStartAt)
+            : (performance.now() - playbackStartAt);
         log('事件发完，用时 ' + streamMs.toFixed(0) + 'ms，等待收敛 ' + SETTLE_MS + 'ms…');
         await sleep(SETTLE_MS);
         if (token !== runToken) return;
@@ -378,8 +650,9 @@
         const s = viewer.previewStats();
         const expected = fixture.stats;
 
-        check('事件顺序：全部事件按序接受', appliedCount === events.length,
-            appliedCount + ' / ' + events.length + ' 条');
+        check('事件顺序：全部事件按序接受',
+            rejectedCount === 0 && appliedIndex === events.length,
+            `rejected=${rejectedCount}, applied=${appliedIndex}/${events.length}`);
         check('序号去重：重复投递最后一条被拒',
             viewer.applyPreviewDelta(events[events.length - 1]) === false);
 
@@ -406,11 +679,11 @@
         else
             check('抖动抑制已关闭（不适用）', true, '按设置跳过', true);
 
-        check('事件流用时与实测节拍一致', Math.abs(streamMs - (events.length * STEP_MS) / (Number(speedSel.value) || 1)) < 1500,
+        check('事件流用时与实测节拍一致',
+            Math.abs(streamMs - (events.length * STEP_MS) / (Number(speedSel.value) || 1)) < 1500,
             streamMs.toFixed(0) + 'ms');
 
         // 回放结束后保留预览层：画面就是验收对象，播完不能清空。
-        // 再次回放（replay 开头）/ 点「■ 停止」/ 导入新 fixture 时会先 discard 再开始。
         check('回放结束后预览层保留（不自动清除）', viewer.previewing === true,
             '存活 ' + s.alive + ' 个对象');
         check('canvas 仍在（正式场景未受影响）',
@@ -435,8 +708,34 @@
             checks.length = 0;
             failures.length = 0;
         }
+
+        // 停掉旧播放
+        autoPlaying = false;
+        scrubbing = false;
+        rafRunning = false;
+        playhead = 0;
+        targetPlayhead = 0;
+        appliedIndex = 0;
+        finishPlayback();
+        if (viewer && viewer.previewing) viewer.discardPreview();
+
         fixture = data;
         events = data.events;
+
+        // 预览配置（拖动时重建复用）
+        previewOptions = {
+            projector: projectorSel.value,
+            enterDelayMs: Number(thrashSel.value) || 0,
+            minLifeMs: Number(thrashSel.value) || 0,
+            settleMs: 100,
+        };
+        if (viewer) viewer.setRenderSettings({ previewAnimation: animationSel.value !== 'off' ? 'on' : 'off' });
+
+        // 进度条
+        setScrubberVisible(true);
+        scrubberTotal.textContent = String(events.length);
+        updateScrubberUI();
+
         fixtureNameEl.textContent = name;
         fixtureNameEl.title = name;
         log('已加载 fixture：' + name + '（' + fixture.stats.events + ' 条事件 / '
@@ -445,8 +744,8 @@
         if (Array.isArray(fixture.stats.switchSequences))
             log('坐标切换发生在 sequence=' + (fixture.stats.switchSequences.join(',') || '无'));
         bannerEl.className = 'banner running';
-        bannerEl.textContent = '就绪：点「▶ 回放」开始（' + events.length + ' 条事件 ≈ '
-            + ((events.length * STEP_MS) / 1000).toFixed(1) + 's）';
+        bannerEl.textContent = '就绪：点「▶ 回放」自动播放，或直接拖动底部进度条 scrubbing（'
+            + events.length + ' 条事件 ≈ ' + ((events.length * STEP_MS) / 1000).toFixed(1) + 's）';
         playBtn.disabled = false;
     }
 
@@ -483,7 +782,7 @@
                     log('fixture 读取失败：' + String((e && e.message) || e));
                     bannerEl.className = 'banner fail';
                     bannerEl.textContent = 'fixture 读取失败：' + String((e && e.message) || e);
-                    playBtn.disabled = fixture === null; // 从未加载成功过则保持禁用
+                    playBtn.disabled = fixture === null;
                 });
         });
 

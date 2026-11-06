@@ -167,6 +167,7 @@
             <input id="cIndex" type="number" min="0" value="3" />
             <button id="cSelect" type="button">selectBuilding(idx)</button>
             <button id="cSelectNull" type="button">selectBuilding(null)</button>
+            
         </div>
         <div class="rows">
             <button id="cFocus" type="button">focusBuilding(idx)</button>
@@ -182,6 +183,7 @@
     <fieldset>
         <legend>主题</legend>
         <div class="rows">
+            <button id="cThemeeditor" type="button">setTheme('editor')</button>
             <button id="cThemeDark" type="button">setTheme('dark')</button>
             <button id="cThemeLight" type="button">setTheme('light')</button>
             <button id="cThemeAuto" type="button">setTheme('auto')</button>
@@ -316,6 +318,7 @@
     var reportEl = document.getElementById('report').querySelector('tbody');
     var bannerEl = document.getElementById('banner');
     var FIXTURE = './fixtures/sample_blueprint.txt';
+    var FIXTUREJSON = './fixtures/sample_blueprint.json';
 
     function log(message) {
         var time = new Date().toLocaleTimeString();
@@ -802,7 +805,7 @@
     });
 
     // ---- 主题 ----
-    for (var theme of [['cThemeDark', 'dark'], ['cThemeLight', 'light'], ['cThemeAuto', 'auto']]) {
+    for (var theme of [['cThemeDark', 'dark'], ['cThemeLight', 'light'], ['cThemeAuto', 'auto'], ['cThemeEditor', 'editor']]) {
         (function (id, name) {
             on(id, function () {
                 var v = viewer();

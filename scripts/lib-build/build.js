@@ -322,10 +322,20 @@ function copyStaticFiles() {
 
     // 验证页用的蓝图样本（相对路径 fetch，跟页面一起搬家也不会坏）
     const fixture = path.join(ROOT, 'public', 'demo', 'sample_throughput.txt');
+    const fixturejson = path.join(ROOT, 'public', 'demo', 'sample_blueprint.json');
+    const preview = path.join(ROOT, 'public', 'demo', 'preview.json');
     if (fs.existsSync(fixture))
         copyFile(fixture, path.join(OUT, 'fixtures', 'sample_blueprint.txt'));
     else
         log('警告：public/demo/sample_throughput.txt 不存在，host-test.html 只能手工粘贴蓝图');
+    if (fs.existsSync(fixturejson))
+        copyFile(fixturejson, path.join(OUT, 'fixtures', 'sample_blueprint.json'));
+    else
+        log('警告：public/demo/sample_blueprint.json 不存在，host-test.html 只能手工粘贴蓝图');
+    if (fs.existsSync(preview))
+        copyFile(preview, path.join(OUT, 'preview.json'));
+    else
+        log('警告：public/demo/preview.json 不存在，preview-test.html 无法回放');
 
     // Basis 转码器：public/basis/ → dist-lib/basis/
     // 运行时 `resolveAssetUrl("basis/")` 或 `${BASE_URL}basis/` 都会命中这里。
