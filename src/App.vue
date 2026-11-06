@@ -675,6 +675,8 @@ const packBytes = ref(0);
 /** 尚未缓存模型的总字节数；null = 构建期清单不可用 */
 const packMissingBytes = ref<number | null>(null);
 const packError = ref("");
+/** 本地持久化是否被构建配置（config/persistence.config.js）关闭：与「浏览器不支持」分开提示 */
+const packPersistenceOff = ref(false);
 /** 进行中的下载；null = 空闲 */
 let packAbort: AbortController | null = null;
 
@@ -702,7 +704,8 @@ const formatSize = (bytes: number): string => {
 const packStatusText = computed(() => {
     switch (packState.value) {
         case "unsupported":
-            return t("不支持");
+            // 「持久化开关被关掉」和「浏览器不支持」是两回事，提示要能区分
+            return packPersistenceOff.value ? t("已关闭") : t("不支持");
         case "checking":
             return t("检查中…");
         case "downloading":
@@ -747,7 +750,9 @@ const packHint = computed(() => {
             : "";
     switch (packState.value) {
         case "unsupported":
-            return t("当前浏览器不支持本地缓存，模型仍可在联网时加载");
+            return packPersistenceOff.value
+                ? t("本地持久化已在构建配置中关闭，模型仍可在联网时加载")
+                : t("当前浏览器不支持本地缓存，模型仍可在联网时加载");
         case "checking":
             return t("正在检查本地已缓存的模型…");
         case "downloading":
@@ -785,6 +790,7 @@ const refreshPackState = async (): Promise<void> => {
     packState.value = "checking";
     try {
         const pack = await loadPackModule();
+        packPersistenceOff.value = !pack.isPersistenceEnabled();
         if (!pack.isPackSupported()) {
             packState.value = "unsupported";
             return;
@@ -812,6 +818,7 @@ const startPackDownload = async (): Promise<void> => {
     packState.value = "checking";
     try {
         const pack = await loadPackModule();
+        packPersistenceOff.value = !pack.isPersistenceEnabled();
         if (!pack.isPackSupported()) {
             packState.value = "unsupported";
             return;
@@ -1942,10 +1949,12 @@ ul.operations > li.render-settings-li {
         "检查中…": "检查中…",
         "下载失败": "下载失败",
         "不支持": "不支持",
+        "已关闭": "已关闭",
         "下载完成前无法切换渲染设置": "下载完成前无法切换渲染设置",
         "已缓存到本地，断网也能查看这些模型": "已缓存到本地，断网也能查看这些模型",
         "可选：把全部模型存到本地，断网也能看 3D 模型": "可选：把全部模型存到本地，断网也能看 3D 模型",
         "当前浏览器不支持本地缓存，模型仍可在联网时加载": "当前浏览器不支持本地缓存，模型仍可在联网时加载",
+        "本地持久化已在构建配置中关闭，模型仍可在联网时加载": "本地持久化已在构建配置中关闭，模型仍可在联网时加载",
         "正在检查本地已缓存的模型…": "正在检查本地已缓存的模型…"
     },
     en: {
@@ -1999,10 +2008,12 @@ ul.operations > li.render-settings-li {
         "检查中…": "Checking…",
         "下载失败": "Download failed",
         "不支持": "Unsupported",
+        "已关闭": "Disabled",
         "下载完成前无法切换渲染设置": "Rendering settings are locked until the download finishes",
         "已缓存到本地，断网也能查看这些模型": "Stored locally — these models now work offline",
         "可选：把全部模型存到本地，断网也能看 3D 模型": "Optional: store every model locally to view 3D models offline",
         "当前浏览器不支持本地缓存，模型仍可在联网时加载": "This browser does not support local caching; models still load while online",
+        "本地持久化已在构建配置中关闭，模型仍可在联网时加载": "Local persistence is disabled in the build config; models still load while online",
         "正在检查本地已缓存的模型…": "Checking locally cached models…"
     },
 }

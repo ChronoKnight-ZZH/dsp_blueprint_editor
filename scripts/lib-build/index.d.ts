@@ -6,7 +6,8 @@
  * 无法解析的 import。这里按发布面重写一遍，宿主只要装了 `three` 的类型就能用。
  *
  * 对应运行时导出（`src/lib/index.ts`）：
- *   BlueprintViewer / parseBlueprint / serializeBlueprint / configureAssetBaseUrl
+ *   BlueprintViewer / parseBlueprint / serializeBlueprint / configureAssetBaseUrl /
+ *   setModelCacheEnabled / isModelCacheEnabled
  *
  * 本文件是**纯模块**声明，不写 `export as namespace`：
  * 产出的 ESM 里宿主按 `import('./dsp-blueprint-editor.esm.js')` 使用，
@@ -519,3 +520,26 @@ export function serializeBlueprint(data: BlueprintData): string;
  * `configureAssetBaseUrl('https://cdn.example.com/dsp/')`。
  */
 export function configureAssetBaseUrl(baseUrl: string | null | undefined): void;
+
+/**
+ * 模型本地持久化缓存（Cache Storage）的运行时开关。
+ *
+ * 库构建默认**关闭**：库嵌在宿主页面里，存储属于宿主，不替宿主预写最多 ~128 MB
+ * 的模型。需要「看过的模型断网也能显示」时，在创建 Viewer 之前调用一次：
+ *
+ * ```ts
+ * setModelCacheEnabled(true);
+ * ```
+ *
+ * 关闭（或浏览器不支持 Cache Storage）时，缓存操作全部变成**空操作**：
+ * 读永远未命中、写永远失败、清单为空、清空 0 条，且不写宿主存储、不弹持久化授权。
+ * 对调用方没有任何 API 差异（`loadBlueprint` 等照常工作，只是每次都走网络）。
+ *
+ * 开关的默认值来自构建配置 `config/persistence.config.js` 的 `lib` 字段。
+ *
+ * @param enabled `true` 开启；`false` 关闭；`null` 恢复成构建配置的值
+ */
+export function setModelCacheEnabled(enabled: boolean | null): void;
+
+/** 持久化总开关当前是否打开（不含「浏览器是否支持」的判断） */
+export function isModelCacheEnabled(): boolean;

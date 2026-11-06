@@ -1267,7 +1267,8 @@ cat blueprint.txt | yarn cli > bp.json
 | --- | --- |
 | `models/glbAssets.ts` | GLB 资源注册表：`require.context` 编译期索引、`availableModelNames`、别名/变形表、`modelUrl()`（Promise 缓存）。 |
 | `models/glbLoader.ts` | 加载器：懒加载、`loaded/pending/failed` 三层缓存、并发闸门、8s 超时、错误吞掉、释放；**契约「永不 reject」**；取模型时**本地缓存优先**（见 §16.13）。 |
-| `models/modelCache.ts` | 模型文件的浏览器本地持久化缓存（Cache Storage，缓存名 `dsp-models-v1`）：`readCachedModel / storeCachedModel / removeCachedModel / cachedModelUrls / clearModelCache`，不可用时全部退化为空操作。 |
+| `models/modelCache.ts` | 模型文件的浏览器本地持久化缓存（Cache Storage，缓存名 `dsp-models-v1`）：`ModelCache` 后端接口 + `getModelCache()` + 便捷函数；开关关闭 / 环境不支持时固定返回**空操作对象** `NoopModelCache`（见 §16.13）。 |
+| `models/modelCacheConfig.ts` | 持久化全局开关：解析构建期注入的 `__DSP_MODEL_CACHE_ENABLED__`（唯一来源 `config/persistence.config.js`），并提供运行时覆盖 `setModelCacheEnabled()`。 |
 | `models/modelPack.ts` | 「离线模型包」：`resolvePackFiles / inspectPack / downloadPack / clearPack`——按缺失补齐、文件粒度进度、`AbortController` 可取消。 |
 | `models/buildingModel.ts` | 解析器：`modelIndex → Item → icon → GLB`、放置矩阵、按需请求、变更订阅、映射报告。 |
 | `models/glbInstances.ts` | `GlbModelInstances`：每个 GLB 子网格一个 `InstancedMesh`，几何/材质复用一份。 |
@@ -1466,13 +1467,16 @@ modelIndex → itemsMap 中的 Item.models 下标 → Item.icon
 | 读 | `glbLoader` 取模型前先 `readCachedModel(url)`：命中则完全不发网络请求（离线同样成立）。 |
 | 写 | ① 每个模型首次加载成功就顺手落盘（看过的模型天然可离线）；② 用户点「下载全部模型」时按缺失补齐。 |
 | 进度 / 取消 | 文件粒度进度（`completed / total` + 已收字节）；`AbortController` 取消，**半成品不落盘**、已完成文件保留 → 再点是续传。 |
-| 降级 | `caches` 不可用（老浏览器 / 非安全上下文）时 `isPackSupported() === false`，按钮置灰，加载器退回纯网络且不抛错。 |
+| 全局开关 | 唯一来源 `config/persistence.config.js`：`web`（编辑器 / PWA，默认 **开**）、`lib`（`dist-lib/`，默认 **关**）。两个构建各自把它编译成 `__DSP_MODEL_CACHE_ENABLED__`（`vue.config.js` / `scripts/lib-build/build.js` 的 DefinePlugin）。 |
+| 空操作降级 | 开关关闭 **或** `caches` 不可用（老浏览器 / 非安全上下文 / Node 单测）时，`getModelCache()` 返回 `NoopModelCache`：读未命中、写失败、清单为空、清空 0，且**完全不碰 `caches`**。调用方（`glbLoader` / `modelPack` / 宿主）不需要任何分支判断。 |
+| 界面降级 | `isPackSupported()` 变 false → 按钮置灰；`isPersistenceEnabled()` 区分「构建配置关闭」（提示「已关闭」）与「浏览器不支持」两种文案；加载器退回纯网络且不抛错。 |
+| 库宿主 | 发布库默认不写宿主存储；宿主在创建 Viewer 前调 `setModelCacheEnabled(true)` 即可开启（传 `null` 恢复构建配置值），无需重新出包。 |
 | 清理 | 「清除离线模型」清空整个缓存；下载时顺带调 `navigator.storage.persist()`，降低被浏览器按配额回收的概率。 |
 
 - 与 service worker 的关系：两者都基于 Cache Storage，但这份缓存由**页面**直接读写，不依赖 SW 是否已接管页面（首访、隐私模式同样有效）。
 - 下载期间「展示真实模型 / 开启贴图」两个开关被禁用（`packBusy`），避免一半模型按新设置、一半按旧设置。
 - 已知取舍：取消保留已完成文件（续传语义），不是整包丢弃；缓存不设条数上限——天然上限是模型总数（约 128 MB）。
-- 单测：`tests/unit/models/modelPack.spec.ts`，用 `caches` / `fetch` / `document` 的最小假实现覆盖命中、只补缺失、进度单调、取消、HTTP 失败与降级。
+- 单测：`tests/unit/models/modelPack.spec.ts`（命中、只补缺失、进度单调、取消、HTTP 失败、降级）与 `tests/unit/models/modelCache.spec.ts`（开关解析、`NoopModelCache` 不碰 `caches`、开关关闭时 `inspectPack / downloadPack` 的降级、重新打开后恢复）。
 
 ***
 

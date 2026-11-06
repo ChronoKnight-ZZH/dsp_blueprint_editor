@@ -40,6 +40,8 @@ const { execSync } = require('child_process');
 const webpack = require('webpack');
 
 const { buildInventory } = require('./assetInventory');
+// 持久化全局开关：与编辑器共用同一份配置（见 config/persistence.config.js）
+const persistence = require('../../config/persistence.config');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const SRC = path.join(ROOT, 'src');
@@ -176,6 +178,10 @@ function createConfig(kind, inventory) {
                 // 资产根自动探测：ESM 注入产物自身 URL；UMD 注入 undefined，
                 // 由源码里的 typeof 守卫跳过并回落到 <script src>（见 assetBaseUrl.ts）
                 __DSP_LIB_MODULE_URL__: isUmd ? 'undefined' : 'import.meta.url',
+                // 模型本地缓存（持久化）的全局开关：取 config/persistence.config.js 的
+                // `lib` 字段。默认关闭 → 宿主拿到的是「空操作」缓存对象，库不替宿主
+                // 写 Cache Storage；宿主可用 setModelCacheEnabled(true) 显式开启。
+                __DSP_MODEL_CACHE_ENABLED__: JSON.stringify(persistence.lib === true),
             }),
             // 单文件产物：把 gltf-loader 动态 import 拆出来的 chunk 合并回主 chunk
             new webpack.optimize.LimitChunkCountPlugin({ maxChunks: 1 }),
@@ -492,6 +498,8 @@ async function main() {
     const inventory = buildInventory(ROOT);
     log(`资产清单：${inventory.models.length} 个 GLB / ${inventory.itemRecipe.length} 物品图标 / `
         + `${inventory.tech.length} 科技图标 / ${inventory.signal.length} 信号图标`);
+    log(`模型本地缓存（持久化）：${persistence.lib ? '开启' : '关闭（运行时为空操作对象，'
+        + '宿主可用 setModelCacheEnabled(true) 打开）'}`);
 
     const statsByKind = {};
     for (const kind of ['umd', 'esm']) {

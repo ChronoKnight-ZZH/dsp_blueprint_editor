@@ -13,19 +13,24 @@
  *
  * 进度语义：`completed / total` 都是**本次要补的文件数**（已缓存的不算），
  * 因此「取消 → 再点」是断点续传，已经落盘的文件不会重下。
+ *
+ * 持久化总开关（`config/persistence.config.js`）关闭时，缓存后端是空操作对象，
+ * 本模块随之整体退化为「不支持」：`isPackSupported()` 为 false、界面按钮置灰、
+ * 下载入口直接报错——不会出现「显示下载完成其实什么都没存」的假成功。
  */
 
 import { availableModelNames, modelUrl } from "./glbAssets";
 import {
     cachedModelUrls,
     clearModelCache,
-    isModelCacheSupported,
+    isModelCacheActive,
     modelCacheKey,
     readCachedModel,
     removeCachedModel,
     requestPersistentStorage,
     storeCachedModel,
 } from "./modelCache";
+import { isModelCacheEnabled } from "./modelCacheConfig";
 
 /**
  * 构建期注入的模型大小清单（模型名 → 字节数），由 vue.config.js 的 DefinePlugin 生成。
@@ -57,7 +62,7 @@ export interface PackFile {
 
 /** 离线包当前状态（只统计，不下载） */
 export interface PackStatus {
-    /** 当前浏览器是否支持 Cache Storage */
+    /** 持久化是否生效：开关打开**且**浏览器支持 Cache Storage */
     readonly supported: boolean;
     /** 离线包总文件数（= 磁盘上真实存在的 GLB 数量） */
     readonly total: number;
@@ -101,9 +106,19 @@ export interface DownloadPackOptions {
     readonly onProgress?: (progress: PackProgress) => void;
 }
 
-/** 浏览器是否支持把模型存到本地 */
+/** 浏览器是否支持把模型存到本地（且持久化开关没被关掉） */
 export function isPackSupported(): boolean {
-    return isModelCacheSupported();
+    return isModelCacheActive();
+}
+
+/**
+ * 持久化全局开关是否打开（构建配置 `config/persistence.config.js` / 库宿主的运行时设置）。
+ *
+ * 与浏览器能力无关：为 `false` 时界面应提示「本地持久化已关闭」，
+ * 而不是把锅甩给浏览器（`isPackSupported()` 在两种情况下都是 false）。
+ */
+export function isPersistenceEnabled(): boolean {
+    return isModelCacheEnabled();
 }
 
 /**
@@ -225,7 +240,12 @@ export async function downloadPack(
     options: DownloadPackOptions = {}
 ): Promise<PackProgress> {
     const { signal, onProgress } = options;
-    if (!isPackSupported()) throw new Error("当前浏览器不支持本地缓存");
+    if (!isPackSupported())
+        throw new Error(
+            isModelCacheEnabled()
+                ? "当前浏览器不支持本地缓存"
+                : "本地持久化已关闭（config/persistence.config.js）"
+        );
 
     const files = await resolvePackFiles();
     const cached = await cachedModelUrls();

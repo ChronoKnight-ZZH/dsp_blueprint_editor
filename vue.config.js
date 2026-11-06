@@ -4,6 +4,7 @@ const path = require('path')
 const fs = require('fs')
 const { execSync } = require('child_process')
 const { buildModelBytes } = require('./scripts/lib-build/assetInventory')
+const persistence = require('./config/persistence.config')
 
 /** 部署根路径：GitHub Pages 项目页 /<repo>/。改这里等于同时改 publicPath 与 KTX2 转码器目录。 */
 const PUBLIC_PATH = '/dsp_blueprint_editor/'
@@ -85,6 +86,10 @@ module.exports = defineConfig({
                 // 构建期模型大小清单（模型名 → 字节数）。GLB 走 asset/resource 原样拷贝，
                 // 源文件大小即产物大小；运行时据此零请求算出「未下载模型共多少 MB」。
                 __DSP_MODEL_BYTES__: JSON.stringify(buildModelBytes(__dirname)),
+                // 模型本地缓存（持久化）的全局开关：唯一来源是 config/persistence.config.js
+                // 的 `web` 字段。关闭后运行时换成「空操作」缓存对象——读写都直接返回
+                // 未命中/失败，不碰 Cache Storage（见 src/models/modelCache.ts）。
+                __DSP_MODEL_CACHE_ENABLED__: JSON.stringify(persistence.web === true),
             }),
         ],
     },

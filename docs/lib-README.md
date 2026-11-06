@@ -3,8 +3,22 @@
 戴森球计划蓝图编辑器 & 3D 预览库。本文档面向**库的使用者**（Web 页面、Wails 桌面端、MES 端），
 完整覆盖当前版本的发布面与新增能力。
 
-> 当前版本：**v1.5.0**。本版本重点：**增量预览（preview-delta）**、**建筑多选**、
-> **editor 主题（新默认）**、**蓝图 JSON 导入导出**、**外置 GLB/KTX2 资产与资产根自动探测**。
+本仓库的对外能力分三层：完整编辑器（Vue 应用，见 `src/components/BlueprintEditor.vue` 与 `npm run serve`）、
+纯 3D 预览器 `BlueprintViewer`、蓝图解析 `parseBlueprint`。
+
+| 导出                      | 说明                                                    | 需要 Vue？ |
+| ----------------------- | ----------------------------------------------------- | ------- |
+| `BlueprintViewer`       | **纯 3D 预览器**（仅 Three.js 球体渲染，无 UI）                    | 否       |
+| `parseBlueprint`        | **蓝图解析**（字符串 → 数据对象）                                  | 否       |
+| `serializeBlueprint`    | **蓝图序列化**（数据对象 → 字符串，`parseBlueprint` 的逆运算）           | 否       |
+| `configureAssetBaseUrl` | **资产根地址**（库构建下决定 `models/`、`img/` 的位置）                | 否       |
+| `setModelCacheEnabled`  | **模型本地缓存开关**（库构建默认关闭；`true` 开启离线缓存，`null` 恢复构建配置）       | 否       |
+| `isModelCacheEnabled`   | 查询当前持久化开关是否打开                                          | 否       |
+| `describeBuild`         | ✗ **不在发布面**（诊断能力，仍可从源码 `@/lib/core/describeBuild` 引用） | 否       |
+| `createBlueprintApp`    | ✗ **本仓库不提供**：编辑器是独立应用（`src/App.vue`），不是可嵌入的库工厂        | —       |
+
+> `BlueprintViewer` 与编辑器共用 `src/lib/core/` 渲染内核，但**不依赖 Vue**；
+> 需要在已有页面里嵌入 3D 预览并用代码控制加载/选中/镜头，请直接使用它。
 
 ***
 
@@ -60,7 +74,7 @@
 
 ### 1.2 导出面
 
-运行时导出**刻意收窄**为 4 个，避免把编辑器 UI 或内部实现耦进宿主：
+运行时导出**刻意收窄**为 6 个，避免把编辑器 UI 或内部实现耦进宿主：
 
 | 导出 | 类型 | 说明 | 本次迭代 |
 | ---- | ---- | ---- | ---- |
@@ -68,6 +82,8 @@
 | `parseBlueprint` | function | 蓝图字符串 → `BlueprintData`；失败**抛异常** | 既有 |
 | `serializeBlueprint` | function | `BlueprintData` → 蓝图字符串；`parseBlueprint` 的逆运算 | 既有 |
 | `configureAssetBaseUrl` | function | 指定 `models/`、`basis/`、`img/` 的根目录 | 既有（资产探测增强） |
+| `setModelCacheEnabled` | function | 模型本地缓存（持久化）开关：库构建默认关闭，`true` 开启、`null` 恢复构建配置 | 新增 |
+| `isModelCacheEnabled` | function | 查询持久化开关是否打开（不含「浏览器是否支持」） | 新增 |
 
 此外，`src/lib/index.ts` 还导出了**纯类型**（`ViewerOptions`、`ViewerCallbacks`、
 `PreviewDeltaEvent`、`PreviewStats` 等），供 TypeScript 宿主直接引用；它们没有运行时开销。
@@ -99,6 +115,7 @@
 | 尺寸 | `setSize` / `resetSize` | 固定画布尺寸、嵌入布局 |
 | 截图 | `toDataURL` / `toBlob` | 分享、报告、导出图片 |
 | 资产地址 | `configureAssetBaseUrl` | CDN、子路径、离线包 |
+| 本地持久化 | `setModelCacheEnabled(true)` | 宿主开启「看过的模型断网也能显示」（库默认关闭） |
 | 诊断 | `previewStats` / `describeBuild` | 验收、性能排查、回归 |
 
 ***
@@ -186,8 +203,8 @@ configureAssetBaseUrl(null);
 该 chunk 同级，要么用 `configureAssetBaseUrl` 指向 public 下的资产副本。
 
 **模型本地缓存**：GLB 会写入浏览器 Cache Storage（`dsp-models-v1`），命中后直接读缓存。
-缓存不可用（老浏览器 / 非安全上下文 / 隐私模式）时自动退化为普通网络请求，不会报错。
-缓存键是模型最终 URL，因此内容变化（contenthash 变化）会自动失效。
+缓存不可用（老浏览器 / 非安全上下文 / 隐私模式）**或持久化开关关闭**时自动退化为普通网络请求，
+不会报错。缓存键是模型最终 URL，因此内容变化（contenthash 变化）会自动失效。
 
 ### 2.4 依赖
 
@@ -195,6 +212,12 @@ configureAssetBaseUrl(null);
 - `pako`：蓝图解压，已内联。
 - `vue` ^3.2 + `vue-i18n` ^9：仅编辑器应用需要；`BlueprintViewer` 与解析器不依赖 Vue。
 - KTX2/Basis：运行时需要产物中的 `basis/` 目录；缺失时带 KTX2 贴图的模型会退化为**无贴图**（保留几何），不会中断渲染。
+
+模型本地缓存（Cache Storage）在**库构建里默认关闭**：库是嵌在宿主页面里的无头渲染器，
+存储属于宿主，不替宿主预写最多 ~128 MB 的模型。需要「看过的模型断网也能显示」时，
+创建 Viewer 前调用一次 `setModelCacheEnabled(true)`（见「API 参考 › setModelCacheEnabled / isModelCacheEnabled」）。
+关闭时缓存操作全部是**空操作**：读未命中、写失败、清单为空、清空 0，不占宿主配额、
+不弹持久化授权，`loadBlueprint` 等 API 行为完全不变（只是每次走网络）。
 
 ***
 
@@ -811,6 +834,34 @@ function describeBuild(input: DescribeBuildInput): BuildDescription;
 
 `describeBuild` **不在发布面**，宿主若需要请直接以源码路径打包，或自行构建快照接口。
 
+### setModelCacheEnabled / isModelCacheEnabled
+
+```typescript
+function setModelCacheEnabled(enabled: boolean | null): void   // true 开启 / false 关闭 / null 恢复构建配置
+function isModelCacheEnabled(): boolean                        // 不含「浏览器是否支持」的判断
+```
+
+默认值来自构建配置 `config/persistence.config.js` 的 `lib` 字段（当前 **`false`**）。
+关闭、或浏览器不支持 Cache Storage 时，缓存后端固定是一个**空操作对象**：
+`read` 永远未命中、`store` 永远失败、清单永远为空、`clear` 返回 0，而且完全不接触
+`caches`——不占宿主存储配额、不弹 `navigator.storage.persist()`、不打印日志。
+
+宿主开启离线缓存只需一行（在任何模型加载之前调用）：
+
+```javascript
+import { BlueprintViewer, setModelCacheEnabled } from './dist-lib/dsp-blueprint-editor.esm.js';
+
+setModelCacheEnabled(true);                 // 看过的模型断网也能显示
+const viewer = new BlueprintViewer({ container: '#viewer' });
+viewer.loadBlueprint(blueprintText);
+```
+
+- 缓存键是模型最终的 URL（编辑器构建带 `[contenthash:8]`；库产物的 `models/` 文件名固定，
+  需要版本隔离时请在自己的部署路径上加版本前缀）；
+- 开关是**全局**的：对所有 `BlueprintViewer` 实例生效，随时可切换（`setModelCacheEnabled(null)`
+  恢复构建配置值）；
+- 想改变库的出厂默认值，改 `config/persistence.config.js` 的 `lib` 后重新 `yarn build:lib`。
+
 ***
 
 ## 5. API 参考
@@ -965,6 +1016,8 @@ type BuildingsLocateResult = { ok: true; indexes: number[] }       | { ok: false
 function parseBlueprint(str: string): BlueprintData;
 function serializeBlueprint(data: BlueprintData): string;
 function configureAssetBaseUrl(baseUrl: string | null | undefined): void;
+function setModelCacheEnabled(enabled: boolean | null): void;
+function isModelCacheEnabled(): boolean;
 ```
 
 | 函数 | 失败行为 | 说明 |
@@ -972,6 +1025,8 @@ function configureAssetBaseUrl(baseUrl: string | null | undefined): void;
 | `parseBlueprint` | **抛异常** | 调用前建议 `try/catch`，或用 `viewer.loadBlueprint` |
 | `serializeBlueprint` | **抛异常** | 数据不自洽（如 `header.time` 非 `Date`）时抛 TypeError |
 | `configureAssetBaseUrl` | 不抛异常 | `null` / `undefined` / `''` 清除配置 |
+| `setModelCacheEnabled` | 不抛异常 | 全局开关；`null` 恢复 `config/persistence.config.js` 的构建配置值 |
+| `isModelCacheEnabled` | 不抛异常 | 只表示开关本身；浏览器能力另由缓存是否真正生效决定 |
 
 ***
 

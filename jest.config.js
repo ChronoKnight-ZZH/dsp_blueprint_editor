@@ -18,5 +18,8 @@ module.exports = {
         // runtime 资产解析器靠「构建期注入的清单」判断文件是否存在；
         // 单测没有构建步骤，这里用同一套磁盘扫描逻辑注入（见 lib-build/assetInventory.js）
         __DSP_LIB_ASSET_INVENTORY__: buildInventory(__dirname),
+        // 持久化全局开关：单测按编辑器（Web 端）的配置跑，与线上行为一致；
+        // 测「关闭」路径时用 setModelCacheEnabled(false) 运行时覆盖（见 modelCacheConfig.ts）
+        __DSP_MODEL_CACHE_ENABLED__: require('./config/persistence.config').web === true,
     },
 }

@@ -229,6 +229,7 @@ async function runLoad(
 
         // 本地持久化缓存优先：命中就**完全不走网络**（断网也能渲染），
         // 见 modelCache.ts —— 键是带内容哈希的 URL，内容变了自然换键。
+        // 持久化总开关关闭时这里是空操作对象，恒未命中：直接走下面的 fetch。
         const local = await readCachedModel(url);
         const response =
             local ??
