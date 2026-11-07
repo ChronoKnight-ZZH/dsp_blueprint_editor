@@ -12,8 +12,9 @@
 | `parseBlueprint`        | **蓝图解析**（字符串 → 数据对象）                                  | 否       |
 | `serializeBlueprint`    | **蓝图序列化**（数据对象 → 字符串，`parseBlueprint` 的逆运算）           | 否       |
 | `configureAssetBaseUrl` | **资产根地址**（库构建下决定 `models/`、`img/` 的位置）                | 否       |
-| `setModelCacheEnabled`  | **模型本地缓存开关**（库构建默认关闭；`true` 开启离线缓存，`null` 恢复构建配置）       | 否       |
-| `isModelCacheEnabled`   | 查询当前持久化开关是否打开                                          | 否       |
+| `setModelCacheEnabled`  | **模型本地缓存开关**（库构建默认关闭；`true` 开启离线缓存，`null` 恢复构建配置）     | 否       |
+| `isModelCacheEnabled`   | 查询当前持久化开关是否打开                                         | 否       |
+| `calculateStatsList`    | **统计列表**（蓝图字符串/`BlueprintData` + 增产剂等级 → 耗电/需求/输出）    | 否       |
 | `describeBuild`         | ✗ **不在发布面**（诊断能力，仍可从源码 `@/lib/core/describeBuild` 引用） | 否       |
 | `createBlueprintApp`    | ✗ **本仓库不提供**：编辑器是独立应用（`src/App.vue`），不是可嵌入的库工厂        | —       |
 
@@ -42,7 +43,8 @@
   - [4.5 主题与视觉](#45-主题与视觉)
   - [4.6 资产、模型与渲染设置](#46-资产模型与渲染设置)
   - [4.7 蓝图解析与序列化](#47-蓝图解析与序列化)
-  - [4.8 诊断能力（非发布面）](#48-诊断能力非发布面)
+- [4.8 诊断能力（非发布面）](#48-诊断能力非发布面)
+  - [4.9 统计列表（calculateStatsList）](#49-统计列表calculatestatslist)
 - [5. API 参考](#5-api-参考)
   - [5.1 构造函数](#51-构造函数)
   - [5.2 实例方法总表](#52-实例方法总表)
@@ -63,60 +65,62 @@
 
 本仓库对外能力分三层：
 
-| 层级 | 入口 | 说明 | 需要 Vue？ |
-| ---- | ---- | ---- | ---- |
-| 完整编辑器 | `src/App.vue` + `src/components/BlueprintEditor.vue` | Vue 应用，含全部 UI 与编辑能力，`yarn serve` 启动 | 是 |
-| 纯 3D 预览器 | `BlueprintViewer` | 无头渲染器，仅 Three.js 球体渲染，不含任何 UI | 否 |
-| 蓝图数据层 | `parseBlueprint` / `serializeBlueprint` | 蓝图字符串 ↔ 数据对象；不依赖渲染栈 | 否 |
+| 层级       | 入口                                                   | 说明                                  | 需要 Vue？ |
+| -------- | ---------------------------------------------------- | ----------------------------------- | ------- |
+| 完整编辑器    | `src/App.vue` + `src/components/BlueprintEditor.vue` | Vue 应用，含全部 UI 与编辑能力，`yarn serve` 启动 | 是       |
+| 纯 3D 预览器 | `BlueprintViewer`                                    | 无头渲染器，仅 Three.js 球体渲染，不含任何 UI       | 否       |
+| 蓝图数据层    | `parseBlueprint` / `serializeBlueprint`              | 蓝图字符串 ↔ 数据对象；不依赖渲染栈                 | 否       |
 
 `BlueprintViewer` 与编辑器共用 `src/lib/core/` 渲染内核，但**不依赖 Vue**。
 需要在已有页面里嵌入 3D 预览并用代码控制加载、选中、镜头、增量生成时，直接使用它。
 
 ### 1.2 导出面
 
-运行时导出**刻意收窄**为 6 个，避免把编辑器 UI 或内部实现耦进宿主：
+运行时导出**刻意收窄**为 7 个，避免把编辑器 UI 或内部实现耦进宿主：
 
-| 导出 | 类型 | 说明 | 本次迭代 |
-| ---- | ---- | ---- | ---- |
-| `BlueprintViewer` | class | 无头 3D 预览器；加载 / 选中 / 多选 / 聚焦 / 主题 / 截图 / 增量预览 / 销毁 | 增强（多选、增量预览、JSON、editor 主题） |
-| `parseBlueprint` | function | 蓝图字符串 → `BlueprintData`；失败**抛异常** | 既有 |
-| `serializeBlueprint` | function | `BlueprintData` → 蓝图字符串；`parseBlueprint` 的逆运算 | 既有 |
-| `configureAssetBaseUrl` | function | 指定 `models/`、`basis/`、`img/` 的根目录 | 既有（资产探测增强） |
-| `setModelCacheEnabled` | function | 模型本地缓存（持久化）开关：库构建默认关闭，`true` 开启、`null` 恢复构建配置 | 新增 |
-| `isModelCacheEnabled` | function | 查询持久化开关是否打开（不含「浏览器是否支持」） | 新增 |
+| 导出                      | 类型       | 说明                                                       | 本次迭代                       |
+| ----------------------- | -------- | -------------------------------------------------------- | -------------------------- |
+| `BlueprintViewer`       | class    | 无头 3D 预览器；加载 / 选中 / 多选 / 聚焦 / 主题 / 截图 / 增量预览 / 销毁        | 增强（多选、增量预览、JSON、editor 主题） |
+| `parseBlueprint`        | function | 蓝图字符串 → `BlueprintData`；失败**抛异常**                        | 既有                         |
+| `serializeBlueprint`    | function | `BlueprintData` → 蓝图字符串；`parseBlueprint` 的逆运算            | 既有                         |
+| `configureAssetBaseUrl` | function | 指定 `models/`、`basis/`、`img/` 的根目录                        | 既有（资产探测增强）                 |
+| `setModelCacheEnabled`  | function | 模型本地缓存（持久化）开关：库构建默认关闭，`true` 开启、`null` 恢复构建配置            | 新增                         |
+| `isModelCacheEnabled`   | function | 查询持久化开关是否打开（不含「浏览器是否支持」）                                 | 新增                         |
+| `calculateStatsList`    | function | 蓝图统计列表：总耗电 / 需求 / 输出；复用编辑器网页端 `calculateProductionStats` | 本次新增                       |
 
 此外，`src/lib/index.ts` 还导出了**纯类型**（`ViewerOptions`、`ViewerCallbacks`、
 `PreviewDeltaEvent`、`PreviewStats` 等），供 TypeScript 宿主直接引用；它们没有运行时开销。
 
 以下能力存在但**不在发布面**，只能从源码路径引用：
 
-| 能力 | 源码路径 | 说明 |
-| ---- | ---- | ---- |
-| `describeBuild` | `@/lib/core/describeBuild` | 构建结果快照，用于渲染问题定位与回归对比 |
-| `blueprintJSON` 工具 | `@/lib/blueprintJSON` | `parseBlueprintJSON` / `stringifyBlueprintJSON` / `formatBlueprintJSON` |
-| `currentAssetBaseUrl` / `resolveAssetUrl` | `@/lib/assets/assetBaseUrl` | 资产地址解析细节 |
-| `PreviewLayer` / `PreviewProjector` | `@/lib/preview/*` | 增量预览内部实现（不保证跨版本稳定） |
-| `createBlueprintApp` | — | **本仓库不提供**：编辑器是独立应用，不是可嵌入的库工厂 |
+| 能力                                        | 源码路径                        | 说明                                                                      |
+| ----------------------------------------- | --------------------------- | ----------------------------------------------------------------------- |
+| `describeBuild`                           | `@/lib/core/describeBuild`  | 构建结果快照，用于渲染问题定位与回归对比                                                    |
+| `blueprintJSON` 工具                        | `@/lib/blueprintJSON`       | `parseBlueprintJSON` / `stringifyBlueprintJSON` / `formatBlueprintJSON` |
+| `currentAssetBaseUrl` / `resolveAssetUrl` | `@/lib/assets/assetBaseUrl` | 资产地址解析细节                                                                |
+| `PreviewLayer` / `PreviewProjector`       | `@/lib/preview/*`           | 增量预览内部实现（不保证跨版本稳定）                                                      |
+| `createBlueprintApp`                      | —                           | **本仓库不提供**：编辑器是独立应用，不是可嵌入的库工厂                                           |
 
 ### 1.3 功能索引
 
-| 功能 | 入口 | 典型场景 |
-| ---- | ---- | ---- |
-| 加载蓝图字符串 | `viewer.loadBlueprint(str)` | 用户粘贴、文件读取、后端返回正式蓝图 |
-| 加载已解析数据 | `viewer.loadBlueprintData(data)` | 宿主已自行解析或需要注入构造的数据 |
-| 加载 JSON | `viewer.loadBlueprintJSON(text)` | 网页端只能拿到 JSON 文本、跨进程传输 |
-| 导出 JSON | `viewer.exportBlueprintJSON()` | 保存工程、调试、传给后端 |
-| 选中单栋 | `viewer.selectBuilding(i)` | 点击列表 / 搜索定位 |
-| 选中多栋 | `viewer.selectedBuildings(list)` | 批量高亮、框选结果回显 |
-| 镜头对准 | `viewer.focusBuilding(i, opts)` | 列表点击后居中查看，不锁镜头 |
-| 增量生成预览 | `viewer.beginPreview()` / `applyPreviewDelta()` / `commitPreview()` | 后端流式推送生成过程 |
-| 预览运行时开关 | `previewAnimation: 'auto' \| 'on' \| 'off'` | 外部端 / MES 端低端机降级 |
-| 主题 | `setTheme` / `setCustomTheme` / `getTheme` | 深浅色、复刻编辑器观感 |
-| 尺寸 | `setSize` / `resetSize` | 固定画布尺寸、嵌入布局 |
-| 截图 | `toDataURL` / `toBlob` | 分享、报告、导出图片 |
-| 资产地址 | `configureAssetBaseUrl` | CDN、子路径、离线包 |
-| 本地持久化 | `setModelCacheEnabled(true)` | 宿主开启「看过的模型断网也能显示」（库默认关闭） |
-| 诊断 | `previewStats` / `describeBuild` | 验收、性能排查、回归 |
+| 功能      | 入口                                                                  | 典型场景                                |
+| ------- | ------------------------------------------------------------------- | ----------------------------------- |
+| 加载蓝图字符串 | `viewer.loadBlueprint(str)`                                         | 用户粘贴、文件读取、后端返回正式蓝图                  |
+| 加载已解析数据 | `viewer.loadBlueprintData(data)`                                    | 宿主已自行解析或需要注入构造的数据                   |
+| 加载 JSON | `viewer.loadBlueprintJSON(text)`                                    | 网页端只能拿到 JSON 文本、跨进程传输               |
+| 导出 JSON | `viewer.exportBlueprintJSON()`                                      | 保存工程、调试、传给后端                        |
+| 选中单栋    | `viewer.selectBuilding(i)`                                          | 点击列表 / 搜索定位                         |
+| 选中多栋    | `viewer.selectedBuildings(list)`                                    | 批量高亮、框选结果回显                         |
+| 镜头对准    | `viewer.focusBuilding(i, opts)`                                     | 列表点击后居中查看，不锁镜头                      |
+| 增量生成预览  | `viewer.beginPreview()` / `applyPreviewDelta()` / `commitPreview()` | 后端流式推送生成过程                          |
+| 预览运行时开关 | `previewAnimation: 'auto' \| 'on' \| 'off'`                         | 外部端 / MES 端低端机降级                    |
+| 主题      | `setTheme` / `setCustomTheme` / `getTheme`                          | 深浅色、复刻编辑器观感                         |
+| 尺寸      | `setSize` / `resetSize`                                             | 固定画布尺寸、嵌入布局                         |
+| 截图      | `toDataURL` / `toBlob`                                              | 分享、报告、导出图片                          |
+| 资产地址    | `configureAssetBaseUrl`                                             | CDN、子路径、离线包                         |
+| 本地持久化   | `setModelCacheEnabled(true)`                                        | 宿主开启「看过的模型断网也能显示」（库默认关闭）            |
+| 统计列表    | `calculateStatsList(input, acceleratorItem?)`                       | 外部端 / MES 端算总耗电、某材料需求/输出（与网页端统计同口径） |
+| 诊断      | `previewStats` / `describeBuild`                                    | 验收、性能排查、回归                          |
 
 ***
 
@@ -138,20 +142,20 @@ yarn build:lib     # → dist-lib/
 
 产物包含：
 
-| 文件 / 目录 | 说明 |
-| ---- | ---- |
-| `dsp-blueprint-editor.esm.js` | ESM，three 已内联 |
-| `dsp-blueprint-editor.esm.d.ts` | 与 ESM 产物同名的类型声明 |
-| `dsp-blueprint-editor.umd.js` | UMD，three 已内联，全局名 `DSPBlueprintEditor` |
-| `index.d.ts` | 公共类型声明（内容同 ESM 版，供 `package.json#types`） |
-| `host-test.html` | UMD 宿主验证页（零 404 自检） |
-| `esm-test.html` | ESM 宿主验证页（验证 `import.meta.url` 资产探测） |
-| `preview-test.html` | 增量预览效果与验收页 |
-| `preview-fixture.json` | 增量预览回放样本（252 条事件 / 7,186 个操作） |
-| `models/<name>.glb` | 建筑模型；法线 / 自发光 / spec 已内嵌 KTX2 |
-| `basis/` | KTX2 解码必需的 Basis Universal 转码器 |
-| `img/item_recipe/`、`img/tech/`、`img/signal/` | 物品 / 配方 / 科技 / 信号图标 |
-| `fixtures/sample_blueprint.txt` | 验证页样本，可删 |
+| 文件 / 目录                                      | 说明                                       |
+| -------------------------------------------- | ---------------------------------------- |
+| `dsp-blueprint-editor.esm.js`                | ESM，three 已内联                            |
+| `dsp-blueprint-editor.esm.d.ts`              | 与 ESM 产物同名的类型声明                          |
+| `dsp-blueprint-editor.umd.js`                | UMD，three 已内联，全局名 `DSPBlueprintEditor`   |
+| `index.d.ts`                                 | 公共类型声明（内容同 ESM 版，供 `package.json#types`） |
+| `host-test.html`                             | UMD 宿主验证页（零 404 自检）                      |
+| `esm-test.html`                              | ESM 宿主验证页（验证 `import.meta.url` 资产探测）     |
+| `preview-test.html`                          | 增量预览效果与验收页                               |
+| `preview-fixture.json`                       | 增量预览回放样本（252 条事件 / 7,186 个操作）            |
+| `models/<name>.glb`                          | 建筑模型；法线 / 自发光 / spec 已内嵌 KTX2            |
+| `basis/`                                     | KTX2 解码必需的 Basis Universal 转码器           |
+| `img/item_recipe/`、`img/tech/`、`img/signal/` | 物品 / 配方 / 科技 / 信号图标                      |
+| `fixtures/sample_blueprint.txt`              | 验证页样本，可删                                 |
 
 UMD（纯静态 `<script>`）：
 
@@ -214,7 +218,7 @@ configureAssetBaseUrl(null);
 - KTX2/Basis：运行时需要产物中的 `basis/` 目录；缺失时带 KTX2 贴图的模型会退化为**无贴图**（保留几何），不会中断渲染。
 
 模型本地缓存（Cache Storage）在**库构建里默认关闭**：库是嵌在宿主页面里的无头渲染器，
-存储属于宿主，不替宿主预写最多 ~128 MB 的模型。需要「看过的模型断网也能显示」时，
+存储属于宿主，不替宿主预写最多 \~128 MB 的模型。需要「看过的模型断网也能显示」时，
 创建 Viewer 前调用一次 `setModelCacheEnabled(true)`（见「API 参考 › setModelCacheEnabled / isModelCacheEnabled」）。
 关闭时缓存操作全部是**空操作**：读未命中、写失败、清单为空、清空 0，不占宿主配额、
 不弹持久化授权，`loadBlueprint` 等 API 行为完全不变（只是每次走网络）。
@@ -360,14 +364,14 @@ yarn build     # 产物在 dist/
 
 **设计意图**
 
-| 决策 | 原因 |
-| ---- | ---- |
-| 不逐条播放动画队列 | 实测 250 条事件约 5 秒到齐（≈50 条/秒，20ms 一条），逐条播放会把总时长拖到分钟级 |
-| 摄入与呈现分离 | 摄入只改 SoA 内存（目标 ≤2ms/事件）；呈现每帧一次，只写脏槽并局部上传 GPU |
-| 池化 + SoA | 实测峰值 32,581 个对象，逐对象 JS 对象会造成 GC 抖动；池化 + `Float32Array` 保持稳定帧率 |
-| 抖动抑制 | 实测 77%~92% 的临时 `add` 最终会被撤销；延迟淡入可避免画面闪烁 |
-| 抖动透明度而非混合 | 3 万级半透明实例的排序与过绘制会压垮填充率；抖动保持在不透明通道 |
-| 坐标语义切换硬重投影 | 这是语义跳变而非运动，插值会让全场"蠕动" |
+| 决策         | 原因                                                            |
+| ---------- | ------------------------------------------------------------- |
+| 不逐条播放动画队列  | 实测 250 条事件约 5 秒到齐（≈50 条/秒，20ms 一条），逐条播放会把总时长拖到分钟级             |
+| 摄入与呈现分离    | 摄入只改 SoA 内存（目标 ≤2ms/事件）；呈现每帧一次，只写脏槽并局部上传 GPU                  |
+| 池化 + SoA   | 实测峰值 32,581 个对象，逐对象 JS 对象会造成 GC 抖动；池化 + `Float32Array` 保持稳定帧率 |
+| 抖动抑制       | 实测 77%\~92% 的临时 `add` 最终会被撤销；延迟淡入可避免画面闪烁                      |
+| 抖动透明度而非混合  | 3 万级半透明实例的排序与过绘制会压垮填充率；抖动保持在不透明通道                             |
+| 坐标语义切换硬重投影 | 这是语义跳变而非运动，插值会让全场"蠕动"                                         |
 
 #### 完整示例：用产物自带 fixture 回放（可直接运行）
 
@@ -434,12 +438,12 @@ async function generateWithPreview(request) {
 
 #### `beginPreview` 参数
 
-| 参数 | 类型 | 默认值 | 取值范围 | 说明 |
-| ---- | ---- | ---- | ---- | ---- |
-| `projector` | `'sphere' \| 'plane'` | `'sphere'` | 枚举 | `layout-grid-v1` 阶段的投影方式。`sphere` 按 bbox 自动居中/缩放后投到球面；`plane` 贴在锚点切平面，永不穿极点 |
-| `settleMs` | `number` | `100` | `>= 16`（内部钳制） | 收敛时间常数 τ（毫秒）。越大越平滑、越慢 |
-| `enterDelayMs` | `number` | `120` | `>= 0` | 新对象延迟多久才淡入；`0` = 关闭延迟 |
-| `minLifeMs` | `number` | `120` | `>= 0` | 存活短于该值即被撤销的对象不出场；`0` = 关闭 |
+| 参数             | 类型                    | 默认值        | 取值范围          | 说明                                                                          |
+| -------------- | --------------------- | ---------- | ------------- | --------------------------------------------------------------------------- |
+| `projector`    | `'sphere' \| 'plane'` | `'sphere'` | 枚举            | `layout-grid-v1` 阶段的投影方式。`sphere` 按 bbox 自动居中/缩放后投到球面；`plane` 贴在锚点切平面，永不穿极点 |
+| `settleMs`     | `number`              | `100`      | `>= 16`（内部钳制） | 收敛时间常数 τ（毫秒）。越大越平滑、越慢                                                       |
+| `enterDelayMs` | `number`              | `120`      | `>= 0`        | 新对象延迟多久才淡入；`0` = 关闭延迟                                                       |
+| `minLifeMs`    | `number`              | `120`      | `>= 0`        | 存活短于该值即被撤销的对象不出场；`0` = 关闭                                                   |
 
 切到 `blueprint-area-local-v1` 后，两种 projector 都会转为真实 Area 球面投影，
 与正式场景的 `calcBuildingTrans` 完全一致。
@@ -491,83 +495,83 @@ async function generateWithPreview(request) {
 
 字段约定：
 
-| 字段 | 类型 | 必填 | 说明 |
-| ---- | ---- | ---- | ---- |
-| `kind` | `string` | 否 | 省略或 `'preview-delta'` 才参与几何；其他值（如 `'phase'`）整条忽略 |
-| `sequence` | `number` | 否 | 单调序号；**只接受比上次更大的值**。跳号是常态，不视为丢包；重复/更旧的整条忽略 |
-| `coordinateSystem` | `string` | 否 | `'layout-grid-v1'` / `'blueprint-area-local-v1'`；未知值按 layout 处理 |
-| `operations` | `PreviewOperation[]` | 是 | 为空则整条忽略 |
-| `areas` | `PreviewAreaLike[]` | 否 | area-local 阶段用于真实 Area 定位；支持扁平与嵌套两种形态 |
-| `primaryAreaIndex` | `number` | 否 | 主区域下标；当前层不读取 |
-| `previewBatch` | `unknown` | 否 | 旧接口兼容字段；当前层不读取 |
+| 字段                 | 类型                   | 必填 | 说明                                                              |
+| ------------------ | -------------------- | -- | --------------------------------------------------------------- |
+| `kind`             | `string`             | 否  | 省略或 `'preview-delta'` 才参与几何；其他值（如 `'phase'`）整条忽略                |
+| `sequence`         | `number`             | 否  | 单调序号；**只接受比上次更大的值**。跳号是常态，不视为丢包；重复/更旧的整条忽略                      |
+| `coordinateSystem` | `string`             | 否  | `'layout-grid-v1'` / `'blueprint-area-local-v1'`；未知值按 layout 处理 |
+| `operations`       | `PreviewOperation[]` | 是  | 为空则整条忽略                                                         |
+| `areas`            | `PreviewAreaLike[]`  | 否  | area-local 阶段用于真实 Area 定位；支持扁平与嵌套两种形态                           |
+| `primaryAreaIndex` | `number`             | 否  | 主区域下标；当前层不读取                                                    |
+| `previewBatch`     | `unknown`            | 否  | 旧接口兼容字段；当前层不读取                                                  |
 
 `PreviewOperation`：
 
-| `type` | 必填字段 | 说明 |
-| ---- | ---- | ---- |
-| `'add'` | `objectId`、`building` | 新增对象；已存在时按 replace 更新 |
-| `'replace'` | `objectId`、`building` | 更新对象；不存在时按 add 处理 |
-| `'remove'` | `objectId` | 删除对象；不存在时静默忽略 |
+| `type`      | 必填字段                  | 说明                    |
+| ----------- | --------------------- | --------------------- |
+| `'add'`     | `objectId`、`building` | 新增对象；已存在时按 replace 更新 |
+| `'replace'` | `objectId`、`building` | 更新对象；不存在时按 add 处理     |
+| `'remove'`  | `objectId`            | 删除对象；不存在时静默忽略         |
 
 `building` 字段：
 
-| 字段 | 类型 | 必填 | 默认 / 说明 |
-| ---- | ---- | ---- | ---- |
-| `itemId` | `number` | 是 | 决定传送带 / 分拣器等程序化几何 |
-| `modelIndex` | `number` | 是 | 决定 GLB / 回退盒 |
-| `localOffset` | `{ x, y, z }` | 是 | 格坐标 |
-| `yaw` | `number` | 是（TS） | 角度制；JS 侧缺失时运行时按 `0` 处理 |
-| `areaIndex` | `number` | 否 | 默认 `0` |
-| `localOffset2` | `{ x, y, z }` | 否 | 分拣器第二端；默认等于 `localOffset` |
-| `yaw2` | `number` | 否 | 默认等于 `yaw` |
-| `outputObjectId` | `string \| null` | 否 | 传送带连线目标；缺失则不画连线 |
-| `inputObjectId` / `inputFromSlot` / `outputToSlot` / `productionIndex` | — | 否 | 类型兼容保留，当前预览层不读取 |
-| `isTemporary` | `boolean` | 否 | 协议兼容字段，当前预览层不读取 |
-| `tilt` / `pitch` | `number` | 否 | 实测恒为 0，当前按 0 处理 |
+| 字段                                                                     | 类型               | 必填    | 默认 / 说明                   |
+| ---------------------------------------------------------------------- | ---------------- | ----- | ------------------------- |
+| `itemId`                                                               | `number`         | 是     | 决定传送带 / 分拣器等程序化几何         |
+| `modelIndex`                                                           | `number`         | 是     | 决定 GLB / 回退盒              |
+| `localOffset`                                                          | `{ x, y, z }`    | 是     | 格坐标                       |
+| `yaw`                                                                  | `number`         | 是（TS） | 角度制；JS 侧缺失时运行时按 `0` 处理    |
+| `areaIndex`                                                            | `number`         | 否     | 默认 `0`                    |
+| `localOffset2`                                                         | `{ x, y, z }`    | 否     | 分拣器第二端；默认等于 `localOffset` |
+| `yaw2`                                                                 | `number`         | 否     | 默认等于 `yaw`                |
+| `outputObjectId`                                                       | `string \| null` | 否     | 传送带连线目标；缺失则不画连线           |
+| `inputObjectId` / `inputFromSlot` / `outputToSlot` / `productionIndex` | —                | 否     | 类型兼容保留，当前预览层不读取           |
+| `isTemporary`                                                          | `boolean`        | 否     | 协议兼容字段，当前预览层不读取           |
+| `tilt` / `pitch`                                                       | `number`         | 否     | 实测恒为 0，当前按 0 处理           |
 
 > **重要**：预览对象不属于正式场景的 BVH，**不可点击拾取、不可选中**。
 > 选中 / 聚焦 / `getBuildingInfo` 只作用于已 `commitPreview` 或 `loadBlueprint` 的正式场景。
 
 #### 健壮性规则
 
-| 情况 | 行为 |
-| ---- | ---- |
-| 序号重复 / 更旧 | 整条忽略，`droppedEvents++` |
-| 序号跳号 | 正常接受（跳号是常态，最多实测连跳 18） |
-| `remove` 不存在的对象 | 静默忽略，`unknownRemoves++` |
-| `replace` 不存在的对象 | 按 `add` 处理，`unknownReplaces++` |
-| 坏操作（缺 `localOffset` 等） | 跳过该操作，绝不抛错 |
-| 对象在 `minLifeMs` 内被撤销且从未露面 | 直接回收，`filteredByThrash++` |
-| 坐标系语义变化 | 硬重投影（不插值），`version++` |
-| `areas` 解析失败 | 保留上一次投影，预览不中断 |
-| 池容量到顶 | 该次操作跳过（回调内不做 GPU 分配），不阻塞后续事件 |
-| 渲染异常 | 预览层内部吞掉并 `console.warn`，不影响生成流程 |
+| 情况                        | 行为                              |
+| ------------------------- | ------------------------------- |
+| 序号重复 / 更旧                 | 整条忽略，`droppedEvents++`          |
+| 序号跳号                      | 正常接受（跳号是常态，最多实测连跳 18）           |
+| `remove` 不存在的对象           | 静默忽略，`unknownRemoves++`         |
+| `replace` 不存在的对象          | 按 `add` 处理，`unknownReplaces++`  |
+| 坏操作（缺 `localOffset` 等）    | 跳过该操作，绝不抛错                      |
+| 对象在 `minLifeMs` 内被撤销且从未露面 | 直接回收，`filteredByThrash++`       |
+| 坐标系语义变化                   | 硬重投影（不插值），`version++`           |
+| `areas` 解析失败              | 保留上一次投影，预览不中断                   |
+| 池容量到顶                     | 该次操作跳过（回调内不做 GPU 分配），不阻塞后续事件    |
+| 渲染异常                      | 预览层内部吞掉并 `console.warn`，不影响生成流程 |
 
 #### 运行期统计（`previewStats()`）
 
 未开始预览时返回 `null`。字段如下：
 
-| 字段 | 类型 | 说明 | 验收参考 |
-| ---- | ---- | ---- | ---- |
-| `events` | `number` | 已应用的事件数 | — |
-| `operations` | `number` | 已计入的操作条数（仅统计至少应用了一条操作的事件） | — |
-| `droppedEvents` | `number` | 因序号过期被整条丢弃的事件数 | 有序投递时应为 0 |
-| `unknownRemoves` | `number` | 删除不存在对象的次数 | 中途订阅时出现属正常 |
-| `unknownReplaces` | `number` | 替换不存在对象的次数 | 应被当作 add，不丢对象 |
-| `alive` | `number` | 当前逻辑存活对象数 | 流结束后应等于数据净增量 |
-| `fading` | `number` | 已不属逻辑对象但仍占槽的数量 | 收敛后应回落 |
-| `peakAlive` | `number` | 存活峰值 | 用于容量预估 |
-| `moving` | `number` | 仍在运动的槽数 | 事件停止后应回落到 0 |
-| `slots` | `number` | 各池已分配槽位总数（高水位） | 用于显存预估 |
-| `filteredByThrash` | `number` | 被抖动抑制吞掉的可见槽数 | 用于判断抑制是否过度 |
-| `coordinateSystem` | `string \| null` | 当前坐标语义 | 应只切一次 |
-| `lastIngestMs` | `number` | 最近一次摄入耗时（毫秒） | 应 ≤ 50ms |
-| `maxIngestMs` | `number` | 最大摄入耗时（毫秒） | 应 ≤ 50ms |
-| `disposed` | `boolean` | 预览层是否已释放 | 丢弃后为 `true` |
+| 字段                 | 类型               | 说明                        | 验收参考          |
+| ------------------ | ---------------- | ------------------------- | ------------- |
+| `events`           | `number`         | 已应用的事件数                   | —             |
+| `operations`       | `number`         | 已计入的操作条数（仅统计至少应用了一条操作的事件） | —             |
+| `droppedEvents`    | `number`         | 因序号过期被整条丢弃的事件数            | 有序投递时应为 0     |
+| `unknownRemoves`   | `number`         | 删除不存在对象的次数                | 中途订阅时出现属正常    |
+| `unknownReplaces`  | `number`         | 替换不存在对象的次数                | 应被当作 add，不丢对象 |
+| `alive`            | `number`         | 当前逻辑存活对象数                 | 流结束后应等于数据净增量  |
+| `fading`           | `number`         | 已不属逻辑对象但仍占槽的数量            | 收敛后应回落        |
+| `peakAlive`        | `number`         | 存活峰值                      | 用于容量预估        |
+| `moving`           | `number`         | 仍在运动的槽数                   | 事件停止后应回落到 0   |
+| `slots`            | `number`         | 各池已分配槽位总数（高水位）            | 用于显存预估        |
+| `filteredByThrash` | `number`         | 被抖动抑制吞掉的可见槽数              | 用于判断抑制是否过度    |
+| `coordinateSystem` | `string \| null` | 当前坐标语义                    | 应只切一次         |
+| `lastIngestMs`     | `number`         | 最近一次摄入耗时（毫秒）              | 应 ≤ 50ms      |
+| `maxIngestMs`      | `number`         | 最大摄入耗时（毫秒）                | 应 ≤ 50ms      |
+| `disposed`         | `boolean`        | 预览层是否已释放                  | 丢弃后为 `true`   |
 
 #### 预览注意事项
 
-1. **先 `beginPreview`，再提交生成请求**；否则开头的差量会丢失。
+1. **先** **`beginPreview`，再提交生成请求**；否则开头的差量会丢失。
 2. **不要自己做队列播放 / 延迟执行**。在 `onProgress` 里同步调用 `applyPreviewDelta`，
    让逻辑立即生效、视觉每帧收敛。
 3. `beginPreview` 会**自动丢弃上一次预览**，可安全地重复调用。
@@ -582,13 +586,13 @@ async function generateWithPreview(request) {
 
 **核心能力**
 
-| 能力 | 方法 | 说明 |
-| ---- | ---- | ---- |
-| 单选 | `selectBuilding(index \| null)` | 只高亮，不动镜头；`null` 取消 |
-| 多选 | `selectedBuildings(indexes \| null)` | **本次新增**；批量高亮，先整体校验再提交 |
-| 聚焦 | `focusBuilding(index \| null, opts?)` | 镜头居中对齐，不锁镜头 |
-| 查询 | `getSelectedIndex()` / `getSelectedIndexes()` | 当前单选 / 多选结果 |
-| 信息 | `getBuildingInfo(index)` | 世界矩阵 |
+| 能力 | 方法                                            | 说明                     |
+| -- | --------------------------------------------- | ---------------------- |
+| 单选 | `selectBuilding(index \| null)`               | 只高亮，不动镜头；`null` 取消     |
+| 多选 | `selectedBuildings(indexes \| null)`          | **本次新增**；批量高亮，先整体校验再提交 |
+| 聚焦 | `focusBuilding(index \| null, opts?)`         | 镜头居中对齐，不锁镜头            |
+| 查询 | `getSelectedIndex()` / `getSelectedIndexes()` | 当前单选 / 多选结果            |
+| 信息 | `getBuildingInfo(index)`                      | 世界矩阵                   |
 
 **适用场景**
 
@@ -633,10 +637,10 @@ console.log(viewer.getBuildingInfo(3));      // { ok: true, value: { index, id, 
 
 `FocusOptions`：
 
-| 参数 | 类型 | 默认值 | 说明 |
-| ---- | ---- | ---- | ---- |
-| `distance` | `number` | `PLANET_RADIUS * 0.5 ≈ 100.1` | 相机到**建筑中心**的距离（≈ 离地高度）。小于 `0.04R ≈ 8` 会被控件抬到贴地最近处 |
-| `select` | `boolean` | `true` | 是否同时选中该建筑 |
+| 参数         | 类型        | 默认值                           | 说明                                                |
+| ---------- | --------- | ----------------------------- | ------------------------------------------------- |
+| `distance` | `number`  | `PLANET_RADIUS * 0.5 ≈ 100.1` | 相机到**建筑中心**的距离（≈ 离地高度）。小于 `0.04R ≈ 8` 会被控件抬到贴地最近处 |
+| `select`   | `boolean` | `true`                        | 是否同时选中该建筑                                         |
 
 要点：
 
@@ -679,10 +683,10 @@ const text = viewer.exportBlueprintJSON();   // 未加载时返回 null
 
 #### 为什么不能直接 `JSON.stringify` 往返
 
-| 字段 | 序列化后的形状 | 直接 parse 回来 | 处理方式 |
-| ---- | ---- | ---- | ---- |
-| `header.time` | ISO 字符串 | `string`，`serializeBlueprint` 调 `getTime()` 会抛 TypeError | 导入时还原为 `Date` |
-| `buildings[].extraBytes` | `{"0":1,"1":2,…}` | 普通对象，取 `.length` 得到 `undefined` | 导入时还原为 `Uint8Array` |
+| 字段                       | 序列化后的形状           | 直接 parse 回来                                              | 处理方式                |
+| ------------------------ | ----------------- | -------------------------------------------------------- | ------------------- |
+| `header.time`            | ISO 字符串           | `string`，`serializeBlueprint` 调 `getTime()` 会抛 TypeError | 导入时还原为 `Date`       |
+| `buildings[].extraBytes` | `{"0":1,"1":2,…}` | 普通对象，取 `.length` 得到 `undefined`                          | 导入时还原为 `Uint8Array` |
 
 #### 输入输出规范
 
@@ -723,12 +727,12 @@ viewer.setCustomTheme({ grid: 0x3fb950 });    // 只覆盖指定项
 console.log(viewer.getTheme());
 ```
 
-| 主题 | 场景背景 | 星球 | 网格 | 角标文字 | 备注 |
-| ---- | ---- | ---- | ---- | ---- | ---- |
-| `editor`（默认） | `0x000000` | `0xb0b0b0` | `0xf0f0f0` | 白字深灰描边 | 复刻编辑器观感，含天光/星空 |
-| `dark` | `0x0d1117` | `0x1c2128` | `0x6e7681` | 白字深灰描边 | 对齐 v1 纯色板 |
-| `light` | `0xd8dee4` | `0xc8d0d8` | `0xffffff` | 深字白描边 | 对齐 v1 纯色板 |
-| `auto` | 跟随系统 | 跟随系统 | 跟随系统 | 跟随系统 | `prefers-color-scheme` 在 `dark` / `light` 间切换 |
+| 主题           | 场景背景       | 星球         | 网格         | 角标文字   | 备注                                            |
+| ------------ | ---------- | ---------- | ---------- | ------ | --------------------------------------------- |
+| `editor`（默认） | `0x000000` | `0xb0b0b0` | `0xf0f0f0` | 白字深灰描边 | 复刻编辑器观感，含天光/星空                                |
+| `dark`       | `0x0d1117` | `0x1c2128` | `0x6e7681` | 白字深灰描边 | 对齐 v1 纯色板                                     |
+| `light`      | `0xd8dee4` | `0xc8d0d8` | `0xffffff` | 深字白描边  | 对齐 v1 纯色板                                     |
+| `auto`       | 跟随系统       | 跟随系统       | 跟随系统       | 跟随系统   | `prefers-color-scheme` 在 `dark` / `light` 间切换 |
 
 要点：
 
@@ -778,12 +782,12 @@ viewer.setRenderSettings({ previewAnimation: 'off' }); // 只改预览插值开�
 
 生效路径：
 
-| 设置 | 是否重建 | 说明 |
-| ---- | ---- | ---- |
-| `showRealModels` | 是 | 分组决策在构建期 |
-| `maxInstancesPerModel` | 是 | 同上；`Infinity` 表示不限制 |
-| `texturesEnabled` | 否 | 共享材质原地重挂 |
-| `previewAnimation` | 否 | 只改预览层的插值布尔 |
+| 设置                     | 是否重建 | 说明                  |
+| ---------------------- | ---- | ------------------- |
+| `showRealModels`       | 是    | 分组决策在构建期            |
+| `maxInstancesPerModel` | 是    | 同上；`Infinity` 表示不限制 |
+| `texturesEnabled`      | 否    | 共享材质原地重挂            |
+| `previewAnimation`     | 否    | 只改预览层的插值布尔          |
 
 渲染细节：
 
@@ -834,6 +838,61 @@ function describeBuild(input: DescribeBuildInput): BuildDescription;
 
 `describeBuild` **不在发布面**，宿主若需要请直接以源码路径打包，或自行构建快照接口。
 
+### 4.9 统计列表（calculateStatsList）
+
+**核心能力**
+
+- 输入蓝图字符串（内部 `parseBlueprint`）或 `BlueprintData`，加上增产剂等级，返回总耗电、需求、输出；
+- 算法**完全复用编辑器网页端**的 `calculateProductionStats`（源码 `@/blueprint/stats`），不改其一行；
+- 只做「入参校验 + 结构转换 + 补物品名」，因此数值与网页端「统计」Tab 逐项一致；
+- 不依赖 Three.js / Vue / DOM，可在 Node、Worker、Wails 后端直接调用。
+
+**适用场景**
+
+- 外部端 / MES 端需要在**不渲染 3D** 的情况下算蓝图耗电与物料平衡；
+- 生成流程收尾后，把统计结果一并返回给上层展示；
+- 批量蓝图离线核算（遍历多份 `.txt`）。
+
+**签名**
+
+```typescript
+function calculateStatsList(
+    input: string | BlueprintData,
+    acceleratorItem?: 0 | 1 | 2 | 3,   // 省略等价 0
+): StatsListResult;
+
+type StatsListResult =
+    | { ok: true; value: StatsListValue }
+    | { ok: false; error: StatsListError };
+```
+
+**增产剂等级**
+
+| 值      | 含义 | 对应源码枚举                |
+| ------ | -- | --------------------- |
+| 0（省略时） | 无  | AcceleratorItem.None  |
+| 1      | 一级 | AcceleratorItem.MkI   |
+| 2      | 二级 | AcceleratorItem.MkII  |
+| 3      | 三级 | AcceleratorItem.MkIII |
+
+数值与 `AcceleratorItem` 一一对应；内部自动推出 `useAccelerator = acceleratorItem !== 0`，与网页端 `!== None` 等价。
+
+**出参**
+
+```typescript
+interface StatsListValue {
+    totalPower: number;          // 总功耗，kW（同 ProductionStats.totalPower）
+    demand: StatsListItem[];     // 需求（= ItemStats.consumed），按 count 降序
+    output: StatsListItem[];     // 输出（= ItemStats.produced），按 count 降序
+}
+
+interface StatsListItem {
+    itemId: number;
+    name: string;                // 取 itemsMap 原文中文键，不翻译
+    count: number;               // 每分钟数量
+}
+```
+
 ### setModelCacheEnabled / isModelCacheEnabled
 
 ```typescript
@@ -862,6 +921,147 @@ viewer.loadBlueprint(blueprintText);
   恢复构建配置值）；
 - 想改变库的出厂默认值，改 `config/persistence.config.js` 的 `lib` 后重新 `yarn build:lib`。
 
+**增产剂等级**
+
+| 值        | 含义 | 对应源码枚举                  |
+| :------- | :- | :---------------------- |
+| `0`（省略时） | 无  | `AcceleratorItem.None`  |
+| `1`      | 一级 | `AcceleratorItem.MkI`   |
+| `2`      | 二级 | `AcceleratorItem.MkII`  |
+| `3`      | 三级 | `AcceleratorItem.MkIII` |
+
+数值与 `AcceleratorItem` 一一对应；内部自动推出 `useAccelerator = acceleratorItem !== 0`，与网页端 `!== None` 等价。
+
+**出参**
+
+typescript
+
+```
+interface StatsListValue {
+    totalPower: number;          // 总功耗，kW（同 ProductionStats.totalPower）
+    demand: StatsListItem[];     // 需求（= ItemStats.consumed），按 count 降序
+    output: StatsListItem[];     // 输出（= ItemStats.produced），按 count 降序
+}
+
+interface StatsListItem {
+    itemId: number;
+    name: string;                // 取 itemsMap 原文中文键，不翻译
+    count: number;               // 每分钟数量
+}
+```
+
+**与** **`calculateProductionStats`** **的映射**
+
+| 网页端字段              | 统计列表字段                            | 说明                        |
+| :----------------- | :-------------------------------- | :------------------------ |
+| `totalPower`       | `value.totalPower`                | 原样                        |
+| `items[].consumed` | `value.demand[].count`            | 只保留 `consumed !== 0` 的项   |
+| `items[].produced` | `value.output[].count`            | 只保留 `produced !== 0` 的项   |
+| `items[].net`      | **不导出**                           | 需要净量请自行 `output - demand` |
+| `items` 按 `net` 降序 | `demand` / `output` 各按 `count` 降序 | **顺序不同**，宿主不要按位置对账        |
+
+**三条口径约定**
+
+1. **同一** **`itemId`** **既产又耗**（某产物被下游当原料）时，`demand` 与 `output` **两边各出现一次**，保真原始值；不做净额合并。
+2. **`name`** **不翻译**：取 `itemsMap.get(itemId)?.name`（`itemsData.ts` 的中文键原文），查不到时 `"unknown"`（与 `i18n.ts` 的 `itemName` 兜底一致）。需要本地化名称请在宿主侧用自己的词典翻译。
+3. **单位**：`totalPower` = kW；`count` = 每分钟。与网页端「统计」Tab 完全一致。
+
+**错误码**
+
+| `code`                | 触发                                                   | 宿主处理建议    |
+| :-------------------- | :--------------------------------------------------- | :-------- |
+| `parse-failed`        | 字符串无法被 `parseBlueprint` 解析（含空串）                      | 提示用户修正蓝图串 |
+| `invalid-accelerator` | `acceleratorItem` 不是 `0/1/2/3` 的整数                   | 检查宿主传参    |
+| `invalid-argument`    | `input` 既非 `string` 也非含 `buildings` 数组的对象；或数据在统计阶段抛错 | 检查数据来源    |
+
+三个错误码与 `ViewerErrorCode` **刻意分离**：3D 生命周期错误与统计入参错误语义不同，宿主不应混用。
+
+**代码示例**
+
+javascript
+
+```
+import { calculateStatsList } from './dist-lib/dsp-blueprint-editor.esm.js';
+
+// 1) 蓝图字符串 + 三级增产剂
+const r = calculateStatsList(blueprintText, 3);
+if (r.ok) {
+    console.log('总耗电', r.value.totalPower, 'kW');
+    for (const d of r.value.demand) {
+        console.log('需求', d.name, d.count, '/min');
+    }
+    for (const o of r.value.output) {
+        console.log('输出', o.name, o.count, '/min');
+    }
+} else {
+    console.warn(r.error.code, r.error.message);
+}
+
+// 2) 已解析数据（对象形态接受最小 { buildings: [...] }）
+const data = parseBlueprint(blueprintText);
+const r2 = calculateStatsList(data, 0);   // 无增产剂
+
+// 3) 批量核算
+for (const file of files) {
+    const s = calculateStatsList(file);
+    if (s.ok) console.log(file, s.value.totalPower);
+}
+```
+
+**验收对账基线**（与 `tests/unit/blueprint/stats.spec.ts` 同口径）
+
+| 场景              | 增产剂    | `totalPower` | 需求                      | 输出         |
+| :-------------- | :----- | :----------- | :---------------------- | :--------- |
+| 分馏塔 ×1          | 无      | 3960 kW      | H2 72/min               | D2 72/min  |
+| 分馏塔 ×1          | 一级     | 5148 kW      | H2 90/min、增产剂 7.5/min   | D2 90/min  |
+| 分馏塔 ×1          | 二级     | 6732 kW      | H2 108/min、增产剂 4.5/min  | D2 108/min |
+| 分馏塔 ×1          | 三级     | 9900 kW      | H2 144/min、增产剂 1.92/min | D2 144/min |
+| 制造台 Mk.I + 铁块配方 | 无      | 270 kW       | 铁矿 45/min               | 铁块 45/min  |
+| 制造台 Mk.I + 铁块配方 | 三级（加速） | 675 kW       | 铁矿 90/min、增产剂 1.2/min   | 铁块 90/min  |
+
+text
+
+```
+---
+
+### B-06-6 · §5.5 导出函数（代码块插 1 段 + 表格插 1 行）
+
+**6a · 代码块内追加**
+```
+
+┌ 原文窗口
+│ function setModelCacheEnabled(enabled: boolean | null): void;
+│ function isModelCacheEnabled(): boolean;
+│ `└ 在 ` isModelCacheEnabled ` 行之后、代码块结束` 之前插入
+
+text
+
+````
+​```typescript
+function isModelCacheEnabled(): boolean;
+function calculateStatsList(
+    input: string | BlueprintData,
+    acceleratorItem?: 0 | 1 | 2 | 3,
+): StatsListResult;
+````
+
+**6b · 表格追加**
+
+text
+
+```
+┌ 原文窗口
+│ | `isModelCacheEnabled` | 不抛异常 | 只表示开关本身；浏览器能力另由缓存是否真正生效决定 |
+└ 在其后追加一行
+```
+
+markdown
+
+```
+| `isModelCacheEnabled` | 不抛异常 | 只表示开关本身；浏览器能力另由缓存是否真正生效决定 |
+| `calculateStatsList` | 不抛异常 | 错误经 `{ ok: false, error }` 返回；算法复用 `calculateProductionStats` |
+```
+
 ***
 
 ## 5. API 参考
@@ -874,22 +1074,22 @@ new BlueprintViewer(options: ViewerOptions, callbacks?: ViewerCallbacks)
 
 **`ViewerOptions`：**
 
-| 参数 | 类型 | 默认值 | 说明 |
-| ---- | ---- | ---- | ---- |
-| `container` | `HTMLElement \| string` | 必填 | 容器元素或 CSS 选择器；找不到时初始化失败并记录 `no-container`，后续加载返回该错误 |
-| `initialSettings` | `Partial<ViewerRenderSettings>` | — | 渲染设置；省略字段取默认值 |
-| `showRealModels` | `boolean` | `true` | 是否用真实 GLB 模型 |
-| `texturesEnabled` | `boolean` | `true` | 是否贴图 |
-| `maxInstancesPerModel` | `number` | `Infinity` | 单模型最多实例化几栋 |
-| `previewAnimation` | `'auto' \| 'on' \| 'off'` | `'auto'` | 增量预览动画开关。`auto` = `prefers-reduced-motion: reduce` 或逻辑核数 < 4 时关闭，否则开启；`off` 不插值、直接跳到目标 |
-| `autoResize` | `boolean` | `true` | 用 ResizeObserver 跟随容器尺寸 |
-| `pixelRatio` | `number` | `min(devicePixelRatio, 2)` | 渲染像素比 |
-| `keyboardTarget` | `HTMLElement \| null` | 容器 | 键盘（WASD 平移 / N 重置）事件目标 |
-| `keepCamera` | `boolean` | `true` | 加载成功后是否保留当前镜头；`false` 回默认视角 |
-| `width` | `number` | 容器宽度 | 显式渲染宽度；给出后容器 resize 不再覆盖 |
-| `height` | `number` | 容器高度 | 显式渲染高度 |
-| `theme` | `'editor' \| 'dark' \| 'light' \| 'auto'` | `'editor'` | 初始 3D 主题 |
-| `settingsPort` | `SettingsPort` | 进程内存端口 | 与编辑器共用同一份设置时注入 |
+| 参数                     | 类型                                        | 默认值                        | 说明                                                                                     |
+| ---------------------- | ----------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------- |
+| `container`            | `HTMLElement \| string`                   | 必填                         | 容器元素或 CSS 选择器；找不到时初始化失败并记录 `no-container`，后续加载返回该错误                                    |
+| `initialSettings`      | `Partial<ViewerRenderSettings>`           | —                          | 渲染设置；省略字段取默认值                                                                          |
+| `showRealModels`       | `boolean`                                 | `true`                     | 是否用真实 GLB 模型                                                                           |
+| `texturesEnabled`      | `boolean`                                 | `true`                     | 是否贴图                                                                                   |
+| `maxInstancesPerModel` | `number`                                  | `Infinity`                 | 单模型最多实例化几栋                                                                             |
+| `previewAnimation`     | `'auto' \| 'on' \| 'off'`                 | `'auto'`                   | 增量预览动画开关。`auto` = `prefers-reduced-motion: reduce` 或逻辑核数 < 4 时关闭，否则开启；`off` 不插值、直接跳到目标 |
+| `autoResize`           | `boolean`                                 | `true`                     | 用 ResizeObserver 跟随容器尺寸                                                                |
+| `pixelRatio`           | `number`                                  | `min(devicePixelRatio, 2)` | 渲染像素比                                                                                  |
+| `keyboardTarget`       | `HTMLElement \| null`                     | 容器                         | 键盘（WASD 平移 / N 重置）事件目标                                                                 |
+| `keepCamera`           | `boolean`                                 | `true`                     | 加载成功后是否保留当前镜头；`false` 回默认视角                                                            |
+| `width`                | `number`                                  | 容器宽度                       | 显式渲染宽度；给出后容器 resize 不再覆盖                                                               |
+| `height`               | `number`                                  | 容器高度                       | 显式渲染高度                                                                                 |
+| `theme`                | `'editor' \| 'dark' \| 'light' \| 'auto'` | `'editor'`                 | 初始 3D 主题                                                                               |
+| `settingsPort`         | `SettingsPort`                            | 进程内存端口                     | 与编辑器共用同一份设置时注入                                                                         |
 
 > `initialSettings` 与平铺字段等价；同时给出时**平铺字段优先**。
 > `previewAnimation` 在 `initialSettings` 中也合法，平铺字段同样优先。
@@ -918,64 +1118,64 @@ const settingsPort = {
 
 **加载 / 数据**
 
-| 方法 | 返回 | 说明 |
-| ---- | ---- | ---- |
-| `loadBlueprint(str)` | `BlueprintLoadOutcome` | 加载蓝图字符串，可多次调用切换蓝图 |
-| `loadBlueprintData(data)` | `BlueprintLoadOutcome` | 加载数据对象（总是重建） |
-| `loadBlueprintJSON(text)` | `BlueprintLoadOutcome` | 从 JSON 文本导入（`Date` / `Uint8Array` 无损还原） |
-| `getBlueprintData()` | `BlueprintData \| null` | 最近一次**成功**加载的数据 |
-| `exportBlueprintJSON()` | `string \| null` | 导出可读 JSON（2 空格缩进） |
+| 方法                        | 返回                      | 说明                                      |
+| ------------------------- | ----------------------- | --------------------------------------- |
+| `loadBlueprint(str)`      | `BlueprintLoadOutcome`  | 加载蓝图字符串，可多次调用切换蓝图                       |
+| `loadBlueprintData(data)` | `BlueprintLoadOutcome`  | 加载数据对象（总是重建）                            |
+| `loadBlueprintJSON(text)` | `BlueprintLoadOutcome`  | 从 JSON 文本导入（`Date` / `Uint8Array` 无损还原） |
+| `getBlueprintData()`      | `BlueprintData \| null` | 最近一次**成功**加载的数据                         |
+| `exportBlueprintJSON()`   | `string \| null`        | 导出可读 JSON（2 空格缩进）                       |
 
 **增量预览**
 
-| 方法 | 返回 | 说明 |
-| ---- | ---- | ---- |
-| `beginPreview(options?)` | `void` | 开始预览；会先丢弃上一次预览 |
-| `applyPreviewDelta(event)` | `boolean` | 同步摄入一条差量；绝不抛错；未预览 / 已销毁返回 `false` |
-| `commitPreview(blueprint)` | `BlueprintLoadOutcome` | 用正式蓝图串收尾（先建后换） |
-| `discardPreview()` | `void` | 丢弃预览层（失败 / 中止 / 离开页面） |
-| `previewing` | `boolean` | 只读属性：是否正在预览 |
-| `previewStats()` | `PreviewStats \| null` | 运行期统计；未预览时 `null` |
+| 方法                         | 返回                     | 说明                                |
+| -------------------------- | ---------------------- | --------------------------------- |
+| `beginPreview(options?)`   | `void`                 | 开始预览；会先丢弃上一次预览                    |
+| `applyPreviewDelta(event)` | `boolean`              | 同步摄入一条差量；绝不抛错；未预览 / 已销毁返回 `false` |
+| `commitPreview(blueprint)` | `BlueprintLoadOutcome` | 用正式蓝图串收尾（先建后换）                    |
+| `discardPreview()`         | `void`                 | 丢弃预览层（失败 / 中止 / 离开页面）             |
+| `previewing`               | `boolean`              | 只读属性：是否正在预览                       |
+| `previewStats()`           | `PreviewStats \| null` | 运行期统计；未预览时 `null`                 |
 
 **选中 / 定位 / 查询**
 
-| 方法 | 返回 | 说明 |
-| ---- | ---- | ---- |
-| `selectBuilding(index \| null)` | `BuildingLocateResult` | 选中单栋（只高亮，不动镜头） |
-| `selectedBuildings(indexes \| null)` | `BuildingsLocateResult` | 批量选中（去重、保持顺序；任一失败则整次失败） |
-| `focusBuilding(index \| null, opts?)` | `BuildingLocateResult` | 镜头居中对齐（不锁镜头）；`null` 等价 `resetCamera()` |
-| `getSelectedIndex()` | `number \| null` | 单选结果；多选时返回第一项 |
-| `getSelectedIndexes()` | `number[]` | 全部选中下标（副本） |
-| `getBuildingInfo(index)` | `ViewerQueryResult<BuildingInfoPayload>` | 建筑世界矩阵 |
-| `resetCamera()` | `void` | 重置为默认全局视角 |
+| 方法                                    | 返回                                       | 说明                                     |
+| ------------------------------------- | ---------------------------------------- | -------------------------------------- |
+| `selectBuilding(index \| null)`       | `BuildingLocateResult`                   | 选中单栋（只高亮，不动镜头）                         |
+| `selectedBuildings(indexes \| null)`  | `BuildingsLocateResult`                  | 批量选中（去重、保持顺序；任一失败则整次失败）                |
+| `focusBuilding(index \| null, opts?)` | `BuildingLocateResult`                   | 镜头居中对齐（不锁镜头）；`null` 等价 `resetCamera()` |
+| `getSelectedIndex()`                  | `number \| null`                         | 单选结果；多选时返回第一项                          |
+| `getSelectedIndexes()`                | `number[]`                               | 全部选中下标（副本）                             |
+| `getBuildingInfo(index)`              | `ViewerQueryResult<BuildingInfoPayload>` | 建筑世界矩阵                                 |
+| `resetCamera()`                       | `void`                                   | 重置为默认全局视角                              |
 
 **相机 / 尺寸 / 主题 / 导出**
 
-| 方法 | 返回 | 说明 |
-| ---- | ---- | ---- |
-| `getCamera()` | `PerspectiveCamera \| null` | 相机对象（只读用途） |
-| `getCameraVersion()` | `number` | 相机版本号；仅在真的变化的帧自增 |
-| `getCanvas()` | `HTMLCanvasElement \| null` | 渲染 canvas |
-| `setSize(w, h)` | `void` | 显式尺寸；此后忽略容器 resize |
-| `resetSize()` | `void` | 取消显式尺寸，恢复跟随容器 |
-| `setTheme(theme)` | `void` | 切换主题 |
-| `setCustomTheme(colors)` | `void` | 在当前主题上覆盖颜色 |
-| `getTheme()` | `ThemeColors \| null` | 当前主题色 |
-| `toDataURL()` | `string \| null` | 导出 base64 PNG |
-| `toBlob()` | `Promise<Blob \| null>` | 导出 Blob |
-| `setRenderSettings(patch)` | `void` | 更新渲染设置 |
-| `setCallbacks(cbs, opts?)` | `void` | 更新回调（默认整体替换，`{ merge: true }` 合并） |
-| `dispose()` | `void` | 销毁实例，释放资源（幂等） |
+| 方法                         | 返回                          | 说明                                |
+| -------------------------- | --------------------------- | --------------------------------- |
+| `getCamera()`              | `PerspectiveCamera \| null` | 相机对象（只读用途）                        |
+| `getCameraVersion()`       | `number`                    | 相机版本号；仅在真的变化的帧自增                  |
+| `getCanvas()`              | `HTMLCanvasElement \| null` | 渲染 canvas                         |
+| `setSize(w, h)`            | `void`                      | 显式尺寸；此后忽略容器 resize                |
+| `resetSize()`              | `void`                      | 取消显式尺寸，恢复跟随容器                     |
+| `setTheme(theme)`          | `void`                      | 切换主题                              |
+| `setCustomTheme(colors)`   | `void`                      | 在当前主题上覆盖颜色                        |
+| `getTheme()`               | `ThemeColors \| null`       | 当前主题色                             |
+| `toDataURL()`              | `string \| null`            | 导出 base64 PNG                     |
+| `toBlob()`                 | `Promise<Blob \| null>`     | 导出 Blob                           |
+| `setRenderSettings(patch)` | `void`                      | 更新渲染设置                            |
+| `setCallbacks(cbs, opts?)` | `void`                      | 更新回调（默认整体替换，`{ merge: true }` 合并） |
+| `dispose()`                | `void`                      | 销毁实例，释放资源（幂等）                     |
 
 ### 5.3 回调
 
-| 回调 | 类型 | 说明 |
-| ---- | ---- | ---- |
+| 回调                 | 类型                                      | 说明                                          |
+| ------------------ | --------------------------------------- | ------------------------------------------- |
 | `onBuildingSelect` | `(pick: { index; id } \| null) => void` | 点击拾取命中；`index` 是数组下标，`id` 是建筑 ID；点空为 `null` |
-| `onBuildingRemove` | `(index: number) => void` | 移除请求（仅内核开启 `contextRemove` 时；Viewer 默认不开） |
-| `onCameraChange` | `() => void` | 相机变化；仅在真的变化的帧触发，同帧最多一次 |
-| `onRebuild` | `(info: RebuildInfo) => void` | 场景重建完成（含模型懒加载触发的重建） |
-| `onError` | `(error: ViewerError) => void` | 统一错误通道；按 `code + message` 去重 |
+| `onBuildingRemove` | `(index: number) => void`               | 移除请求（仅内核开启 `contextRemove` 时；Viewer 默认不开）   |
+| `onCameraChange`   | `() => void`                            | 相机变化；仅在真的变化的帧触发，同帧最多一次                      |
+| `onRebuild`        | `(info: RebuildInfo) => void`           | 场景重建完成（含模型懒加载触发的重建）                         |
+| `onError`          | `(error: ViewerError) => void`          | 统一错误通道；按 `code + message` 去重                |
 
 `setCallbacks` 语义：
 
@@ -993,16 +1193,44 @@ type BlueprintLoadOutcome = { ok: true; value: BlueprintLoadResult } | { ok: fal
 type ViewerQueryResult<T>  = { ok: true; value: T }                | { ok: false; error: ViewerError };
 type BuildingLocateResult  = { ok: true; index: number }           | { ok: false; error: ViewerError };
 type BuildingsLocateResult = { ok: true; indexes: number[] }       | { ok: false; error: ViewerError };
+// ---- 统计列表（calculateStatsList）
+
+type StatsListErrorCode =
+    | 'parse-failed'
+    | 'invalid-accelerator'
+    | 'invalid-argument';
+
+interface StatsListError {
+    code: StatsListErrorCode;
+    message: string;
+    cause?: unknown;
+}
+
+interface StatsListItem {
+    itemId: number;
+    name: string;    // itemsMap 原文中文键，不翻译
+    count: number;   // 每分钟
+}
+
+interface StatsListValue {
+    totalPower: number;        // kW
+    demand: StatsListItem[];   // = consumed，按 count 降序
+    output: StatsListItem[];   // = produced，按 count 降序
+}
+
+type StatsListResult =
+    | { ok: true; value: StatsListValue }
+    | { ok: false; error: StatsListError };
 ```
 
-| `error.phase` | `error.code` | 含义 |
-| ---- | ---- | ---- |
-| `parse` | `invalid-start` / `header-too-short` / `checksum-missing` / `checksum-mismatch` / `buffer-overflow` / `parse-failed` | 蓝图字符串解析失败 |
-| `parse` | `json-syntax` / `json-shape` | `loadBlueprintJSON` 的语法 / 结构错误 |
-| `position` | `no-root-area` / `no-longitude` / `inconsistent-area` | 蓝图数据不自洽（用户可修） |
-| `build` | `build-failed` | 渲染构建内部失败（保留旧场景） |
-| `lifecycle` | `no-container` / `no-webgl` / `already-disposed` | 初始化 / 生命周期 |
-| `lifecycle` | `not-loaded` / `building-not-found` / `not-renderable` | 查询类失败（未加载 / 找不到 / 无可用矩阵） |
+| `error.phase` | `error.code`                                                                                                         | 含义                             |
+| ------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `parse`       | `invalid-start` / `header-too-short` / `checksum-missing` / `checksum-mismatch` / `buffer-overflow` / `parse-failed` | 蓝图字符串解析失败                      |
+| `parse`       | `json-syntax` / `json-shape`                                                                                         | `loadBlueprintJSON` 的语法 / 结构错误 |
+| `position`    | `no-root-area` / `no-longitude` / `inconsistent-area`                                                                | 蓝图数据不自洽（用户可修）                  |
+| `build`       | `build-failed`                                                                                                       | 渲染构建内部失败（保留旧场景）                |
+| `lifecycle`   | `no-container` / `no-webgl` / `already-disposed`                                                                     | 初始化 / 生命周期                     |
+| `lifecycle`   | `not-loaded` / `building-not-found` / `not-renderable`                                                               | 查询类失败（未加载 / 找不到 / 无可用矩阵）       |
 
 **失败语义**
 
@@ -1018,15 +1246,20 @@ function serializeBlueprint(data: BlueprintData): string;
 function configureAssetBaseUrl(baseUrl: string | null | undefined): void;
 function setModelCacheEnabled(enabled: boolean | null): void;
 function isModelCacheEnabled(): boolean;
+function calculateStatsList(
+    input: string | BlueprintData,
+    acceleratorItem?: 0 | 1 | 2 | 3,
+): StatsListResult;
 ```
 
-| 函数 | 失败行为 | 说明 |
-| ---- | ---- | ---- |
-| `parseBlueprint` | **抛异常** | 调用前建议 `try/catch`，或用 `viewer.loadBlueprint` |
-| `serializeBlueprint` | **抛异常** | 数据不自洽（如 `header.time` 非 `Date`）时抛 TypeError |
-| `configureAssetBaseUrl` | 不抛异常 | `null` / `undefined` / `''` 清除配置 |
-| `setModelCacheEnabled` | 不抛异常 | 全局开关；`null` 恢复 `config/persistence.config.js` 的构建配置值 |
-| `isModelCacheEnabled` | 不抛异常 | 只表示开关本身；浏览器能力另由缓存是否真正生效决定 |
+| 函数                      | 失败行为    | 说明                                                            |
+| ----------------------- | ------- | ------------------------------------------------------------- |
+| `parseBlueprint`        | **抛异常** | 调用前建议 `try/catch`，或用 `viewer.loadBlueprint`                   |
+| `serializeBlueprint`    | **抛异常** | 数据不自洽（如 `header.time` 非 `Date`）时抛 TypeError                   |
+| `configureAssetBaseUrl` | 不抛异常    | `null` / `undefined` / `''` 清除配置                              |
+| `setModelCacheEnabled`  | 不抛异常    | 全局开关；`null` 恢复 `config/persistence.config.js` 的构建配置值          |
+| `isModelCacheEnabled`   | 不抛异常    | 只表示开关本身；浏览器能力另由缓存是否真正生效决定                                     |
+| `calculateStatsList`    | 不抛异常    | 错误经 `{ ok: false, error }` 返回；算法复用 `calculateProductionStats` |
 
 ***
 
@@ -1144,6 +1377,34 @@ type BuildingLocateResult =
 type BuildingsLocateResult =
     | { ok: true; indexes: number[] }
     | { ok: false; error: ViewerError };
+// ---- 统计列表（calculateStatsList）
+
+type StatsListErrorCode =
+    | 'parse-failed'
+    | 'invalid-accelerator'
+    | 'invalid-argument';
+
+interface StatsListError {
+    code: StatsListErrorCode;
+    message: string;
+    cause?: unknown;
+}
+
+interface StatsListItem {
+    itemId: number;
+    name: string;    // itemsMap 原文中文键，不翻译
+    count: number;   // 每分钟
+}
+
+interface StatsListValue {
+    totalPower: number;        // kW
+    demand: StatsListItem[];   // = consumed，按 count 降序
+    output: StatsListItem[];   // = produced，按 count 降序
+}
+
+type StatsListResult =
+    | { ok: true; value: StatsListValue }
+    | { ok: false; error: StatsListError };
 ```
 
 **增量预览类型**（公共类型，可从 `dist-lib/index.d.ts` 直接引用；源码侧见 `src/lib/types.ts` / `src/lib/preview/types.ts`）：
@@ -1385,10 +1646,10 @@ JSON 文本 ──loadBlueprintJSON──▶ BlueprintData ──（同一条应
 1. **容器必须有尺寸**。`height: 0` 的容器会得到空画面；库不会替你撑开布局。
 2. **必须 http(s) 访问**。`file://` 下模型 / 图标会被 CORS 拦截；本地验证用 `npx serve dist-lib`。
 3. **一页一个 Viewer**。模型 / 贴图 / 图标缓存是模块级单例；多实例会重复占显存。
-4. **始终 `dispose()`**。组件卸载 / 页面销毁时调用，释放 rAF、定时器、ResizeObserver、控件、几何、材质、renderer。
-5. **按 `ok` 收窄，不靠异常**。只有 `parseBlueprint` / `serializeBlueprint` 会抛异常。
-6. **优先用 `onError` 做诊断**。错误已按 `code + message` 去重，不会刷屏。
-7. **TypeScript 宿主装 `@types/three`**。类型声明引用 `Matrix4` / `PerspectiveCamera`，运行时不需要 three。
+4. **始终** **`dispose()`**。组件卸载 / 页面销毁时调用，释放 rAF、定时器、ResizeObserver、控件、几何、材质、renderer。
+5. **按** **`ok`** **收窄，不靠异常**。只有 `parseBlueprint` / `serializeBlueprint` 会抛异常。
+6. **优先用** **`onError`** **做诊断**。错误已按 `code + message` 去重，不会刷屏。
+7. **TypeScript 宿主装** **`@types/three`**。类型声明引用 `Matrix4` / `PerspectiveCamera`，运行时不需要 three。
 
 ### 8.2 加载与状态
 
@@ -1407,7 +1668,7 @@ JSON 文本 ──loadBlueprintJSON──▶ BlueprintData ──（同一条应
    预览层本身就是「逻辑立即生效 + 视觉持续收敛」。
 3. **不要逐条播放动画**：事件到达速度（≈50 条/秒）远高于可感知动画时长；
    逐条播放会把总时长拖到分钟级。
-4. **`commitPreview` 只收蓝图字符串**；如果后端给的是 `BlueprintData`，先 `serializeBlueprint`。
+4. **`commitPreview`** **只收蓝图字符串**；如果后端给的是 `BlueprintData`，先 `serializeBlueprint`。
 5. **预览对象不可交互**：点击拾取 / 选中 / 聚焦只作用于正式场景；预览期间若需要交互，
    应等 `commitPreview` 完成。
 6. **不支持回退**：需要回看较早状态时，`discardPreview` + `beginPreview` + 从 0 重放。
@@ -1513,25 +1774,26 @@ console.log(m.serializeBlueprint(d).length === s.length);
 
 ### 10.2 新增功能与既有功能的关联
 
-| 新增能力 | 依赖 / 关联的既有能力 | 关系说明 |
-| ---- | ---- | ---- |
-| 增量预览 | `RenderCore` 场景、`calcBuildingTrans`、GLB / 池化 | 预览是独立 `Group`，不进入正式 BVH；`commitPreview` 才切到正式场景 |
-| 建筑多选 | 单选、BVH 选择盒 | 复用同一套选择盒池，按需扩容；单选是「只含一个元素的多选」 |
-| `focusBuilding` | 相机控件、BVH | 只移动相机，不锁目标点；与 `selectBuilding` 可一条调用组合 |
-| JSON 导入导出 | `loadBlueprintData` / `getBlueprintData` | JSON 入口只是在同一应用链路上多一步类型还原 / 序列化 |
-| editor 主题 | `RenderCore.setTheme`、天光/星空 | 新默认主题；`dark` / `light` 保持 v1 纯色板 |
-| 外置 GLB / KTX2 | `buildBuildings`、`assetResolver` | 库构建用字符串拼接资产 URL；编辑器构建保留 webpack `require.context`，行为不变 |
-| `previewAnimation` | `settingsPort` / 渲染设置 | 与既有设置通道共用，宿主零新增机制即可运行时开关 |
-| `describeBuild` | `BuildStats`、BVH | 把构建产物转成可比对快照，用于回归定位 |
+| 新增能力               | 依赖 / 关联的既有能力                                 | 关系说明                                                   |
+| ------------------ | -------------------------------------------- | ------------------------------------------------------ |
+| 增量预览               | `RenderCore` 场景、`calcBuildingTrans`、GLB / 池化 | 预览是独立 `Group`，不进入正式 BVH；`commitPreview` 才切到正式场景        |
+| 建筑多选               | 单选、BVH 选择盒                                   | 复用同一套选择盒池，按需扩容；单选是「只含一个元素的多选」                          |
+| `focusBuilding`    | 相机控件、BVH                                     | 只移动相机，不锁目标点；与 `selectBuilding` 可一条调用组合                 |
+| JSON 导入导出          | `loadBlueprintData` / `getBlueprintData`     | JSON 入口只是在同一应用链路上多一步类型还原 / 序列化                         |
+| editor 主题          | `RenderCore.setTheme`、天光/星空                  | 新默认主题；`dark` / `light` 保持 v1 纯色板                       |
+| 外置 GLB / KTX2      | `buildBuildings`、`assetResolver`             | 库构建用字符串拼接资产 URL；编辑器构建保留 webpack `require.context`，行为不变 |
+| `previewAnimation` | `settingsPort` / 渲染设置                        | 与既有设置通道共用，宿主零新增机制即可运行时开关                               |
+| `describeBuild`    | `BuildStats`、BVH                             | 把构建产物转成可比对快照，用于回归定位                                    |
 
 ### 10.3 迁移提示
 
-| 需求 | 旧做法 | 当前推荐 |
-| ---- | ---- | ---- |
-| 加载蓝图 | 自己解析后塞进渲染器 | `loadBlueprint` / `loadBlueprintData` / `loadBlueprintJSON` |
-| 选中建筑 | 直接操作场景对象 | `selectBuilding` / `selectedBuildings`，统一走门面 |
-| 定位镜头 | 自己算相机位置 | `focusBuilding(index, { distance, select })` |
-| 生成过程可视化 | 逐条动画 / 轮询全量 | `beginPreview` + `applyPreviewDelta` + `commitPreview` |
-| 跨进程数据 | 手工还原 `Date` / `Uint8Array` | `loadBlueprintJSON` / `exportBlueprintJSON` |
-| 低端机降级 | 重新出包关闭动画 | `previewAnimation: 'off'` |
-| 资产路径 | 写死 CDN / publicPath | `configureAssetBaseUrl` + 自动探测 |
+| 需求      | 旧做法                        | 当前推荐                                                        |
+| ------- | -------------------------- | ----------------------------------------------------------- |
+| 加载蓝图    | 自己解析后塞进渲染器                 | `loadBlueprint` / `loadBlueprintData` / `loadBlueprintJSON` |
+| 选中建筑    | 直接操作场景对象                   | `selectBuilding` / `selectedBuildings`，统一走门面                |
+| 定位镜头    | 自己算相机位置                    | `focusBuilding(index, { distance, select })`                |
+| 生成过程可视化 | 逐条动画 / 轮询全量                | `beginPreview` + `applyPreviewDelta` + `commitPreview`      |
+| 跨进程数据   | 手工还原 `Date` / `Uint8Array` | `loadBlueprintJSON` / `exportBlueprintJSON`                 |
+| 低端机降级   | 重新出包关闭动画                   | `previewAnimation: 'off'`                                   |
+| 资产路径    | 写死 CDN / publicPath        | `configureAssetBaseUrl` + 自动探测                              |
+

@@ -7,7 +7,8 @@
  * 导出面**刻意收窄**（只保留无头命令式 API，不含任何写死 UI）：
  * - `BlueprintViewer`：类实例控制器；
  * - `parseBlueprint` / `serializeBlueprint`：蓝图字符串 ↔ 数据对象；
- * - `configureAssetBaseUrl`：资产根地址（UMD 场景默认自动探测，ESM 场景请显式配置）。
+ * - `configureAssetBaseUrl`：资产根地址（UMD 场景默认自动探测，ESM 场景请显式配置）；
+ * - `calculateStatsList`：蓝图统计列表（总耗电 / 需求 / 输出），复用 `@/blueprint/stats` 算法。
  *
  * `describeBuild` 等诊断能力仍留在 `@/lib/core/...` 源码路径，不进入发布面。
  */
@@ -31,6 +32,10 @@ export {
     isModelCacheEnabled,
     setModelCacheEnabled,
 } from "@/models/modelCacheConfig";
+
+// 统计列表：输入蓝图字符串或 BlueprintData + 增产剂等级（0/1/2/3），返回耗电/需求/输出。
+// 算法复用 @/blueprint/stats 的 calculateProductionStats，不改其一行。
+export { calculateStatsList } from "./statsList";
 
 export type {
     ViewerOptions,
@@ -70,3 +75,12 @@ export type {
     BlueprintBuilding,
     BlueprintData,
 } from "@/blueprint/parser";
+
+// 统计列表的公开类型（值导出见上方 calculateStatsList）
+export type {
+    StatsListResult,
+    StatsListValue,
+    StatsListItem,
+    StatsListError,
+    StatsListErrorCode,
+} from "./types";

@@ -7,7 +7,7 @@
  *
  * 对应运行时导出（`src/lib/index.ts`）：
  *   BlueprintViewer / parseBlueprint / serializeBlueprint / configureAssetBaseUrl /
- *   setModelCacheEnabled / isModelCacheEnabled
+ *   setModelCacheEnabled / isModelCacheEnabled / calculateStatsList
  *
  * 本文件是**纯模块**声明，不写 `export as namespace`：
  * 产出的 ESM 里宿主按 `import('./dsp-blueprint-editor.esm.js')` 使用，
@@ -543,3 +543,65 @@ export function setModelCacheEnabled(enabled: boolean | null): void;
 
 /** 持久化总开关当前是否打开（不含「浏览器是否支持」的判断） */
 export function isModelCacheEnabled(): boolean;
+
+// ---------------------------------------------------------------- 统计列表
+
+/**
+ * 统计列表的错误码。
+ *
+ * 与 `ViewerErrorCode` **刻意分离**：3D 生命周期错误（`no-container` 等）
+ * 与统计列表的「入参/解析」错误语义不同，宿主不应混淆。
+ */
+export type StatsListErrorCode =
+    | 'parse-failed'        // 蓝图字符串无法被 parseBlueprint 解析
+    | 'invalid-accelerator' // acceleratorItem 不是 0/1/2/3
+    | 'invalid-argument';   // input 既非 string 也非 BlueprintData，或数据形状不合法
+
+export interface StatsListError {
+    code: StatsListErrorCode;
+    message: string;
+    cause?: unknown;
+}
+
+/** 统计列表中的一条物品（name 取 itemsMap 的原文中文键、不翻译） */
+export interface StatsListItem {
+    itemId: number;
+    name: string;
+    /** 每分钟数量（与 calculateProductionStats 的 produced/consumed 同口径） */
+    count: number;
+}
+
+export interface StatsListValue {
+    /** 总功耗，kW（同 ProductionStats.totalPower） */
+    totalPower: number;
+    /** 需求（= ItemStats.consumed），按 count 降序 */
+    demand: StatsListItem[];
+    /** 输出（= ItemStats.produced），按 count 降序 */
+    output: StatsListItem[];
+}
+
+/** 统计列表的公开返回（与 ViewerQueryResult 同构，便于宿主统一按 ok 收窄） */
+export type StatsListResult =
+    | { ok: true; value: StatsListValue }
+    | { ok: false; error: StatsListError };
+
+/**
+ * 蓝图统计列表：总耗电 / 需求 / 输出。
+ *
+ * 算法完全复用编辑器网页端的 `calculateProductionStats`（源码 `@/blueprint/stats`），
+ * 这里只做「入参校验 + 结构转换 + 补物品名」：
+ * - `demand` = `ItemStats.consumed`，`output` = `ItemStats.produced`；
+ * - 同一 `itemId` 既产又耗时**两边各出现一次**，保真；`net` 不导出，宿主需要净量自行 `output - demand`；
+ * - `name` 取 `itemsMap.get(itemId)?.name`（原文中文键、不翻译），查不到时 `"unknown"`；
+ * - `totalPower` 单位 kW；`count` 单位「每分钟」；
+ * - 字符串入参会先 `trim()` 再解析，与 `viewer.loadBlueprint` 一致。
+ *
+ * @param input 蓝图字符串（内部 `parseBlueprint`）或 `BlueprintData` 对象；
+ *              对象形态接受最小 `{ buildings: [...] }`（与 `calculateProductionStats` 一致）
+ * @param acceleratorItem 增产剂等级：`0` 无 / `1` 一级 / `2` 二级 / `3` 三级；省略等价 `0`
+ * @returns `{ ok: true, value }` 或 `{ ok: false, error }`；**永不抛错**
+ */
+export function calculateStatsList(
+    input: string | BlueprintData,
+    acceleratorItem?: 0 | 1 | 2 | 3,
+): StatsListResult;

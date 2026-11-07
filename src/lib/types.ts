@@ -258,3 +258,44 @@ export interface ViewerError {
 export type BlueprintLoadOutcome =
     | { ok: true; value: BlueprintLoadResult }
     | { ok: false; error: ViewerError };
+
+
+// ---- 统计列表（calculateStatsList） ----
+// 与 @/blueprint/stats 的 ItemStats / ProductionStats 的关系：
+// - 算法完全复用 calculateProductionStats，这里只做「入参校验 + 结构转换 + 补物品名」；
+// - ItemStats 的 produced/consumed 分别在下面拆成 output/demand（同一 itemId 两边各出现一次，保真）；
+// - ItemStats 的 net 字段不导出，宿主需要净量自行 output - demand。
+
+/** 统计列表的错误码（与 ViewerErrorCode 分离，避免污染 3D 生命周期语义） */
+export type StatsListErrorCode =
+    | "parse-failed"        // 蓝图字符串无法被 fromStr 解析
+    | "invalid-accelerator" // acceleratorItem 不是 0/1/2/3
+    | "invalid-argument";   // input 既非 string 也非 BlueprintData，或数据形状不合法
+
+export interface StatsListError {
+    code: StatsListErrorCode;
+    message: string;
+    cause?: unknown;
+}
+
+/** 统计列表中的一条物品（name 取 itemsMap.get(itemId).name，原文中文键、不翻译） */
+export interface StatsListItem {
+    itemId: number;
+    name: string;
+    /** 每分钟数量（与 calculateProductionStats 的 produced/consumed 同口径） */
+    count: number;
+}
+
+export interface StatsListValue {
+    /** 总功耗，kW（同 ProductionStats.totalPower） */
+    totalPower: number;
+    /** 需求（= ItemStats.consumed），按 count 降序 */
+    demand: StatsListItem[];
+    /** 输出（= ItemStats.produced），按 count 降序 */
+    output: StatsListItem[];
+}
+
+/** 统计列表的公开返回（与 ViewerQueryResult 同构，便于宿主统一按 ok 收窄） */
+export type StatsListResult =
+    | { ok: true; value: StatsListValue }
+    | { ok: false; error: StatsListError };

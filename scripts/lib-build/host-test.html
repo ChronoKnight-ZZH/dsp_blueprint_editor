@@ -161,6 +161,20 @@
     </fieldset>
 
     <fieldset>
+        <legend>统计列表 calculateStatsList</legend>
+        <div class="rows">
+            <label for="cAccel">增产剂</label>
+            <input id="cAccel" type="number" min="0" max="3" step="1" value="0" />
+            <button id="cStatsInput" type="button">calculateStatsList(输入)</button>
+            <button id="cStatsData" type="button">calculateStatsList(Data)</button>
+        </div>
+        <div class="rows">
+            <button id="cStatsBadInput" type="button">calculateStatsList(null)</button>
+            <button id="cStatsBadAccel" type="button">calculateStatsList(输入, 3)</button>
+        </div>
+    </fieldset>
+
+    <fieldset>
         <legend>选中 / 定位 / 信息</legend>
         <div class="rows">
             <label for="cIndex">建筑下标</label>
@@ -457,7 +471,8 @@
         check('导出 parseBlueprint', typeof api.parseBlueprint === 'function', '');
         check('导出 serializeBlueprint', typeof api.serializeBlueprint === 'function', '');
         check('导出 configureAssetBaseUrl', typeof api.configureAssetBaseUrl === 'function', '');
-        check('发布面不含 describeBuild（无头黑盒，只留 4 个入口）',
+        check('导出 calculateStatsList', typeof api.calculateStatsList === 'function', '');
+        check('发布面不含 describeBuild（无头黑盒，只留函数入口）',
             api.describeBuild === undefined, 'describeBuild=' + String(api.describeBuild));
         check('HTML 里没有任何库自带按钮（只在本页脚本中创建）',
             document.querySelectorAll('#viewer button').length === 0, '容器内 button 数=0');
@@ -524,6 +539,44 @@
             catch (e) {
                 check('serializeBlueprint 往返一致', false, String(e));
             }
+
+            // ---- 4.1 统计列表：字符串 / 数据对象两种入参，以及错误通道 ----
+            function sortedDesc(list) {
+                for (var i = 1; i < list.length; i++) {
+                    if (list[i - 1].count < list[i].count)
+                        return false;
+                }
+                return true;
+            }
+
+            var statsText = api.calculateStatsList(text.trim());
+            check('calculateStatsList(样本字符串) 成功', statsText.ok,
+                statsText.ok
+                    ? 'power=' + statsText.value.totalPower.toFixed(1) + ' kW，需求 '
+                      + statsText.value.demand.length + ' 项，输出 '
+                      + statsText.value.output.length + ' 项'
+                    : statsText.error.code + ': ' + statsText.error.message);
+
+            var statsData = api.calculateStatsList(data);
+            check('calculateStatsList(BlueprintData) 与字符串入参一致',
+                statsText.ok && statsData.ok
+                && statsData.value.totalPower === statsText.value.totalPower
+                && statsData.value.demand.length === statsText.value.demand.length
+                && statsData.value.output.length === statsText.value.output.length,
+                statsData.ok
+                    ? 'power=' + statsData.value.totalPower.toFixed(1) + ' kW，需求 '
+                      + statsData.value.demand.length + ' 项，输出 '
+                      + statsData.value.output.length + ' 项'
+                    : statsData.error.code);
+
+            check('demand / output 按 count 降序',
+                statsText.ok && sortedDesc(statsText.value.demand) && sortedDesc(statsText.value.output),
+                statsText.ok ? '两个列表均按每分钟数量降序' : '统计失败，跳过');
+
+            var statsBadAccel = api.calculateStatsList(text.trim(), 5);
+            check('calculateStatsList 非法增产剂 → invalid-accelerator',
+                !statsBadAccel.ok && statsBadAccel.error.code === 'invalid-accelerator',
+                statsBadAccel.ok ? '意外成功' : statsBadAccel.error.code);
 
             // ---- 5. 类实例 API：加载蓝图 ----
             var outcome = viewer.loadBlueprint(text.trim());
@@ -677,7 +730,10 @@
             log('✓ ' + label + ' → ok' + (describe === undefined ? '' : '｜' + describe(value)));
             return;
         }
-        log('✗ ' + label + ' → ' + (out.error ? out.error.code + '（' + out.error.phase + '）：' + out.error.message : '未知错误'));
+        log('✗ ' + label + ' → ' + (out.error
+            // 统计列表的 StatsListError 没有 phase 字段，避免打出「（undefined）」
+            ? out.error.code + (out.error.phase ? '（' + out.error.phase + '）' : '') + '：' + out.error.message
+            : '未知错误'));
     }
 
     async function loadText() {
@@ -741,6 +797,66 @@
         if (v === null) return;
         var json = v.exportBlueprintJSON();
         log(json === null ? '· exportBlueprintJSON() → null' : '✓ exportBlueprintJSON()｜' + json.length + ' 字符');
+    });
+
+    // ---- 统计列表 ----
+    /** 增产剂等级：直接取输入框，越界值原样传给库（用来演示 invalid-accelerator） */
+    function accelerator() {
+        var n = parseInt(document.getElementById('cAccel').value, 10);
+        return Number.isFinite(n) ? n : 0;
+    }
+
+    function describeStats(value) {
+        return 'power=' + value.totalPower.toFixed(1) + ' kW，需求 ' + value.demand.length
+            + ' 项，输出 ' + value.output.length + ' 项';
+    }
+
+    function logStatsList(label, list) {
+        if (list.length === 0) {
+            log('· ' + label + '：空');
+            return;
+        }
+        log('· ' + label + ' Top' + Math.min(5, list.length) + '：'
+            + list.slice(0, 5).map(function (it) {
+                return it.name + '×' + it.count.toFixed(1) + '/min（id=' + it.itemId + '）';
+            }).join('，'));
+    }
+
+    on('cStatsInput', async function () {
+        var text = await loadText();
+        var level = accelerator();
+        var out = DSPBlueprintEditor.calculateStatsList(text, level);
+        report('calculateStatsList(输入, ' + level + ')', out, describeStats);
+        if (out.ok) {
+            logStatsList('需求', out.value.demand);
+            logStatsList('输出', out.value.output);
+        }
+    });
+
+    on('cStatsData', function () {
+        var v = viewer();
+        if (v === null) return;
+        var data = v.getBlueprintData();
+        if (data === null) {
+            log('· 尚未加载蓝图：先点「loadBlueprint(样本)」或「loadBlueprint(输入)」');
+            return;
+        }
+        var level = accelerator();
+        var out = DSPBlueprintEditor.calculateStatsList(data, level);
+        report('calculateStatsList(Data, ' + level + ')', out, describeStats);
+        if (out.ok) {
+            logStatsList('需求', out.value.demand);
+            logStatsList('输出', out.value.output);
+        }
+    });
+
+    on('cStatsBadInput', function () {
+        report('calculateStatsList(null)', DSPBlueprintEditor.calculateStatsList(null), describeStats);
+    });
+
+    on('cStatsBadAccel', async function () {
+        var text = await loadText();
+        report('calculateStatsList(输入, 3)', DSPBlueprintEditor.calculateStatsList(text, 3), describeStats);
     });
 
     // ---- 选中 / 定位 / 信息 ----
