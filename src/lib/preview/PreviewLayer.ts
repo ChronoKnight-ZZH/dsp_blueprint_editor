@@ -19,7 +19,7 @@
  * - 坐标系切换 → 硬重投影（不插值），因为那是语义跳变不是运动。
  */
 
-import { Group, InstancedBufferAttribute, Matrix4, Vector3 } from "three";
+import { Group, Matrix4, Vector3 } from "three";
 import type { Object3D } from "three";
 import { isBelt, isInserter } from "@/data/items";
 import { INSERTER_HEIGHT } from "@/lib/core/geometryHelpers";
@@ -378,7 +378,6 @@ export class PreviewLayer {
         const spec = buildPoolSpec(kind, modelIndex, INITIAL_CAPACITY[kind], null);
         const pool = new SlotPool(spec);
         for (const mesh of pool.meshes) this.group.add(mesh);
-        if (pool.cargoMesh !== undefined) this.group.add(pool.cargoMesh);
         const entry: PoolEntry = {
             key,
             kind,
@@ -419,17 +418,6 @@ export class PreviewLayer {
             next.curOpacity[i] = old.curOpacity[i];
             next.tgtOpacity[i] = old.tgtOpacity[i];
             next.bornAt[i] = old.bornAt[i];
-            if (old.cargoMesh !== undefined && next.cargoMesh !== undefined) {
-                const oldDist = old.cargoMesh.geometry
-                    .cargoDistance as InstancedBufferAttribute;
-                const nextDist = next.cargoMesh.geometry
-                    .cargoDistance as InstancedBufferAttribute;
-                (nextDist.array as Float32Array)[i] =
-                    (oldDist.array as Float32Array)[i];
-                // getMatrixAt 写入 target 矩阵，返回 void —— 先读再写
-                old.cargoMesh.getMatrixAt(i, _m1);
-                next.cargoMesh.setMatrixAt(i, _m1);
-            }
             if (old.state[i] !== SLOT_FREE) next.moving.add(i);
         }
         next.highWater = Math.min(old.highWater, capacity);
@@ -487,10 +475,8 @@ export class PreviewLayer {
     private swapPool(entry: PoolEntry, next: SlotPool): void {
         const old = entry.pool;
         for (const mesh of old.meshes) mesh.removeFromParent();
-        if (old.cargoMesh !== undefined) old.cargoMesh.removeFromParent();
         old.dispose();
         for (const mesh of next.meshes) this.group.add(mesh);
-        if (next.cargoMesh !== undefined) this.group.add(next.cargoMesh);
         entry.pool = next;
     }
 
@@ -562,11 +548,6 @@ export class PreviewLayer {
                 pool.flushDirty();
             }
             pool.syncCount();
-            // 货物动画：与正式场景 RenderCore 同公式，cycle=1000ms
-            if (pool.cargoMesh !== undefined) {
-                pool.cargoMesh.cargoMove =
-                    this.animate ? (now % 1000) / 1000 : 0;
-            }
         }
     }
 
@@ -650,10 +631,10 @@ export class PreviewLayer {
         }
     }
 
-    /** 传送带连线：从本槽指向输出对象的**当前视觉位置**；同时写货物动画 */
+    /** 传送带连线：从本槽指向输出对象的**当前视觉位置** */
     private writeBeltLink(pool: SlotPool, slot: number): void {
         const linkMesh = pool.meshes[1];
-        const cargo = pool.cargoMesh;
+        if (linkMesh === undefined) return;
         const selfId = pool.ids[slot];
         const self = selfId === null ? undefined : this.objects.get(selfId);
         const targetId = self?.outputId ?? null;
@@ -663,7 +644,6 @@ export class PreviewLayer {
             target.entry.pool.state[target.slot] === SLOT_FREE
         ) {
             linkMesh.setMatrixAt(slot, pool.hidden);
-            if (cargo !== undefined) cargo.setMatrixAt(slot, pool.hidden);
             return;
         }
         const targetPool = target.entry.pool;
@@ -680,7 +660,6 @@ export class PreviewLayer {
         const len = _p1.distanceTo(_p2);
         if (len < 1e-3 || len > 8) {
             linkMesh.setMatrixAt(slot, pool.hidden);
-            if (cargo !== undefined) cargo.setMatrixAt(slot, pool.hidden);
             return;
         }
         _m2.identity().lookAt(_p1, _p2, _p1);
@@ -688,19 +667,10 @@ export class PreviewLayer {
         _m2.multiply(_m1.makeScale(1, 1, len));
         _m2.multiply(_m1.makeTranslation(0, 0.03, -0.5));
         linkMesh.setMatrixAt(slot, _m2);
-        if (cargo !== undefined) {
-            // 货物矩阵同连线，沿 Z 轴按 cargoMove 平移（shader 注入）
-            cargo.setMatrixAt(slot, _m2);
-            const dist = cargo.geometry.cargoDistance as InstancedBufferAttribute;
-            (dist.array as Float32Array)[slot] = len;
-            dist.addUpdateRange(slot, 1);
-            dist.needsUpdate = true;
-        }
     }
 
     private writeInserter(pool: SlotPool, slot: number): void {
         const areaIndex = pool.areaIndex[slot];
-        const cargo = pool.cargoMesh;
         this.projector.writeMatrix(_m1, pool.curX[slot], pool.curY[slot], pool.curZ[slot], 0, areaIndex);
         this.projector.writeMatrix(_m2, pool.curX2[slot], pool.curY2[slot], pool.curZ2[slot], 0, areaIndex);
         _p1.setFromMatrixPosition(_m1);
@@ -716,13 +686,6 @@ export class PreviewLayer {
         _m2.multiply(_m1.makeScale(1, 1, len));
         _m2.multiply(_m1.makeTranslation(0, 0, -0.5));
         pool.meshes[0].setMatrixAt(slot, _m2);
-        if (cargo !== undefined) {
-            cargo.setMatrixAt(slot, _m2);
-            const dist = cargo.geometry.cargoDistance as InstancedBufferAttribute;
-            (dist.array as Float32Array)[slot] = len;
-            dist.addUpdateRange(slot, 1);
-            dist.needsUpdate = true;
-        }
     }
 
     /** 释放全部 GPU 资源并从场景移除 */

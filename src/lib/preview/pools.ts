@@ -29,7 +29,6 @@ import {
     resolveBuildingModel,
 } from "@/models/buildingModel";
 import { cloneFadeMaterial } from "./materials";
-import { Cargos } from "@/cargos";
 
 /** 槽的状态机：空 / 存活 / 正在淡出（淡出结束才真正释放） */
 export const SLOT_FREE = 0;
@@ -124,10 +123,6 @@ export class SlotPool {
     readonly ids: (string | null)[];
 
     readonly free: number[] = [];
-
-    /** 传送带/分拣器的货物动画网格（材质 shader 里 `transformed.z -= cargoMove * cargoDistance`）。
-     *  货物移动距离直接写进 `cargoMesh.geometry.cargoDistance.array`（Float32Array）。 */
-    cargoMesh?: Cargos;
     highWater = 0;
     alive = 0;
     readonly moving = new Set<number>();
@@ -240,14 +235,6 @@ export class SlotPool {
         this.bornAt = new Float32Array(this.capacity);
         this.state = new Uint8Array(this.capacity);
         this.ids = new Array<string | null>(this.capacity).fill(null);
-        // 传送带 / 分拣器有货物动画（正式场景 Cargos 实例）
-        if (this.kind === "belt" || this.kind === "inserter") {
-            const cargo = new Cargos(this.capacity);
-            cargo.count = 0;
-            cargo.visible = false;
-            cargo.frustumCulled = false;
-            this.cargoMesh = cargo;
-        }
         // 逆序入栈 → alloc 从 0 开始，槽号连续
         for (let i = this.capacity - 1; i >= 0; i--) this.free.push(i);
     }
@@ -272,13 +259,6 @@ export class SlotPool {
         this.curOpacity[slot] = 0;
         this.tgtOpacity[slot] = 0;
         (this.opacity.array as Float32Array)[slot] = 0;
-        // 货物槽位清零（不可见）
-        if (this.cargoMesh !== undefined) {
-            const dist = this.cargoMesh.geometry
-                .cargoDistance as InstancedBufferAttribute;
-            (dist.array as Float32Array)[slot] = 0;
-            this.cargoMesh.setMatrixAt(slot, this.hidden);
-        }
         this.alive--;
         this.moving.delete(slot);
         this.free.push(slot);
@@ -303,14 +283,6 @@ export class SlotPool {
         }
         this.opacity.addUpdateRange(start, count);
         this.opacity.needsUpdate = true;
-        if (this.cargoMesh !== undefined) {
-            this.cargoMesh.instanceMatrix.addUpdateRange(start * 16, count * 16);
-            this.cargoMesh.instanceMatrix.needsUpdate = true;
-            const dist = this.cargoMesh.geometry
-                .cargoDistance as InstancedBufferAttribute;
-            dist.addUpdateRange(start, count);
-            dist.needsUpdate = true;
-        }
     }
 
     /** 更新 `mesh.count` 与可见性（每帧一次，代价极低） */
@@ -320,10 +292,6 @@ export class SlotPool {
         for (const mesh of this.meshes) {
             mesh.count = count;
             mesh.visible = visible;
-        }
-        if (this.cargoMesh !== undefined) {
-            this.cargoMesh.count = count;
-            this.cargoMesh.visible = visible;
         }
     }
 
@@ -335,15 +303,6 @@ export class SlotPool {
             if (Array.isArray(material)) {
                 for (const m of material) m.dispose();
             } else material.dispose();
-        }
-        if (this.cargoMesh !== undefined) {
-            this.cargoMesh.removeFromParent();
-            this.cargoMesh.dispose();
-            this.cargoMesh.geometry.dispose();
-            const mat = this.cargoMesh.material;
-            if (Array.isArray(mat)) for (const m of mat) m.dispose();
-            else mat.dispose();
-            this.cargoMesh = undefined;
         }
         this.meshes.length = 0;
         this.pre.length = 0;
