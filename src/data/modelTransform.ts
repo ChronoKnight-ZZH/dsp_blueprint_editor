@@ -116,7 +116,7 @@ export const modelTransform: Readonly<Record<number, ModelTransform>> = {
 
     // ── 电力 ─────────────────────────────────────────────────────────
     44: { x: 0, y: 0, z: -0.1, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 电力感应塔 · tesla-coil.glb
-    71: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 0.5 }, // 无线输电塔 · charging-pole.glb
+    71: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 无线输电塔 · charging-pole.glb
     68: { x: 0, y: 0, z: -13.5, pitch: 0, yaw: 0, roll: 0, scale: 1.8 }, // 卫星配电站 · orbital-substation.glb
     53: { x: 0, y: 0, z: -3, pitch: 0, yaw: 0, roll: 0, scale: 2 }, // 风力涡轮机 · wind-turbine.glb
     54: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 火力发电厂 · fuel-plant.glb
