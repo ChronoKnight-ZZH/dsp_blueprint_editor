@@ -40,6 +40,7 @@ import { AllBuildings } from "./AllBuildings";
 import { PreviewLayer } from "../preview/PreviewLayer";
 import { resolvePreviewAnimation } from "../preview/mode";
 import type {
+    PreviewAlignedSnapshot,
     PreviewBeginOptions,
     PreviewDeltaEvent,
     PreviewStats,
@@ -89,6 +90,16 @@ export interface RenderCoreOptions {
 }
 
 export type RebuildReason = "load" | "settings" | "data" | "models";
+
+/**
+ * `beginPreview` 的扩展选项。
+ *
+ * `clearFormalScene: true` 时先把当前正式场景（bundle + data + 选中）清空，
+ * 快照由宿主 / Go 端负责；失败恢复走宿主侧 `loadBlueprint(snapshot)`。
+ */
+export interface BeginPreviewOptions extends PreviewBeginOptions {
+    clearFormalScene?: boolean;
+}
 
 /**
  * 带上阶段的内部错误。
@@ -388,17 +399,34 @@ export class RenderCore {
     /**
      * 开始一次增量预览（对应宿主 `generateFactory` 之前/同时调用）。
      *
-     * 语义（对齐指南 §2 的时序）：先 `beginPreview`，再提交生成请求；
-     * 失败/中止走 `discardPreview`，成功则用 `result.blueprint` 走全量 `setBlueprintData`。
-     * 预览层是**独立临时层**，与正式场景（`bundle`）互不影响。
+     * `clearFormalScene: true` 会先把正式场景 bundle 与 `data` 清空并释放，
+     * 预览期间 `getBlueprintData()` 返回 null、拾取返回 null；宿主需自行保存
+     * 蓝图快照，失败时通过 `loadBlueprint(snapshot)` 恢复。
      */
-    beginPreview(options?: PreviewBeginOptions): void {
+    beginPreview(options?: BeginPreviewOptions): void {
         this.assertAlive();
+        if (options?.clearFormalScene === true) this.clearFormalScene();
         this.discardPreview();
         const layer = new PreviewLayer(options);
-        layer.setAnimate(resolvePreviewAnimation(this.settings.previewAnimation) === "on");
+        layer.setAnimate(
+            resolvePreviewAnimation(this.settings.previewAnimation) === "on"
+        );
         this.scene.add(layer.object3d);
         this.preview = layer;
+    }
+
+    /**
+     * 清空正式场景（视觉移除 + dispose + 数据置空），供对齐式提交前使用。
+     * 图标图集是跨重建复用的，这里不释放。
+     */
+    private clearFormalScene(): void {
+        if (this.bundle !== null) {
+            this.scene.remove(this.bundle.buildings);
+            this.bundle.buildings.dispose();
+            this.bundle = null;
+        }
+        this.data = null;
+        this.clearSelection();
     }
 
     /**
@@ -427,6 +455,76 @@ export class RenderCore {
     /** 预览运行期统计（诊断用；未开始时为 null） */
     getPreviewStats(): PreviewStats | null {
         return this.preview?.stats ?? null;
+    }
+
+    /** 导出预览层收敛后的骨架快照（未预览 / 已销毁时为 null） */
+    exportPreviewSnapshot(): PreviewAlignedSnapshot | null {
+        return this.preview?.exportAlignedSnapshot() ?? null;
+    }
+
+    /**
+     * 用预览层收敛矩阵构建正式场景（**跳过 `findPosForAreas`**），先建后换。
+     *
+     * 仅支持 `blueprint-area-local-v1`；其他坐标语义抛 `RenderPhaseError('position')`。
+     * 快照缺任一建筑矩阵抛 `RenderPhaseError('build')`。
+     * 成功时 `this.data = data` 并原子替换 bundle；失败保留旧场景。
+     */
+    alignedCommit(data: BlueprintData, snapshot: PreviewAlignedSnapshot): void {
+        this.assertAlive();
+        if (snapshot.coordinateSystem !== "blueprint-area-local-v1")
+            throw new RenderPhaseError(
+                "position",
+                new Error(
+                    `alignedCommit 仅支持 blueprint-area-local-v1，实际 ${String(
+                        snapshot.coordinateSystem
+                    )}`
+                )
+            );
+
+        const started = Date.now();
+        const transforms: Matrix4[][] = [];
+        for (const b of data.buildings) {
+            const obj = snapshot.objects.get(b.index);
+            if (obj === undefined)
+                throw new RenderPhaseError(
+                    "build",
+                    new Error(`预览快照缺少建筑 ${b.index} 的矩阵`)
+                );
+            transforms.push([obj.matrix, obj.matrix2]);
+        }
+
+        try {
+            const built = buildBuildings(transforms, data.buildings, {
+                settings: this.settings,
+                textureSink: this.renderer,
+                iconTexture: this.iconTexture,
+                textureSettings: this.textureSettingsProvider(),
+                textStyle: {
+                    fill: this.theme.textFill,
+                    stroke: this.theme.textStroke,
+                },
+                reapplyMaterials: false,
+            });
+            const bvhResult = buildBVH(transforms, data.buildings);
+
+            this.data = data;
+            this.replaceBundle({
+                buildings: built.buildings,
+                bvh: bvhResult.bvh,
+                transforms,
+                unknownModelIndexes: bvhResult.unknownModelIndexes,
+            });
+            this.clearSelection();
+            this.callbacks.onRebuild?.({
+                reason: "load",
+                buildingCount: data.buildings.length,
+                unknownModelIndexes: bvhResult.unknownModelIndexes,
+                durationMs: Date.now() - started,
+            });
+        } catch (e) {
+            if (e instanceof RenderPhaseError) throw e;
+            throw new RenderPhaseError("build", e);
+        }
     }
 
     setRenderSettings(patch: Partial<ViewerRenderSettings>): void {

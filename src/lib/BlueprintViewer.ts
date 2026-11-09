@@ -1,10 +1,12 @@
 import type { PerspectiveCamera } from "three";
 import type { BlueprintData } from "@/blueprint/parser";
 import { fromStr } from "@/blueprint/parser";
+import { isBelt, isInserter } from "@/data/items";
 import type { ViewerRenderSettings } from "@/renderSettingsTypes";
 import { RenderCore, RenderPhaseError } from "./core/RenderCore";
 import type { RebuildReason } from "./core/RenderCore";
 import type {
+    PreviewAlignedSnapshot,
     PreviewBeginOptions,
     PreviewDeltaEvent,
     PreviewStats,
@@ -15,6 +17,7 @@ import {
     stringifyBlueprintJSON,
 } from "./blueprintJSON";
 import type {
+    AlignedCommitOutcome,
     BlueprintLoadOutcome,
     BlueprintLoadResult,
     BuildingInfoPayload,
@@ -279,12 +282,16 @@ export class BlueprintViewer {
      * 开始一次增量预览。
      *
      * 时序（指南 §2）：**先开始预览，再提交生成请求**，否则会漏掉开头的消息。
-     * 预览层是独立临时层：`beginPreview` 不会清空当前正式场景（保留上一次成功结果）。
+     * `clearFormalScene: true` 会清空正式场景（含 `getBlueprintData()` 返回 null），
+     * 快照由宿主 / Go 端保存；失败恢复走 `loadBlueprint(snapshot)`。
      */
-    beginPreview(options?: PreviewBeginOptions): void {
+    beginPreview(
+        options?: PreviewBeginOptions & { clearFormalScene?: boolean }
+    ): void {
         const guard = this.guard();
         if (guard !== null) return;
         this.core?.beginPreview(options);
+        if (options?.clearFormalScene === true) this.data = null;
     }
 
     /**
@@ -319,6 +326,99 @@ export class BlueprintViewer {
         const outcome = this.applyData(data);
         this.core?.discardPreview();
         return outcome;
+    }
+
+    /**
+     * 对齐式提交：完整蓝图到达后先停留 `settleMs`（默认 1000ms），再对比
+     * 预览层骨架与完整蓝图：
+     *
+     * - 骨架一致且坐标语义为 `blueprint-area-local-v1` → `alignedCommit`（0 位移、无闪烁）；
+     * - 骨架不一致 / 其他坐标语义 → 常规 `setBlueprintData`（强制刷新，位置由 areas 决定）。
+     *
+     * 失败时预览层已丢弃，宿主按 Go 端快照 `loadBlueprint(snapshot)` 恢复。
+     * 骨架不一致**不算失败**：`ok: true` 且 `aligned: false`。
+     */
+    async commitPreviewAligned(
+        blueprint: string,
+        options: { settleMs?: number } = {}
+    ): Promise<AlignedCommitOutcome> {
+        const guard = this.guard();
+        if (guard !== null) return { ...guard, aligned: false };
+        const core = this.core;
+        if (core === null)
+            return {
+                ok: false,
+                aligned: false,
+                error: {
+                    code: "no-webgl",
+                    phase: "lifecycle",
+                    message: "渲染内核未初始化",
+                },
+            };
+
+        const settleMs = Math.max(0, options.settleMs ?? 1000);
+
+        let data: BlueprintData;
+        try {
+            data = fromStr(blueprint.trim());
+        } catch (e) {
+            core.discardPreview();
+            return this.failAligned(classifyError(e, "parse"));
+        }
+
+        if (settleMs > 0) await wait(settleMs);
+        if (this.disposed)
+            return this.failAligned({
+                code: "already-disposed",
+                phase: "lifecycle",
+                message: "Viewer 已销毁",
+            });
+
+        const snapshot = core.exportPreviewSnapshot();
+        const mismatches =
+            snapshot === null
+                ? ["preview:no-snapshot"]
+                : compareSkeleton(snapshot, data);
+        const aligned =
+            snapshot !== null &&
+            mismatches.length === 0 &&
+            snapshot.coordinateSystem === "blueprint-area-local-v1";
+
+        try {
+            if (aligned && snapshot !== null) {
+                core.alignedCommit(data, snapshot);
+            } else {
+                core.setBlueprintData(data);
+            }
+        } catch (e) {
+            core.discardPreview();
+            return this.failAligned(classifyError(e, "build"));
+        }
+
+        this.data = data;
+        if (!this.keepCamera) core.resetCamera();
+        core.discardPreview();
+
+        const stats = core.lastBuildStats();
+        const result: BlueprintLoadResult = {
+            buildingCount: data.buildings.length,
+            areas: data.areas,
+            header: data.header,
+            unknownModelIndexes: stats?.unknownModelIndexes ?? [],
+            warnings: [...this.warnings],
+        };
+        return {
+            ok: true,
+            value: result,
+            aligned,
+            settleMs,
+            skeletonMismatch: mismatches,
+        };
+    }
+
+    private failAligned(error: ViewerError): AlignedCommitOutcome {
+        this.reportError(error);
+        return { ok: false, error, aligned: false };
     }
 
     /** 丢弃预览层（生成失败 / 中止 / 用户离开页面时调用） */
@@ -733,4 +833,100 @@ export class BlueprintViewer {
         // 同时留一条控制台记录，便于无回调时排查
         console.warn(`[viewer] ${error.phase}/${error.code}: ${error.message}`);
     }
+}
+
+/** 骨架对比容差：格坐标（局部坐标，精度足够） */
+const SKELETON_EPS = 1e-4;
+/** 骨架对比容差：角度（度） */
+const YAW_EPS = 0.01;
+
+function normalizeYaw(y: number): number {
+    let r = y % 360;
+    if (r < 0) r += 360;
+    if (r >= 360 - YAW_EPS) r = 0;
+    return r;
+}
+
+/**
+ * 对比预览层骨架与完整蓝图。
+ *
+ * 口径（用户确认）：
+ * - 一致条件：数量、相对坐标（第一端 + 分拣器第二端）、朝向、模型（modelIndex）、连接关系（outputObjIdx）；
+ * - 不比较：参数（配方 / 过滤 / 库存 / 加速模式等）、kind（glb vs 回退盒，只是资源加载状态）、itemId；
+ * - `areas` 全球定位不参与比较（预览层与蓝图整体偏移属预期）。
+ *
+ * 返回不一致原因列表；空数组表示一致。`outputBuildingIndex` 是建筑 ID，
+ * 与蓝图 `outputObjIdx`（数组下标）对比前先经 `idToPos` 转换。
+ */
+function compareSkeleton(
+    snapshot: PreviewAlignedSnapshot,
+    data: BlueprintData
+): string[] {
+    const mismatches: string[] = [];
+    if (snapshot.objects.size !== data.buildings.length) {
+        mismatches.push(
+            `count: preview=${snapshot.objects.size}, blueprint=${data.buildings.length}`
+        );
+        return mismatches;
+    }
+
+    const idToPos = new Map<number, number>();
+    data.buildings.forEach((b, i) => idToPos.set(b.index, i));
+
+    for (const b of data.buildings) {
+        const obj = snapshot.objects.get(b.index);
+        if (obj === undefined) {
+            mismatches.push(`missing: building-${b.index}`);
+            continue;
+        }
+        if (obj.areaIndex !== b.areaIndex) {
+            mismatches.push(`area ${b.index}: ${obj.areaIndex} vs ${b.areaIndex}`);
+            continue;
+        }
+        if (
+            Math.abs(obj.x - b.localOffset[0].x) > SKELETON_EPS ||
+            Math.abs(obj.y - b.localOffset[0].y) > SKELETON_EPS ||
+            Math.abs(obj.z - b.localOffset[0].z) > SKELETON_EPS
+        ) {
+            mismatches.push(`pos ${b.index}`);
+            continue;
+        }
+        if (
+            Math.abs(normalizeYaw(obj.yaw) - normalizeYaw(b.yaw[0])) > YAW_EPS
+        ) {
+            mismatches.push(`yaw ${b.index}`);
+            continue;
+        }
+        if (obj.modelIndex !== b.modelIndex) {
+            mismatches.push(
+                `model ${b.index}: ${obj.modelIndex} vs ${b.modelIndex}`
+            );
+            continue;
+        }
+        if (isInserter(b.itemId)) {
+            if (
+                Math.abs(obj.x2 - b.localOffset[1].x) > SKELETON_EPS ||
+                Math.abs(obj.y2 - b.localOffset[1].y) > SKELETON_EPS ||
+                Math.abs(obj.z2 - b.localOffset[1].z) > SKELETON_EPS
+            ) {
+                mismatches.push(`pos2 ${b.index}`);
+                continue;
+            }
+        }
+        const expectedOutput = b.outputObjIdx >= 0 ? b.outputObjIdx : null;
+        const actualOutput =
+            obj.outputBuildingIndex === null
+                ? null
+                : idToPos.get(obj.outputBuildingIndex) ?? -2;
+        if (actualOutput !== expectedOutput) {
+            mismatches.push(
+                `output ${b.index}: ${actualOutput} vs ${expectedOutput}`
+            );
+        }
+    }
+    return mismatches;
+}
+
+function wait(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -299,3 +299,22 @@ export interface StatsListValue {
 export type StatsListResult =
     | { ok: true; value: StatsListValue }
     | { ok: false; error: StatsListError };
+
+/** 对齐式提交的结果：`aligned: true` 表示走的是预览投影 0 位移转正 */
+export type AlignedCommitOutcome =
+    | {
+          ok: true;
+          value: BlueprintLoadResult;
+          aligned: boolean;
+          /** 实际停留时长（毫秒），便于宿主上报 */
+          settleMs: number;
+          /** 骨架不一致原因；`aligned: true` 时为空数组 */
+          skeletonMismatch: string[];
+      }
+    | { ok: false; error: ViewerError; aligned: false };
+
+/** 公开对齐式提交用到的快照类型（宿主只读引用） */
+export type {
+    PreviewAlignedObject,
+    PreviewAlignedSnapshot,
+} from "./preview/types";

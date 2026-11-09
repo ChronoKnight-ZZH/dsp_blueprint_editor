@@ -10,6 +10,9 @@
  *    `inputObjectId` 缺失视为「无输入」。
  */
 
+import type { Matrix4 } from "three";
+import type { PoolKind } from "./pools";
+
 /** 预览动画模式：`off` = 不插值（直接跳变），`on` = 完整动效，`auto` = 按设备能力判定 */
 export type PreviewAnimationMode = "auto" | "on" | "off";
 
@@ -138,4 +141,36 @@ export interface PreviewStats {
     readonly lastIngestMs: number;
     readonly maxIngestMs: number;
     readonly disposed: boolean;
+}
+
+/** 对齐式提交用的单对象骨架（矩阵来自预览层收敛值，与画面逐像素一致） */
+export interface PreviewAlignedObject {
+    readonly objectId: string;
+    /** 建筑 ID（`BlueprintBuilding.index`），由 `building-N` 解析 */
+    readonly buildingIndex: number;
+    readonly kind: PoolKind;
+    readonly itemId: number;
+    readonly modelIndex: number;
+    readonly areaIndex: number;
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly yaw: number;
+    readonly x2: number;
+    readonly y2: number;
+    readonly z2: number;
+    /** 第一端世界矩阵（与 `writeSlot` 同一数据源） */
+    readonly matrix: Matrix4;
+    /** 第二端世界矩阵（分拣器用；其他建筑与第一端同源、yaw 取 0） */
+    readonly matrix2: Matrix4;
+    /** 输出对象的建筑 ID（未携带或无法解析时为 null） */
+    readonly outputBuildingIndex: number | null;
+}
+
+/** 预览层收敛后的整体骨架快照（`exportAlignedSnapshot` 的返回） */
+export interface PreviewAlignedSnapshot {
+    /** 键为建筑 ID（`BlueprintBuilding.index`） */
+    readonly objects: Map<number, PreviewAlignedObject>;
+    readonly count: number;
+    readonly coordinateSystem: PreviewCoordinateSystem | null;
 }

@@ -648,7 +648,8 @@
 
     async function evaluate(streamMs) {
         const s = viewer.previewStats();
-        const expected = fixture.stats;
+        // stats 可选：新格式（根数组）没有 stats，则跳过对比断言
+        const expected = (fixture && fixture.stats) ? fixture.stats : null;
 
         check('事件顺序：全部事件按序接受',
             rejectedCount === 0 && appliedIndex === events.length,
@@ -660,10 +661,15 @@
         check('首帧可见 ≤ 50ms', firstVisibleMs !== null && firstVisibleMs <= 50,
             firstVisibleMs === null ? '未观测到槽位' : firstVisibleMs.toFixed(1) + 'ms');
 
-        check('末态存活数 = 数据净增量', s.alive === expected.expectedAlive,
-            s.alive + ' / 期望 ' + expected.expectedAlive);
-        check('峰值存活数 = 数据峰值', s.peakAlive === expected.expectedPeak,
-            s.peakAlive + ' / 期望 ' + expected.expectedPeak);
+        if (expected) {
+            check('末态存活数 = 数据净增量', s.alive === expected.expectedAlive,
+                s.alive + ' / 期望 ' + expected.expectedAlive);
+            check('峰值存活数 = 数据峰值', s.peakAlive === expected.expectedPeak,
+                s.peakAlive + ' / 期望 ' + expected.expectedPeak);
+        } else {
+            check('末态存活数 = 数据净增量（无 stats，跳过）', true, 'alive=' + s.alive, true);
+            check('峰值存活数 = 数据峰值（无 stats，跳过）', true, 'peakAlive=' + s.peakAlive, true);
+        }
 
         check('事件停后收敛（moving = 0）', s.moving === 0, 'moving=' + s.moving);
 
@@ -696,12 +702,32 @@
 
     // ---------------------------------------------------------------- 启动
 
-    /** 加载一份 fixture（默认文件 / 手工导入共用）：校验 + 重置状态 + 更新界面 */
+    /**
+     * 加载一份 fixture（默认文件 / 手工导入共用）：校验 + 重置状态 + 更新界面。
+     * 支持两种格式：
+     *   1) 根就是事件数组：[{...}, {...}]
+     *   2) 旧格式：{ version, stats, events: [...] }
+     */
     function loadFixture(data, name) {
-        if (data === null || typeof data !== 'object' || !Array.isArray(data.events) || data.events.length === 0)
-            throw new Error('fixture 里没有 events');
-        if (data.stats === undefined || typeof data.stats.expectedAlive !== 'number')
-            throw new Error('fixture 缺少 stats（请用 scripts/preview/build-fixture.mjs 生成）');
+        let eventList;
+        let stats = null;
+        let sourceInfo = null;
+        let versionInfo = null;
+
+        if (Array.isArray(data)) {
+            eventList = data;
+        } else if (data !== null && typeof data === 'object' && Array.isArray(data.events)) {
+            eventList = data.events;
+            stats = data.stats || null;
+            sourceInfo = data.source || null;
+            versionInfo = data.version;
+        } else {
+            throw new Error('fixture 格式无法识别（既不是事件数组，也没有 events 字段）');
+        }
+
+        if (eventList.length === 0)
+            throw new Error('fixture 里没有事件');
+
         // 仅在替换旧数据时清空报告行；首次加载要保留上面的启动检查结果
         if (fixture !== null) {
             reportEl.innerHTML = '';
@@ -720,7 +746,7 @@
         if (viewer && viewer.previewing) viewer.discardPreview();
 
         fixture = data;
-        events = data.events;
+        events = eventList;
 
         // 预览配置（拖动时重建复用）
         previewOptions = {
@@ -738,11 +764,12 @@
 
         fixtureNameEl.textContent = name;
         fixtureNameEl.title = name;
-        log('已加载 fixture：' + name + '（' + fixture.stats.events + ' 条事件 / '
-            + fixture.stats.operations + ' 个操作 / ' + fixture.stats.expectedAlive + ' 个终态对象）');
-        if (fixture.source) log('数据来源：' + fixture.source + '（version ' + fixture.version + '）');
-        if (Array.isArray(fixture.stats.switchSequences))
-            log('坐标切换发生在 sequence=' + (fixture.stats.switchSequences.join(',') || '无'));
+        log('已加载 fixture：' + name + '（' + events.length + ' 条事件'
+            + (stats ? ' / ' + (stats.operations || '?') + ' 个操作 / ' + stats.expectedAlive + ' 个终态对象' : '')
+            + '）');
+        if (sourceInfo) log('数据来源：' + sourceInfo + '（version ' + versionInfo + '）');
+        if (stats && Array.isArray(stats.switchSequences))
+            log('坐标切换发生在 sequence=' + (stats.switchSequences.join(',') || '无'));
         bannerEl.className = 'banner running';
         bannerEl.textContent = '就绪：点「▶ 回放」自动播放，或直接拖动底部进度条 scrubbing（'
             + events.length + ' 条事件 ≈ ' + ((events.length * STEP_MS) / 1000).toFixed(1) + 's）';
@@ -791,15 +818,16 @@
             const response = await fetch(fixtureUrl);
             if (!response.ok) throw new Error('preview-fixture.json → HTTP ' + response.status);
             loadFixture(await response.json(), 'preview-fixture.json（默认）');
+            const st = (fixture && fixture.stats) ? fixture.stats : null;
             check('数据已加载',
                 true,
-                fixture.stats.events + ' 条事件 / ' + fixture.stats.operations + ' 个操作 / '
-                + fixture.stats.expectedAlive + ' 个终态对象');
+                events.length + ' 条事件'
+                + (st ? ' / ' + st.operations + ' 个操作 / ' + st.expectedAlive + ' 个终态对象' : '（无 stats 元数据）'));
         }
         catch (e) {
             log('默认 fixture 未加载：' + String((e && e.message) || e));
             bannerEl.className = 'banner running';
-            bannerEl.textContent = '未找到默认 preview-fixture.json，请点「导入 fixture…」选择 build-fixture.mjs 的产物';
+            bannerEl.textContent = '未找到默认 preview-fixture.json，请点「导入 fixture…」选择事件数组 JSON 或 build-fixture.mjs 的产物';
         }
     }
     catch (error) {

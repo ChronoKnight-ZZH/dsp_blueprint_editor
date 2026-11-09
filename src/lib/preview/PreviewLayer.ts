@@ -35,6 +35,8 @@ import type { PoolKind } from "./pools";
 import { PreviewProjector } from "./projector";
 import type { PreviewProjectorOptions, PreviewProjectorSnapshot } from "./projector";
 import type {
+    PreviewAlignedObject,
+    PreviewAlignedSnapshot,
     PreviewBeginOptions,
     PreviewBuildingLike,
     PreviewCoordinateSystem,
@@ -70,6 +72,7 @@ interface ObjRecord {
     slot: number;
     /** 首选输出目标（传送带连线用） */
     outputId: string | null;
+    itemId: number;
 }
 
 const _m1 = new Matrix4();
@@ -143,6 +146,71 @@ export class PreviewLayer {
 
     projectorSnapshot(): PreviewProjectorSnapshot {
         return this.projector.snapshot();
+    }
+
+    /**
+     * 导出「收敛后骨架」快照：每个逻辑存活对象的第一/第二端世界矩阵与骨架字段。
+     *
+     * 语义：只导出 `SLOT_ALIVE`（正在淡出 / 已释放的不算骨架）；矩阵取自
+     * `curX/curY/curZ/curYaw` 与 `curX2/curY2/curZ2`，与 `writeSlot` 同一数据源，
+     * 因此与画面逐像素一致。键为 `building-N` 解析出的建筑 ID。
+     */
+    exportAlignedSnapshot(): PreviewAlignedSnapshot | null {
+        if (this.disposed) return null;
+        const out = new Map<number, PreviewAlignedObject>();
+        for (const [id, rec] of this.objects) {
+            const pool = rec.entry.pool;
+            const slot = rec.slot;
+            if (pool.state[slot] !== SLOT_ALIVE) continue;
+            const buildingIndex = parseBuildingIndex(id);
+            if (buildingIndex === null) continue;
+
+            const m1 = new Matrix4();
+            this.projector.writeMatrix(
+                m1,
+                pool.curX[slot],
+                pool.curY[slot],
+                pool.curZ[slot],
+                pool.curYaw[slot],
+                pool.areaIndex[slot]
+            );
+            const m2 = new Matrix4();
+            this.projector.writeMatrix(
+                m2,
+                pool.curX2[slot],
+                pool.curY2[slot],
+                pool.curZ2[slot],
+                0,
+                pool.areaIndex[slot]
+            );
+
+            out.set(buildingIndex, {
+                objectId: id,
+                buildingIndex,
+                kind: rec.entry.kind,
+                itemId: rec.itemId,
+                modelIndex: rec.entry.modelIndex,
+                areaIndex: pool.areaIndex[slot],
+                x: pool.curX[slot],
+                y: pool.curY[slot],
+                z: pool.curZ[slot],
+                yaw: pool.curYaw[slot],
+                x2: pool.curX2[slot],
+                y2: pool.curY2[slot],
+                z2: pool.curZ2[slot],
+                matrix: m1,
+                matrix2: m2,
+                outputBuildingIndex:
+                    rec.outputId === null
+                        ? null
+                        : parseBuildingIndex(rec.outputId),
+            });
+        }
+        return {
+            objects: out,
+            count: out.size,
+            coordinateSystem: this.coordinateSystem,
+        };
     }
 
     get stats(): PreviewStats {
@@ -310,6 +378,7 @@ export class PreviewLayer {
             pool.tgtZ2[slot] = z2;
             pool.areaIndex[slot] = areaIndex;
             existing.outputId = outputId;
+            existing.itemId = b.itemId;
             if (pool.state[slot] === SLOT_DYING) {
                 // 撤销后又回来 → 复活，不重新淡入
                 pool.state[slot] = SLOT_ALIVE;
@@ -353,7 +422,7 @@ export class PreviewLayer {
         pool.curOpacity[slot] = 0;
         // 抖动抑制：先不可见，满 `enterDelayMs` 后再淡入（见 `tick`）
         pool.tgtOpacity[slot] = this.enterDelayMs > 0 ? 0 : 1;
-        this.objects.set(id, { entry, slot, outputId });
+        this.objects.set(id, { entry, slot, outputId, itemId: b.itemId });
         pool.moving.add(slot);
         this.logicalAlive++;
         return true;
@@ -715,4 +784,18 @@ function perfNow(): number {
 
 function nowMs(): number {
     return perfNow();
+}
+
+const BUILDING_ID_PREFIX = "building-";
+
+/**
+ * 解析后端 `objectId = "building-N"` 中的 N（建筑 ID）。
+ *
+ * 约定：N 是 `BlueprintBuilding.index`（建筑 ID），不是数组下标。
+ * 若后端改用其他命名，只需替换本函数；`compareSkeleton` 会因 `missing` 自动走强制刷新，不会静默错配。
+ */
+function parseBuildingIndex(id: string): number | null {
+    if (!id.startsWith(BUILDING_ID_PREFIX)) return null;
+    const n = Number(id.slice(BUILDING_ID_PREFIX.length));
+    return Number.isInteger(n) && n >= 0 ? n : null;
 }
