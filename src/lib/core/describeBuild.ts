@@ -70,7 +70,9 @@ export function describeBuild(input: DescribeBuildInput): BuildDescription {
             entry.hidden++;
             entry.fallback++;
         } else if (isBelt(b.itemId) || isInserter(b.itemId)) {
-            // 带子与分拣器走程序化几何，不算 fallback 盒
+            // 带子是程序化几何；分拣器现在走「元数据盒 + GLB」管线（GLB 未就绪时
+            // 回退细条）。两者都不会渲染成元数据盒，因此不计入 fallback。
+            // 分拣器真正走 GLB 的实例数由下面按 `perModelGlbCounts` 回填。
         } else {
             entry.fallback++;
         }

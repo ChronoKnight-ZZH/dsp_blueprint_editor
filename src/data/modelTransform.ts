@@ -82,13 +82,20 @@ export const ZERO_MODEL_TRANSFORM: Readonly<ModelTransform> = Object.freeze({
  */
 export const modelTransform: Readonly<Record<number, ModelTransform>> = {
     // ── 传送带 / 分拣器 ────────────────────────────────────────────────
+    // 分拣器（41/42/43/483）现在也走「元数据盒 + GLB」管线：世界矩阵取
+    // `transforms[i][0]`，它的 +y 沿分拣方向、+z 朝法线（`calcBuildingTrans` 的 yaw
+    // 满足 yaw = atan2(dx, dy)，与 p0→p1 同向），所以默认全 0 即为正位。
+    // 模型沿 ±z 对称（双臂沿分拣方向各伸出约 1 格），yaw 取 0 或 180 视觉上等价。
+    // 大小已经由 `buildingMeta` 的 box（= 模型包围盒放大到 1 格宽）归一，这里保持
+    // scale: 1；要单独放大/缩小再改 scale（注意 scale > 1 会让底部下沉，
+    // 需要同时用 z 抬起 —— 偏移单位是格，垂直 1 格 = HEIGHT_GRID_SIZE = 4/3）。
     35: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 低速传送带 · belt-1.glb
     36: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 高速传送带 · belt-2.glb
     37: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 极速传送带 · belt-3.glb
-    41: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 低速分拣器 · inserter-1.glb
-    42: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 高速分拣器 · inserter-2.glb
-    43: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 极速分拣器 · inserter-3.glb
-    483: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 集装分拣器 · inserter-4.glb
+    41: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 0.8 }, // 低速分拣器 · inserter-1.glb（模型 0.99×1.53×2.06，元数据盒已放大 1.27 倍）
+    42: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 0.8 }, // 高速分拣器 · inserter-2.glb（模型 0.99×1.53×2.06，元数据盒已放大 1.27 倍）
+    43: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 0.8 }, // 极速分拣器 · inserter-3.glb（模型 0.99×1.53×2.06，元数据盒已放大 1.27 倍）
+    483: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 0.8 }, // 集装分拣器 · inserter-4.glb（模型 0.99×1.53×2.06，元数据盒已放大 1.27 倍）
 
     // ── 四向分流器（三种变形共用 icon，模型按变形下标区分）───────────────
     38: { x: 0, y: 0, z: -0.4, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 四向分流器 a · splitter-a.glb

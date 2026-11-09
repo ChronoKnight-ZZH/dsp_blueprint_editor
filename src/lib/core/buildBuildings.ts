@@ -165,30 +165,171 @@ export function buildBuildings(
         return objects;
     };
 
+    /**
+     * 分拣器：**真实模型优先，细条回退**（与 `buildBoxes` 同一套「元数据 + GLB」管线）。
+     *
+     * 与普通建筑的差别只有两点：
+     *   1. 世界矩阵用 `transforms[b.index][0]`。`calcBuildingTrans` 的 yaw 满足
+     *      `yaw = atan2(dx, dy)`（dx/dy 是 p0→p1 的分拣方向），因此该矩阵的
+     *      **+y 正好沿分拣方向、+z 朝法线**，与 `buildingMeta` 的局部坐标系一致，
+     *      模型不需要额外的朝向修正（朝向微调走 `modelTransform` 的 yaw）；
+     *   2. 货物动画（沿臂滑动的色块）与渲染路径无关：不论走模型还是走细条，
+     *      都先按 `inserterTrans` 算出「沿分拣方向的细条矩阵」并挂上货物。
+     *
+     * 上限口径与 `buildBoxes` 一致：按「存在 glbName 的建筑数」计，与 GLB 是否
+     * 已经到达无关，保证同一蓝图同一设置的渲染结果与加载时序无关。
+     */
     const buildInserters = (inserters: BlueprintBuilding[]) => {
         const inserterThickness = 0.06;
-        const geometry = new BoxGeometry(0.15, inserterThickness, 1.0);
-        const material = new MeshLambertMaterial();
-        const mesh = new InstancedMesh(geometry, material, inserters.length);
-        const offset = new Matrix4().makeTranslation(0, 0, -0.5);
-        const temp = new Matrix4();
-        const trans = new Matrix4();
+        const objects: Object3D[] = [];
+
+        // 1) 分拣方向矩阵 + 臂长 + 货物，与最终走不走 GLB 无关，先算齐
+        const armOf = new Map<
+            BlueprintBuilding,
+            { trans: Matrix4; len: number }
+        >();
         for (let i = 0; i < inserters.length; i++) {
             const b = inserters[i];
-
+            const trans = new Matrix4();
             const len = inserterTrans(transforms[b.index], trans);
-            const color = colorOf(b.modelIndex);
-            addCargo(trans, color, len);
-
-            trans.multiply(temp.makeScale(1, 1, len));
-            trans.multiply(offset);
-            mesh.setMatrixAt(i, trans);
-            mesh.setColorAt(i, color);
-            modelRef[b.index] = { mesh, instance: i };
+            armOf.set(b, { trans, len });
+            addCargo(trans, colorOf(b.modelIndex), len);
         }
-        mesh.instanceMatrix.needsUpdate = true;
-        mesh.instanceColor!.needsUpdate = true;
-        return [mesh];
+
+        // 2) 解析每个分拣器的模型来源（resolver 内部已兜底，这里只是双保险）
+        const resolved: (ResolvedBuildingModel | null)[] = inserters.map((b) => {
+            try {
+                return resolveBuildingModel(b.modelIndex);
+            } catch {
+                return null;
+            }
+        });
+        const glbInstanceCounts = new Map<number, number>();
+        if (settings.showRealModels) {
+            for (const r of resolved) {
+                if (r !== null && r.glbName !== null && r.meta !== undefined)
+                    glbInstanceCounts.set(
+                        r.modelIndex,
+                        (glbInstanceCounts.get(r.modelIndex) ?? 0) + 1
+                    );
+            }
+        }
+
+        // 3) 分组：能出真实模型的进 GLB 组，其余进细条回退组
+        const glbGroups = new Map<
+            number,
+            {
+                model: NonNullable<ResolvedBuildingModel["glb"]>;
+                placement: Matrix4;
+                tint: number | null;
+                buildings: BlueprintBuilding[];
+            }
+        >();
+        const bars: BlueprintBuilding[] = [];
+        for (let i = 0; i < inserters.length; i++) {
+            const b = inserters[i];
+            const r = resolved[i];
+            const withinLimit =
+                r !== null &&
+                (glbInstanceCounts.get(r.modelIndex) ?? 0) <=
+                    settings.maxInstancesPerModel;
+            if (
+                settings.showRealModels &&
+                withinLimit &&
+                r !== null &&
+                r.glb !== null &&
+                r.meta !== undefined
+            ) {
+                let group = glbGroups.get(r.modelIndex);
+                if (group === undefined) {
+                    group = {
+                        model: r.glb,
+                        placement: r.placement,
+                        tint: r.tint,
+                        buildings: [],
+                    };
+                    glbGroups.set(r.modelIndex, group);
+                }
+                group.buildings.push(b);
+                continue;
+            }
+            bars.push(b);
+            // 有外部模型但还没加载 → 按需触发懒加载
+            if (
+                r !== null &&
+                r.glbName !== null &&
+                r.glb === null &&
+                r.meta !== undefined
+            )
+                requestBuildingModel(b.modelIndex);
+        }
+
+        // 4) GLB 实例化渲染；任一组失败都退回细条，不影响其余分拣器
+        const anchor = new Matrix4();
+        const anchorPos = new Vector3();
+        const anchorTrans = new Matrix4();
+        const perModelGlbCounts: Record<number, number> = {};
+        for (const [modelIndex, group] of glbGroups) {
+            let instances: GlbModelInstances | null = null;
+            try {
+                instances = new GlbModelInstances(
+                    group.model,
+                    group.placement,
+                    group.buildings.map((b) => transforms[b.index][0]),
+                    group.tint
+                );
+            } catch (e) {
+                console.warn("[glb] 分拣器实例化渲染失败，该模型组回退细条", e);
+                instances = null;
+            }
+            if (instances === null || instances.meshes.length === 0) {
+                bars.push(...group.buildings);
+                continue;
+            }
+            objects.push(instances);
+            perModelGlbCounts[modelIndex] = group.buildings.length;
+            const meta = buildingMeta.get(modelIndex);
+            for (const b of group.buildings) {
+                // modelRef 语义与 buildBoxes 一致：建筑中心的世界矩阵
+                anchor.copy(transforms[b.index][0]);
+                if (meta !== undefined) {
+                    anchorPos.setFromMatrixPosition(meta.selectUnitBoxTrans);
+                    anchor.multiply(
+                        anchorTrans.makeTranslation(
+                            anchorPos.x,
+                            anchorPos.y,
+                            anchorPos.z
+                        )
+                    );
+                }
+                modelRef[b.index] = { matrix: anchor.clone() };
+            }
+        }
+
+        // 5) 细条回退：几何与旧实现完全一致，只是不再覆盖走模型的分拣器
+        if (bars.length) {
+            const geometry = new BoxGeometry(0.15, inserterThickness, 1.0);
+            const material = new MeshLambertMaterial();
+            const mesh = new InstancedMesh(geometry, material, bars.length);
+            const offset = new Matrix4().makeTranslation(0, 0, -0.5);
+            const temp = new Matrix4();
+            for (let i = 0; i < bars.length; i++) {
+                const b = bars[i];
+                // 复制第 1 步的矩阵：后面要沿 z 拉长到臂长，不能污染货物用的那一份
+                const arm = armOf.get(b)!;
+                const trans = new Matrix4().copy(arm.trans);
+                trans.multiply(temp.makeScale(1, 1, arm.len));
+                trans.multiply(offset);
+                mesh.setMatrixAt(i, trans);
+                mesh.setColorAt(i, colorOf(b.modelIndex));
+                modelRef[b.index] = { mesh, instance: i };
+            }
+            mesh.instanceMatrix.needsUpdate = true;
+            mesh.instanceColor!.needsUpdate = true;
+            objects.push(mesh);
+        }
+
+        return { objects, perModelGlbCounts };
     };
 
     // 建筑分类：带子 / 分拣器 / 其余（元数据盒或 GLB）
@@ -473,7 +614,23 @@ export function buildBuildings(
 
     if (belts.length) meshes.push(...buildBelts(belts));
 
-    if (inserters.length) meshes.push(...buildInserters(inserters));
+    // 分拣器也能出真实模型，统计里要和普通建筑的 GLB 计数合并（否则
+    // `describeBuild` 的 glbGroups 会漏掉 2011-2014 这些模型号）
+    const builtInserters = inserters.length
+        ? buildInserters(inserters)
+        : {
+              objects: [] as Object3D[],
+              perModelGlbCounts: {} as Record<number, number>,
+          };
+    if (builtInserters.objects.length) meshes.push(...builtInserters.objects);
+    const perModelGlbCounts: Record<number, number> = {
+        ...built.perModelGlbCounts,
+    };
+    for (const [key, count] of Object.entries(builtInserters.perModelGlbCounts)) {
+        const modelIndex = Number(key);
+        perModelGlbCounts[modelIndex] =
+            (perModelGlbCounts[modelIndex] ?? 0) + count;
+    }
 
     if (numCargos) {
         cargosMesh.count = numCargos;
@@ -511,13 +668,13 @@ export function buildBuildings(
         iconBuilt.subscriptMap
     );
 
-    const glbInstanceCount = Object.values(built.perModelGlbCounts).reduce(
+    const glbInstanceCount = Object.values(perModelGlbCounts).reduce(
         (a, b) => a + b,
         0
     );
     const stats: BuildStats = {
         buildingCount: buildings.length,
-        glbGroupCount: Object.keys(built.perModelGlbCounts).length,
+        glbGroupCount: Object.keys(perModelGlbCounts).length,
         glbInstanceCount,
         fallbackBoxCount: built.fallbackCount,
         hiddenCount: built.unknownModelIndexes.size,
@@ -527,7 +684,7 @@ export function buildBuildings(
         iconCount: iconBuilt.iconCount,
         subscriptCount: iconBuilt.subscriptCount,
         cargoCount: numCargos,
-        perModelGlbCounts: built.perModelGlbCounts,
+        perModelGlbCounts,
     };
 
     return { buildings: buildings3d, stats, iconTexture };
