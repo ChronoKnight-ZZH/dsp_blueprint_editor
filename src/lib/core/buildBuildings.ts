@@ -15,7 +15,14 @@ import { IconGeometry, Icons } from "@/icons";
 import { IconSubscript } from "@/iconSubscript";
 import type { TextStyle } from "@/iconSubscript";
 import { CARGO_COLOR, Cargos } from "@/cargos";
-import { BELT_LEN, BELT_LIFT, CARGO_LIFT, Belts } from "@/belt";
+import {
+    BELT_LEN,
+    BELT_LIFT,
+    BELT_SLOPE_EPS,
+    CARGO_LIFT,
+    Belts,
+} from "@/belt";
+import { HEIGHT_GRID_SIZE } from "@/planetConstants";
 import { buildingMeta, noIconBuildings } from "@/data/building";
 import { isBelt, isInserter } from "@/data/items";
 import { itemIconId } from "@/data/icons";
@@ -100,11 +107,15 @@ export function buildBuildings(
     /**
      * 传送带：**有输出的格**画条带（每格一段），**孤立段**画圆点。
      *
-     * 条带姿态 = `base × Rx(π/2) × T(0, BELT_LIFT, 0) × S(1, 1, BELT_LEN)`，乘序不可换：
+     * 条带姿态 = `base × Rx(π/2) × T(0, BELT_LIFT + slope/2, 0)`，乘序不可换：
      *   - `base`（`transforms[i][0]`）**已经包含建筑 yaw**：`Ry(lon)·Rx(-lat)·Rz(-yaw)·T`，
      *     其局部 +y 轴就是本格流向（与方案 §3.4-F5 的 `dir=(sin yaw, cos yaw)` 一致）；
      *   - `Rx(π/2)` 把「建筑局部 +y＝流向」映射到「条带局部 -z＝流向」（货物着色器也向 -z 走）；
-     *   - `T` 只负责把盒体抬到球面之上，`S` 只拉伸长度，因此盒体恰好覆盖本格 ±段长/2。
+     *   - `T` 只负责抬升：`slope/2` 让后缘落在 `h_i`、前缘落在 `h_{i+1}`（§3.6）；
+     *   - **没有缩放**：`BELT_LEN` 已烘进几何，非等比实例缩放会把圆弧压成椭圆（§3.6 / GL10）。
+     *
+     * 转角与坡度是逐实例形状参数 `(bend, slope)`，由 `shapeOf` 求出后写进 `aBeltCurve`，
+     * 条带与货物共用同一组值，弯折/剪切都在顶点着色器完成（§3.6 / §6.5）。
      *
      * ⚠️ 与方案 §3.4 的差异（已实测确认，方案文字笔误）：方案写 `base × Rz(-yaw) × Rx(π/2)`，
      * 但 `base` 已含 `Rz(-yaw)`，再乘一次等于 `-2·yaw`。用 4 个 fixture 比对「本格 → 输出格」
@@ -121,6 +132,35 @@ export function buildBuildings(
     const buildBelts = (belts: BlueprintBuilding[]) => {
         const objects: Object3D[] = [];
 
+        // ── ⓪ 形状参数：只对「输出是带子且正好一格」的格计算（§3.6 / S11） ──
+        const byIndex = new Map(buildings.map((b) => [b.index, b]));
+        const shapeOf = (b: BlueprintBuilding) => {
+            const out = byIndex.get(b.outputObjIdx);
+            if (!out || !isBelt(out.itemId)) return { bend: 0, slope: 0 };
+
+            const o = b.localOffset[0];
+            const p = out.localOffset[0];
+            const dx = p.x - o.x;
+            const dy = p.y - o.y;
+            const oneGrid =
+                (Math.abs(Math.abs(dx) - 1) < 1e-3 && Math.abs(dy) < 1e-3) ||
+                (Math.abs(Math.abs(dy) - 1) < 1e-3 && Math.abs(dx) < 1e-3);
+            if (!oneGrid) return { bend: 0, slope: 0 }; // 侧口 0.2 / 隔格 2.4 → 不猜
+
+            const raw = (p.z - o.z) * HEIGHT_GRID_SIZE; // 世界单位
+            const slope = Math.abs(raw) < BELT_SLOPE_EPS ? 0 : raw;
+
+            // 自身 yaw 是入/出方向的角平分线（F7）：出格方向与之差 ±45° → 左右转，差 0 → 直段
+            const yaw = (b.yaw[0] / 180) * Math.PI;
+            const turn = Math.atan2(
+                Math.sin(yaw) * dy - Math.cos(yaw) * dx,
+                Math.sin(yaw) * dx + Math.cos(yaw) * dy
+            );
+            const bend =
+                Math.abs(turn) > 0.1 ? Math.sign(turn) * (Math.PI / 2) : 0;
+            return { bend, slope };
+        };
+
         // ── ① 条带：只给有输出的格（每格一段） ──
         const withOutput = belts.filter((b) => b.outputObjIdx >= 0);
         let beltMesh: Belts | null = null;
@@ -135,29 +175,35 @@ export function buildBuildings(
             for (let i = 0; i < withOutput.length; i++) {
                 const b = withOutput[i];
                 const base = transforms[b.index][0];
+                const { bend, slope } = shapeOf(b);
 
+                // 无 scale：BELT_LEN 已烘进几何（否则圆弧被压成椭圆，§3.6）
                 trans.copy(base).multiply(rot);
-                trans.multiply(temp.makeTranslation(0, BELT_LIFT, 0));
-                trans.multiply(temp.makeScale(1, 1, BELT_LEN));
+                trans.multiply(
+                    temp.makeTranslation(0, BELT_LIFT + slope / 2, 0)
+                );
 
                 beltMesh.setMatrixAt(i, trans);
                 // 条带取元数据色（方案 §9.1-E-3 / G5）：材质色保持默认白，避免二次相乘
                 beltMesh.setColorAt(i, colorOf(b.modelIndex));
+                // 逐实例形状参数：顶点着色器据此弯折 / 剪切
+                beltMesh.setCurveAt(i, bend, slope);
                 // modelRef 只能用 base：指向条带 mesh 会让 getBuildingModel 返回被拉伸的矩阵
                 modelRef[b.index] = { matrix: base };
 
-                // 货物：**必须从 base 重新 copy**（不能复用被 scale 过的 trans，否则货物被拉长
-                // BELT_LEN 倍、滑动量变 BELT_LEN²，方案 §6.6-S3）；+z 是本格后缘（逆流向），
-                // 货物从后缘滑到前缘正好走过一格 = 一个周期。
+                // 货物：**必须从 base 重新 copy**（不能复用 trans，否则继承抬升，方案 §6.6-S3）；
+                // +z 是本格后缘（逆流向），货物从后缘滑到前缘正好走过一格 = 一个周期。
+                // 抬升不加 slope/2：坡度由货物着色器对 transformed.z 的剪切项补上（§3.6）。
                 cargoTrans.copy(base).multiply(rot);
                 cargoTrans.multiply(
                     temp.makeTranslation(0, CARGO_LIFT, BELT_LEN / 2)
                 );
-                addCargo(cargoTrans, CARGO_COLOR, BELT_LEN);
+                addCargo(cargoTrans, CARGO_COLOR, BELT_LEN, bend, slope);
             }
             beltMesh.instanceMatrix.needsUpdate = true;
             if (beltMesh.instanceColor !== null)
                 beltMesh.instanceColor.needsUpdate = true;
+            beltMesh.geometry.beltCurve.needsUpdate = true;
             objects.push(beltMesh);
         }
 
@@ -253,10 +299,17 @@ export function buildBuildings(
     // 容量沿用旧实现：只有带子与分拣器会产生货物
     const cargosMesh = new Cargos(belts.length + inserters.length);
     let numCargos = 0;
-    const addCargo = (trans: Matrix4, color: Color, distance: number) => {
+    const addCargo = (
+        trans: Matrix4,
+        color: Color,
+        distance: number,
+        bend = 0,
+        slope = 0
+    ) => {
         cargosMesh.setMatrixAt(numCargos, trans);
         cargosMesh.setColorAt(numCargos, color);
         cargosMesh.setCargoDistanceAt(numCargos, distance);
+        cargosMesh.setCargoCurveAt(numCargos, bend, slope);
         numCargos++;
     };
 
@@ -537,8 +590,9 @@ export function buildBuildings(
         cargosMesh.instanceMatrix.needsUpdate = true;
         if (cargosMesh.instanceColor !== null)
             cargosMesh.instanceColor.needsUpdate = true;
-        // 每实例滑动距离只在构建收尾标脏一次（方案 §6.5）
+        // 每实例滑动距离 / 形状参数只在构建收尾标脏一次（方案 §6.5）
         cargosMesh.geometry.cargoDistance.needsUpdate = true;
+        cargosMesh.geometry.cargoCurve.needsUpdate = true;
     }
 
     if (built.objects.length) meshes.push(...built.objects);

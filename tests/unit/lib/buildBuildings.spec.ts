@@ -5,7 +5,7 @@ import { findPosForAreas, calcBuildingTrans } from '@/blueprint/planet';
 import { fromStr } from '@/blueprint/parser';
 import type { BlueprintArea, BlueprintBuilding } from '@/blueprint/parser';
 import type { TextureSink } from '@/iconTexture';
-import { PLANET_RADIUS, PLANET_SEGMENT } from '@/planetConstants';
+import { HEIGHT_GRID_SIZE, PLANET_RADIUS, PLANET_SEGMENT } from '@/planetConstants';
 import { buildBuildings } from '@/lib/core/buildBuildings';
 import type { BuildBuildingsResult } from '@/lib/core/buildBuildings';
 import {
@@ -94,12 +94,13 @@ function beltBuilding(
     outputObjIdx: number,
     yaw = 0,
     itemId = 2001,
-    modelIndex = 35
+    modelIndex = 35,
+    z = 0
 ): BlueprintBuilding {
     return makeBuilding({
         localOffset: [
-            { x, y, z: 0 },
-            { x, y, z: 0 },
+            { x, y, z },
+            { x, y, z },
         ],
         yaw: [yaw, yaw],
         itemId,
@@ -162,19 +163,56 @@ function instanceCount(mesh: unknown): number {
     return (mesh as { count: number }).count;
 }
 
-/** 条带两端点（局部 z = ∓0.5；-z 为流动方向） */
+/** 条带两端点（局部 z = ∓BELT_LEN/2；-z 为流动方向） */
 function stripEnds(mesh: Belts, i: number) {
     const m = new Matrix4();
     mesh.getMatrixAt(i, m);
     return {
         matrix: m,
-        down: new Vector3(0, 0, -0.5).applyMatrix4(m),
-        up: new Vector3(0, 0, 0.5).applyMatrix4(m),
+        down: new Vector3(0, 0, -BELT_LEN / 2).applyMatrix4(m),
+        up: new Vector3(0, 0, BELT_LEN / 2).applyMatrix4(m),
     };
 }
 
 function cellCenter(transforms: Matrix4[][], index: number): Vector3 {
     return new Vector3().setFromMatrixPosition(transforms[index][0]);
+}
+
+/** 读第 i 个条带的形状参数 `(bend, slope)`（写在实例属性 `aBeltCurve` 里） */
+function curveAt(mesh: Belts, i: number): { bend: number; slope: number } {
+    const a = mesh.geometry.beltCurve.array as Float32Array;
+    return { bend: a[i * 2], slope: a[i * 2 + 1] };
+}
+
+/**
+ * 复刻 `BeltMaterial` 顶点着色器的弯折公式，返回相位 `phase`（1=后缘入射，0=前缘出射）
+ * 处的中线点（世界坐标，含 `BELT_LIFT` 抬升）。
+ *
+ * 用途：验证转角两端的**落点**——正确时正好是相邻两格共享边的中点，
+ * 圆心取错（本格中心 / 等弧长半径）会偏出 0.24 以上。
+ */
+function arcPoint(mesh: Belts, i: number, phase: number): Vector3 {
+    const m = new Matrix4();
+    mesh.getMatrixAt(i, m);
+    const { bend } = curveAt(mesh, i);
+    const h = -Math.sign(bend);
+    const ang = h * Math.PI * 0.5 * (1 - phase);
+    const ca = Math.cos(ang);
+    const sa = Math.sin(ang);
+    const c0 = -h * Math.SQRT1_2;
+    const s0 = Math.SQRT1_2;
+    const dx = c0 * ca - s0 * sa;
+    const dz = c0 * sa + s0 * ca;
+    return new Vector3(
+        h * (BELT_LEN / Math.SQRT2) + (BELT_LEN / 2) * dx,
+        0,
+        (BELT_LEN / 2) * dz
+    ).applyMatrix4(m);
+}
+
+/** 两格中心连线的中点 ≈ 它们共享边的中点（仅差球面弦高） */
+function sharedEdgeMid(a: Vector3, b: Vector3): Vector3 {
+    return a.clone().add(b).multiplyScalar(0.5);
 }
 
 describe('buildBuildings · 传送带条带与圆点', () => {
@@ -449,6 +487,61 @@ describe('buildBuildings · 货物几何与垂直预算', () => {
     });
 });
 
+describe('buildBuildings · 转角与坡度', () => {
+    it('转角格 bend = ±π/2，弧线两端落在相邻两格共享边的中点（A-4、A-6）', () => {
+        nextIndex = 0;
+        const north = beltBuilding(10, 10, 1, 0);
+        // 转角格的 yaw 是入 (+y) / 出 (+x) 方向的角平分线 = 45°
+        const corner = beltBuilding(10, 11, 2, 45);
+        const east = beltBuilding(11, 11, -1, 90);
+        const result = build([north, corner, east]);
+        try {
+            const mesh = stripMeshes(result)[0];
+            expect(mesh.count).toBe(2);
+            // 实例 0 = 直段，实例 1 = 转角
+            expect(curveAt(mesh, 0).bend).toBe(0);
+            expect(Math.abs(curveAt(mesh, 1).bend)).toBeCloseTo(Math.PI / 2, 6);
+
+            const entry = sharedEdgeMid(
+                cellCenter(result.transforms, north.index),
+                cellCenter(result.transforms, corner.index)
+            );
+            const exit = sharedEdgeMid(
+                cellCenter(result.transforms, corner.index),
+                cellCenter(result.transforms, east.index)
+            );
+            // 残差只有 BELT_LIFT(0.04) + 球面弦高；圆心取错会偏出 0.24 以上
+            expect(arcPoint(mesh, 1, 1).distanceTo(entry)).toBeLessThan(0.06);
+            expect(arcPoint(mesh, 1, 0).distanceTo(exit)).toBeLessThan(0.06);
+        } finally {
+            result.buildings.dispose();
+            result.iconTexture.dispose();
+        }
+    });
+
+    it('坡度 = Δz × HEIGHT_GRID_SIZE，亚台阶噪声归零（F8、S12）', () => {
+        nextIndex = 0;
+        const flat = beltBuilding(10, 10, 1, 0, 2001, 35, 0);
+        const up = beltBuilding(10, 11, 2, 0, 2001, 35, 0.5);
+        const noise = beltBuilding(10, 12, -1, 0, 2001, 35, 0.52);
+        const result = build([flat, up, noise]);
+        try {
+            const mesh = stripMeshes(result)[0];
+            expect(mesh.count).toBe(2);
+            expect(curveAt(mesh, 0).bend).toBe(0);
+            expect(curveAt(mesh, 0).slope).toBeCloseTo(
+                0.5 * HEIGHT_GRID_SIZE,
+                6
+            );
+            // 0.02 格 = 0.027 世界单位 < BELT_SLOPE_EPS → 视为平地
+            expect(curveAt(mesh, 1).slope).toBe(0);
+        } finally {
+            result.buildings.dispose();
+            result.iconTexture.dispose();
+        }
+    });
+});
+
 describe('buildBuildings · 资源释放', () => {
     it('dispose 释放条带/圆点/分拣器几何，且可重复调用（R-4）', () => {
         nextIndex = 0;
@@ -492,9 +585,14 @@ describe('BeltMaterial · 箭头着色器注入结构', () => {
 
     it('顶点阶段从 position / normal 取坐标，不引用 uv（G-1）', () => {
         const { vs } = injected();
-        expect(vs).toContain('vBeltPhase = position.z + 0.5;');
+        // BELT_LEN 已烘进几何 → 相位必须除以段长（§3.6 / GL10）
+        expect(vs).toContain('vBeltPhase = position.z /');
+        expect(vs).toContain('+ 0.5;');
         expect(vs).toContain('vBeltX = position.x;');
         expect(vs).toContain('vBeltNY = normal.y;');
+        expect(vs).toContain('attribute vec2 aBeltCurve;');
+        expect(vs).toContain('transformed.y -= (position.z /');
+        expect(vs).toContain('if (abs(bend) >');
         expect(vs).not.toContain('vUv');
     });
 
@@ -513,9 +611,9 @@ describe('BeltMaterial · 箭头着色器注入结构', () => {
         // 符号必须是 +：货物着色器是 transformed.z -= cargoMove * d
         expect(fs).toContain('fract(vBeltPhase + cargoMove)');
         expect(fs).not.toContain('fract(vBeltPhase - cargoMove)');
-        // 几何深 1 + 实例矩阵 scale(1,1,BELT_LEN) → 顶点局部 z ∈ [-0.5, 0.5] → 每格一个周期
+        // 几何本身长度 = 段长（实例矩阵不再缩放），每格一个周期
         const geometry = mesh.geometry;
-        expect(geometry.parameters.depth).toBe(1);
+        expect(geometry.parameters.depth).toBeCloseTo(BELT_LEN, 6);
         expect(geometry.parameters.width).toBeCloseTo(BELT_WIDTH, 6);
         expect(geometry.parameters.height).toBeCloseTo(BELT_HEIGHT, 6);
     });
@@ -523,7 +621,7 @@ describe('BeltMaterial · 箭头着色器注入结构', () => {
     it('customProgramCacheKey 与 CargoMaterial 不同（G-5）', () => {
         const belts = new Belts(1);
         const cargos = new Cargos(1);
-        expect(belts.material.customProgramCacheKey()).toBe('dsp-belt-arrow-v1');
+        expect(belts.material.customProgramCacheKey()).toBe('dsp-belt-arrow-v2');
         expect(belts.material.customProgramCacheKey()).not.toBe(
             cargos.material.customProgramCacheKey()
         );
