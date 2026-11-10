@@ -1,10 +1,10 @@
 import { Matrix4 } from 'three';
-import { findPosForAreas, calcBuildingTrans } from '@/blueprint/planet';
+import { findPosForAreas, calcBuildingTrans } from '@/planet/planet';
 import type { BlueprintArea, BlueprintBuilding } from '@/blueprint/parser';
 import { BVH } from '@/bvh/bvh';
 import { buildingMeta } from '@/data/building';
-import { PLANET_RADIUS, PLANET_SEGMENT } from '@/planetConstants';
-import type { ViewerRenderSettings } from '@/renderSettingsTypes';
+import { PLANET_RADIUS, PLANET_SEGMENT } from '@/planet/planetConstants';
+import type { ViewerRenderSettings } from '@/render/renderSettingsTypes';
 import { buildBVH } from '@/lib/core/buildBVH';
 import { describeBuild } from '@/lib/core/describeBuild';
 import type { BuildStats } from '@/lib/core/types';

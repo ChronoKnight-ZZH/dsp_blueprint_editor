@@ -19,7 +19,7 @@ import {
 } from "./modelCache";
 import { getKtx2Loader } from "./ktx2";
 import { applyModelMaterialTextures } from "./materialTextures";
-import type { TextureSettings } from "@/renderSettingsTypes";
+import type { TextureSettings } from "@/render/renderSettingsTypes";
 
 /** 已加载完成的 GLB 模型（`scene` 作为实例化渲染的原型，不要直接加进场景） */
 export interface LoadedGlbModel {

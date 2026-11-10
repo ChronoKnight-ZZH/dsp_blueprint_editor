@@ -1,8 +1,8 @@
 import type { PerspectiveCamera } from "three";
 import type { BlueprintData } from "@/blueprint/parser";
 import { fromStr } from "@/blueprint/parser";
-import { isBelt, isInserter } from "@/data/items";
-import type { ViewerRenderSettings } from "@/renderSettingsTypes";
+import { isInserter } from "@/data/items";
+import type { ViewerRenderSettings } from "@/render/renderSettingsTypes";
 import { RenderCore, RenderPhaseError } from "./core/RenderCore";
 import type { RebuildReason } from "./core/RenderCore";
 import type {

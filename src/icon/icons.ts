@@ -13,7 +13,7 @@ import {
     InstancedBufferGeometry,
     Mesh,
 } from "three";
-import { BlueprintBuilding } from "./blueprint/parser";
+import type { BlueprintBuilding } from "@/blueprint/parser";
 import { IconTexture } from "./iconTexture";
 
 export class IconsMaterial extends ShaderMaterial {

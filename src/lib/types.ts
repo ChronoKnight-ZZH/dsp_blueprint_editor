@@ -1,6 +1,6 @@
 import type { Matrix4 } from "three";
 import type { BlueprintArea, BlueprintData } from "@/blueprint/parser";
-import type { ViewerRenderSettings } from "@/renderSettingsTypes";
+import type { ViewerRenderSettings } from "@/render/renderSettingsTypes";
 import type { PreviewAnimationMode } from "./preview/types";
 
 /**
@@ -9,7 +9,7 @@ import type { PreviewAnimationMode } from "./preview/types";
  * 设置类型复用 `@/renderSettingsTypes`（纯类型、不 import vue），
  * 保证 `src/lib/**` 整体不依赖 Vue（方案 D1）。
  */
-export type { ViewerRenderSettings } from "@/renderSettingsTypes";
+export type { ViewerRenderSettings } from "@/render/renderSettingsTypes";
 
 /** 增量预览（preview-delta）的公开类型，宿主可原样转发自己的事件对象 */
 export type {

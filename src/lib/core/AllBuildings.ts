@@ -1,10 +1,10 @@
 import { InstancedMesh, Mesh, Object3D } from "three";
-import { IconTexture } from "@/iconTexture";
-import { Icons } from "@/icons";
-import { IconSubscript } from "@/iconSubscript";
-import { Cargos } from "@/cargos";
-import { Belts } from "@/belt";
-import { Inserters } from "@/inserter";
+import { IconTexture } from "@/icon/iconTexture";
+import { Icons } from "@/icon/icons";
+import { IconSubscript } from "@/icon/iconSubscript";
+import { Cargos } from "@/Animation/cargos";
+import { Belts } from "@/Animation/belt";
+import { Inserters } from "@/Animation/inserter";
 import type { BlueprintBuilding } from "@/blueprint/parser";
 import type { BuildingModelRef } from "./types";
 

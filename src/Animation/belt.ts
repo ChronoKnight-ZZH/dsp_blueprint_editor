@@ -6,8 +6,8 @@ import {
     MeshLambertMaterial,
 } from "three";
 import type { WebGLProgramParametersWithUniforms } from "three";
-import { GRID_HORIZONTAL } from "@/planetConstants";
-import { CARGO_SIZE } from "@/cargos";
+import { GRID_HORIZONTAL } from "@/planet/planetConstants";
+import { CARGO_SIZE } from "./cargos";
 
 /**
  * 传送带条带（Belt）。

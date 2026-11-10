@@ -12,8 +12,8 @@ import {
     Color,
     Group,
 } from "three";
-import { PlanetMapControls } from "@/PlanetMapControls";
-import { findPosForAreas, calcBuildingTrans } from "@/blueprint/planet";
+import { PlanetMapControls } from "@/planet/PlanetMapControls";
+import { findPosForAreas, calcBuildingTrans } from "@/planet/planet";
 import type { BlueprintData } from "@/blueprint/parser";
 import { onBuildingModelsChanged } from "@/models/buildingModel";
 import {
@@ -21,19 +21,19 @@ import {
     setSettingsProvider,
 } from "@/models/glbLoader";
 import { disposeKtx2Loader, setKtx2Renderer } from "@/models/ktx2";
-import { IconTexture } from "@/iconTexture";
-import type { TextureSink } from "@/iconTexture";
-import { createSkyGradient } from "@/skyGradient";
-import type { SkyGradient } from "@/skyGradient";
+import { IconTexture } from "@/icon/iconTexture";
+import type { TextureSink } from "@/icon/iconTexture";
+import { createSkyGradient } from "@/planet/skyGradient";
+import type { SkyGradient } from "@/planet/skyGradient";
 import type {
     TextureSettings,
     ViewerRenderSettings,
-} from "@/renderSettingsTypes";
+} from "@/render/renderSettingsTypes";
 import type { BuildingPickPayload, ThemeColors, ThemeName } from "../types";
 import { THEME_PALETTE, resolveTheme } from "./theme";
-import { PLANET_RADIUS, PLANET_SEGMENT } from "@/planetConstants";
-import { createPlanetScene } from "./planetScene";
-import type { PlanetSceneParts } from "./planetScene";
+import { PLANET_RADIUS, PLANET_SEGMENT } from "@/planet/planetConstants";
+import { createPlanetScene } from "@/planet/planetScene";
+import type { PlanetSceneParts } from "@/planet/planetScene";
 import { buildBuildings } from "./buildBuildings";
 import { buildBVH } from "./buildBVH";
 import { AllBuildings } from "./AllBuildings";

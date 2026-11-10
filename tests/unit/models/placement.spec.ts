@@ -21,7 +21,7 @@ function fakeModel(): LoadedGlbModel {
     };
 }
 
-import { GRID_HORIZONTAL as CONST_GRID_HORIZONTAL, HEIGHT_GRID_SIZE as CONST_GRID_VERTICAL } from '@/planetConstants';
+import { GRID_HORIZONTAL as CONST_GRID_HORIZONTAL, HEIGHT_GRID_SIZE as CONST_GRID_VERTICAL } from '@/planet/planetConstants';
 
 /**
  * 下面两个常量**刻意保持硬编码**，不直接引用 `@/planetConstants`：

@@ -11,13 +11,13 @@ import {
 import {
     SphereLatitudeGridGeometry,
     SphereLongitudeGridGeometry,
-} from "@/SphereGridGeometry";
-import { gridAreas } from "@/blueprint/planet";
+} from "./SphereGridGeometry";
+import { gridAreas } from "./planet";
 import {
     PLANET_RADIUS,
     PLANET_SEGMENT,
     GRID_PER_SEGMENT,
-} from "@/planetConstants";
+} from "./planetConstants";
 
 /**
  * 细线网格 LOD 阈值（相机到星球球心的距离，单位：世界单位）。

@@ -11,11 +11,11 @@
  * 本文件只保留 Vue 交互：放置 / 删除 / 预览 / 选中 / 快捷键 / 侧栏联动。
  */
 import { BeltParameters } from "@/blueprint/parser";
-import { calcBuildingTrans, PositionedBlueprint } from "@/blueprint/planet";
+import { calcBuildingTrans, PositionedBlueprint } from "@/planet/planet";
 import { Vector3 } from "three";
 import { itemIconId } from "@/data/icons";
-import { Updater } from "@/command";
-import { PLANET_RADIUS } from "@/planetConstants";
+import { Updater } from "@/render/command";
+import { PLANET_RADIUS } from "@/planet/planetConstants";
 import { AllBuildings } from "@/lib/core/AllBuildings";
 import {
     buildingIconId,
@@ -141,11 +141,11 @@ import {
 } from "three";
 import { RemoveBuildingCommand } from "@/blueprint/removeBuilding";
 import { commandQueueKey } from "@/define";
-import { findPosForAreas } from "@/blueprint/planet";
+import { findPosForAreas } from "@/planet/planet";
 import { buildReforms } from "@/blueprint/reform";
 import { onBuildingModelsChanged } from "@/models/buildingModel";
-import { PlanetMapControls } from "@/PlanetMapControls";
-import { createSkyGradient } from "@/skyGradient";
+import { PlanetMapControls } from "@/planet/PlanetMapControls";
+import { createSkyGradient } from "@/planet/skyGradient";
 import { attachCamera, attachRenderer } from "@/utils";
 import {
     createNeutralEnvironment,
@@ -153,13 +153,13 @@ import {
 } from "@/models/envMap";
 import { setTextureMaxAnisotropy } from "@/models/textureMaps";
 import { setKtx2Renderer } from "@/models/ktx2";
-import { getAppliedRenderSettings } from "@/renderSettings";
+import { getAppliedRenderSettings } from "@/render/renderSettings";
 import { setSettingsProvider } from "@/models/glbLoader";
-import { IconTexture } from "@/iconTexture";
-import { PLANET_SEGMENT } from "@/planetConstants";
+import { IconTexture } from "@/icon/iconTexture";
+import { PLANET_SEGMENT } from "@/planet/planetConstants";
 import { buildBuildings } from "@/lib/core/buildBuildings";
 import { buildBVH } from "@/lib/core/buildBVH";
-import { createPlanetScene } from "@/lib/core/planetScene";
+import { createPlanetScene } from "@/planet/planetScene";
 import type { BuildBuildingsResult } from "@/lib/core/buildBuildings";
 import type { BuildingModelRef } from "@/lib/core/types";
 

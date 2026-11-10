@@ -33,7 +33,7 @@ import {
     glbFailedModels,
 } from "./glbLoader";
 import type { LoadedGlbModel } from "./glbLoader";
-import { GRID_HORIZONTAL, HEIGHT_GRID_SIZE } from "@/planetConstants";
+import { GRID_HORIZONTAL, HEIGHT_GRID_SIZE } from "@/planet/planetConstants";
 
 /** 模型来源：'glb' 外部模型，'meta' 元数据表回退，'unknown' 两边都没有 */
 export type ModelSource = "glb" | "meta" | "unknown";

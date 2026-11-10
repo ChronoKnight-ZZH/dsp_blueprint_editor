@@ -9,21 +9,21 @@ import {
     CylinderGeometry,
     MeshLambertMaterial,
 } from "three";
-import type { TextureSink } from "@/iconTexture";
-import { IconTexture } from "@/iconTexture";
-import { IconGeometry, Icons } from "@/icons";
-import { IconSubscript } from "@/iconSubscript";
-import type { TextStyle } from "@/iconSubscript";
-import { CARGO_COLOR, Cargos } from "@/cargos";
+import type { TextureSink } from "@/icon/iconTexture";
+import { IconTexture } from "@/icon/iconTexture";
+import { IconGeometry, Icons } from "@/icon/icons";
+import { IconSubscript } from "@/icon/iconSubscript";
+import type { TextStyle } from "@/icon/iconSubscript";
+import { CARGO_COLOR, Cargos } from "@/Animation/cargos";
 import {
     BELT_LEN,
     BELT_LIFT,
     BELT_SLOPE_EPS,
     CARGO_LIFT,
     Belts,
-} from "@/belt";
-import { Inserters } from "@/inserter";
-import { HEIGHT_GRID_SIZE } from "@/planetConstants";
+} from "@/Animation/belt";
+import { Inserters } from "@/Animation/inserter";
+import { HEIGHT_GRID_SIZE } from "@/planet/planetConstants";
 import { buildingMeta, noIconBuildings } from "@/data/building";
 import { isBelt, isInserter } from "@/data/items";
 import { itemIconId } from "@/data/icons";
@@ -38,7 +38,7 @@ import { reapplyLoadedModelMaterials } from "@/models/glbLoader";
 import type {
     TextureSettings,
     ViewerRenderSettings,
-} from "@/renderSettingsTypes";
+} from "@/render/renderSettingsTypes";
 import { AllBuildings } from "./AllBuildings";
 import type { BuildStats, BuildingModelRef } from "./types";
 import {

@@ -9,7 +9,7 @@
  */
 
 import { reactive } from "vue";
-import type { FullRenderSettings } from "@/renderSettingsTypes";
+import type { FullRenderSettings } from "./renderSettingsTypes";
 
 /** 贴图通道：-a 反照率 / -n 法线 / -s 高光·粗糙 / -e 自发光 / -eff 特效 / -dirt 污渍 / -glass 玻璃 */
 export type TextureChannel =

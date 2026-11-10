@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { BlueprintBuilding, BlueprintData } from "./parser";
-import { Command, Updater } from "@/command";
+import { Command, Updater } from "@/render/command";
 
 /**
  * 修改全息信标（itemId=2401）自定义文本（content 字段）的撤销命令。

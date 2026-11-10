@@ -1,11 +1,11 @@
 import { Color, Matrix4, Quaternion, ShaderLib, Vector3 } from 'three';
 import type { BoxGeometry, WebGLProgramParametersWithUniforms } from 'three';
 import { readFileSync } from 'fs';
-import { findPosForAreas, calcBuildingTrans } from '@/blueprint/planet';
+import { findPosForAreas, calcBuildingTrans } from '@/planet/planet';
 import { fromStr } from '@/blueprint/parser';
 import type { BlueprintArea, BlueprintBuilding } from '@/blueprint/parser';
-import type { TextureSink } from '@/iconTexture';
-import { HEIGHT_GRID_SIZE, PLANET_RADIUS, PLANET_SEGMENT } from '@/planetConstants';
+import type { TextureSink } from '@/icon/iconTexture';
+import { HEIGHT_GRID_SIZE, PLANET_RADIUS, PLANET_SEGMENT } from '@/planet/planetConstants';
 import { buildBuildings } from '@/lib/core/buildBuildings';
 import type { BuildBuildingsResult } from '@/lib/core/buildBuildings';
 import {
@@ -15,8 +15,8 @@ import {
     BELT_LIFT,
     BELT_WIDTH,
     CARGO_LIFT,
-} from '@/belt';
-import { CARGO_COLOR, CARGO_SIZE, Cargos } from '@/cargos';
+} from '@/Animation/belt';
+import { CARGO_COLOR, CARGO_SIZE, Cargos } from '@/Animation/cargos';
 import { isBelt } from '@/data/items';
 
 /**

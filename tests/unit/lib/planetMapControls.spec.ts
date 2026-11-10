@@ -1,6 +1,6 @@
 import { PerspectiveCamera, Vector3 } from 'three';
-import { PlanetMapControls } from '@/PlanetMapControls';
-import { PLANET_RADIUS } from '@/planetConstants';
+import { PlanetMapControls } from '@/planet/PlanetMapControls';
+import { PLANET_RADIUS } from '@/planet/planetConstants';
 
 /**
  * `PlanetMapControls.focusSpherePoint` / `reset` 的回归测试。

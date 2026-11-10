@@ -1,4 +1,4 @@
-import { findPosForAreas } from '@/blueprint/planet';
+import { findPosForAreas } from '@/planet/planet';
 import { BlueprintArea } from '@/blueprint/parser';
 
 describe('findPosForAreas', () => {

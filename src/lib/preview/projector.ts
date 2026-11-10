@@ -20,9 +20,9 @@ import {
     HEIGHT_GRID_SIZE,
     PLANET_RADIUS,
     PLANET_SEGMENT,
-} from "@/planetConstants";
-import { findPosForAreas } from "@/blueprint/planet";
-import type { PositionedBlueprint } from "@/blueprint/planet";
+} from "@/planet/planetConstants";
+import { findPosForAreas } from "@/planet/planet";
+import type { PositionedBlueprint } from "@/planet/planet";
 import type { BlueprintArea } from "@/blueprint/parser";
 import type { PreviewAreaLike, PreviewCoordinateSystem } from "./types";
 

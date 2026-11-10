@@ -26,7 +26,7 @@ import {
 import { materialMapUrls } from "./textureManifest";
 import type { MaterialTextureSet } from "./textureMaps";
 import { loadMaterialTextureSet } from "./textureMaps";
-import type { TextureSettings } from "@/renderSettingsTypes";
+import type { TextureSettings } from "@/render/renderSettingsTypes";
 
 /**
  * 设置不再从 `@/renderSettings` 全局读取（那会 import vue，见方案 D1），

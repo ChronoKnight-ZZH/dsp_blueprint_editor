@@ -11,7 +11,7 @@ import {
     SRGBColorSpace,
 } from "three";
 import { BlueprintReformData } from "./parser";
-import { PositionedBlueprint } from "./planet";
+import type { PositionedBlueprint } from "@/planet/planet";
 
 /** 无地基（未改造），不渲染 */
 export const REFORM_TYPE_NONE = 0;

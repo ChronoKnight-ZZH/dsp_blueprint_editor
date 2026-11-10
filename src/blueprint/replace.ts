@@ -7,7 +7,7 @@ import {
 import { recipesMap } from "@/data/recipes";
 import { isBelt, isStation } from "@/data/items";
 import { recipeIconId } from "@/data/icons";
-import { Command, Updater } from "@/command";
+import { Command, Updater } from "@/render/command";
 
 export interface ReplaceParams {
     searchRecipe: number;

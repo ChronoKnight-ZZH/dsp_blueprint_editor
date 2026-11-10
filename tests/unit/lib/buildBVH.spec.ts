@@ -1,8 +1,8 @@
 import { Matrix4 } from 'three';
-import { findPosForAreas, calcBuildingTrans } from '@/blueprint/planet';
+import { findPosForAreas, calcBuildingTrans } from '@/planet/planet';
 import type { BlueprintArea, BlueprintBuilding } from '@/blueprint/parser';
 import { buildingMeta } from '@/data/building';
-import { PLANET_RADIUS, PLANET_SEGMENT } from '@/planetConstants';
+import { PLANET_RADIUS, PLANET_SEGMENT } from '@/planet/planetConstants';
 import { buildBVH } from '@/lib/core/buildBVH';
 
 /**
