@@ -471,8 +471,13 @@ onMounted(() => {
         if (lastTimeStamp) {
             c.updateTimeDelta((time - lastTimeStamp) / 1000);
         }
-        if (b.value?.buildings.cargos)
-            b.value.buildings.cargos.cargoMove = (time % 1000) / 1000;
+        // 货物位移与条带箭头共用一个 0..1 相位；没有条带时 belts 为 null，必须判空
+        const built = b.value?.buildings;
+        if (built !== undefined) {
+            const cargoMove = (time % 1000) / 1000;
+            built.cargos.cargoMove = cargoMove;
+            if (built.belts !== null) built.belts.cargoMove = cargoMove;
+        }
         lastTimeStamp = time;
         requestAnimationFrame(animate);
         const cameraUpdated = c.update();

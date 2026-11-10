@@ -14,7 +14,8 @@ import { IconTexture } from "@/iconTexture";
 import { IconGeometry, Icons } from "@/icons";
 import { IconSubscript } from "@/iconSubscript";
 import type { TextStyle } from "@/iconSubscript";
-import { Cargos } from "@/cargos";
+import { CARGO_COLOR, Cargos } from "@/cargos";
+import { BELT_LEN, BELT_LIFT, CARGO_LIFT, Belts } from "@/belt";
 import { buildingMeta, noIconBuildings } from "@/data/building";
 import { isBelt, isInserter } from "@/data/items";
 import { itemIconId } from "@/data/icons";
@@ -96,98 +97,148 @@ export function buildBuildings(
     if (options.reapplyMaterials !== false)
         reapplyLoadedModelMaterials(options.textureSettings);
 
+    /**
+     * 传送带：**有输出的格**画条带（每格一段），**孤立段**画圆点。
+     *
+     * 条带姿态 = `base × Rx(π/2) × T(0, BELT_LIFT, 0) × S(1, 1, BELT_LEN)`，乘序不可换：
+     *   - `base`（`transforms[i][0]`）**已经包含建筑 yaw**：`Ry(lon)·Rx(-lat)·Rz(-yaw)·T`，
+     *     其局部 +y 轴就是本格流向（与方案 §3.4-F5 的 `dir=(sin yaw, cos yaw)` 一致）；
+     *   - `Rx(π/2)` 把「建筑局部 +y＝流向」映射到「条带局部 -z＝流向」（货物着色器也向 -z 走）；
+     *   - `T` 只负责把盒体抬到球面之上，`S` 只拉伸长度，因此盒体恰好覆盖本格 ±段长/2。
+     *
+     * ⚠️ 与方案 §3.4 的差异（已实测确认，方案文字笔误）：方案写 `base × Rz(-yaw) × Rx(π/2)`，
+     * 但 `base` 已含 `Rz(-yaw)`，再乘一次等于 `-2·yaw`。用 4 个 fixture 比对「本格 → 输出格」
+     * 位移方向：按方案公式 yaw=90/180/270 的带子同向率 **0%**；去掉该 `Rz` 后为
+     * 328/333、312/350、69/71、8/8（余下的是分流器侧口 / 非 90° 整数 yaw，本就不指向输出格）。
+     * 若以后要恢复方案写法，必须先让 base 不含 yaw。
+     *
+     * **不读 `transforms[b.index][1]`**：DSP 蓝图里一条传送带记录只代表 1 格，
+     * 段长与方向都取自 `yaw[0]` 与 `BELT_LEN`（方案 §3.4-F1/F2/F4）。
+     *
+     * 返回条带 mesh（可能为 null：没有带子或全部是孤立段），供 `AllBuildings.belts`
+     * 在帧循环里写 `cargoMove`；条带/圆点 mesh 已放进 `objects`，释放由 `AllBuildings.dispose` 覆盖。
+     */
     const buildBelts = (belts: BlueprintBuilding[]) => {
-        const thickness = 0.1;
-        const material = new MeshLambertMaterial();
         const objects: Object3D[] = [];
-        {
+
+        // ── ① 条带：只给有输出的格（每格一段） ──
+        const withOutput = belts.filter((b) => b.outputObjIdx >= 0);
+        let beltMesh: Belts | null = null;
+        if (withOutput.length) {
+            beltMesh = new Belts(withOutput.length);
+            // Rx(π/2) 对所有带子相同，构造一次即可（yaw 已在 base 内）
+            const rot = new Matrix4().makeRotationX(Math.PI / 2);
+            const trans = new Matrix4();
+            const cargoTrans = new Matrix4();
+            const temp = new Matrix4();
+
+            for (let i = 0; i < withOutput.length; i++) {
+                const b = withOutput[i];
+                const base = transforms[b.index][0];
+
+                trans.copy(base).multiply(rot);
+                trans.multiply(temp.makeTranslation(0, BELT_LIFT, 0));
+                trans.multiply(temp.makeScale(1, 1, BELT_LEN));
+
+                beltMesh.setMatrixAt(i, trans);
+                // 条带取元数据色（方案 §9.1-E-3 / G5）：材质色保持默认白，避免二次相乘
+                beltMesh.setColorAt(i, colorOf(b.modelIndex));
+                // modelRef 只能用 base：指向条带 mesh 会让 getBuildingModel 返回被拉伸的矩阵
+                modelRef[b.index] = { matrix: base };
+
+                // 货物：**必须从 base 重新 copy**（不能复用被 scale 过的 trans，否则货物被拉长
+                // BELT_LEN 倍、滑动量变 BELT_LEN²，方案 §6.6-S3）；+z 是本格后缘（逆流向），
+                // 货物从后缘滑到前缘正好走过一格 = 一个周期。
+                cargoTrans.copy(base).multiply(rot);
+                cargoTrans.multiply(
+                    temp.makeTranslation(0, CARGO_LIFT, BELT_LEN / 2)
+                );
+                addCargo(cargoTrans, CARGO_COLOR, BELT_LEN);
+            }
+            beltMesh.instanceMatrix.needsUpdate = true;
+            if (beltMesh.instanceColor !== null)
+                beltMesh.instanceColor.needsUpdate = true;
+            objects.push(beltMesh);
+        }
+
+        // ── ② 孤立段：沿用现有圆盘（无输出就没有可靠方向，方案 §6.3-P0-3） ──
+        const isolated = belts.filter((b) => b.outputObjIdx < 0);
+        if (isolated.length) {
+            const thickness = 0.1;
             const geometry = new CylinderGeometry(0.32, 0.32, thickness, 8);
-            const mesh = new InstancedMesh(geometry, material, belts.length);
+            const material = new MeshLambertMaterial();
+            const dots = new InstancedMesh(geometry, material, isolated.length);
+            // 乘序不可换（方案 §6.6-S10）：先 Rx(π/2) 把圆柱轴放平，再沿 +z 抬半个厚度贴地
             const offset = new Matrix4().makeRotationX(Math.PI / 2);
             offset.premultiply(
                 new Matrix4().makeTranslation(0, 0, thickness / 2)
             );
             const trans = new Matrix4();
-            for (let i = 0; i < belts.length; i++) {
-                const b = belts[i];
-                trans.copy(transforms[b.index][0]);
-                trans.multiply(offset);
-                mesh.setMatrixAt(i, trans);
-                mesh.setColorAt(i, colorOf(b.modelIndex));
-                modelRef[b.index] = { mesh, instance: i };
+            for (let i = 0; i < isolated.length; i++) {
+                const b = isolated[i];
+                const base = transforms[b.index][0];
+                trans.copy(base).multiply(offset);
+                dots.setMatrixAt(i, trans);
+                dots.setColorAt(i, colorOf(b.modelIndex));
+                modelRef[b.index] = { matrix: base };
             }
-            mesh.instanceMatrix.needsUpdate = true;
-            mesh.instanceColor!.needsUpdate = true;
-            objects.push(mesh);
+            dots.instanceMatrix.needsUpdate = true;
+            if (dots.instanceColor !== null) dots.instanceColor.needsUpdate = true;
+            objects.push(dots);
         }
-        const linkThickness = 0.6 * thickness;
-        {
-            // links
-            const geometry = new BoxGeometry(0.15, linkThickness, 1.0);
-            const mesh = new InstancedMesh(geometry, material, belts.length);
-            let numLinks = 0;
-            const offset = new Matrix4().makeTranslation(
-                0,
-                linkThickness / 2,
-                -0.5
-            );
-            const p1 = new Vector3();
-            const p2 = new Vector3();
-            const d = new Vector3();
-            const temp = new Matrix4();
-            const trans = new Matrix4();
-            for (let i = 0; i < belts.length; i++) {
-                const b1 = belts[i];
-                if (b1.outputObjIdx < 0) continue;
-                p1.setFromMatrixPosition(transforms[b1.index][0]);
-                p2.setFromMatrixPosition(transforms[b1.outputObjIdx][0]);
-                const len = d.subVectors(p1, p2).length();
-                trans.identity();
-                trans.lookAt(p1, p2, p1);
-                trans.premultiply(temp.makeTranslation(p1.x, p1.y, p1.z));
 
-                const color = colorOf(b1.modelIndex);
-                addCargo(trans, color, len);
-
-                trans.multiply(temp.makeScale(1, 1, len));
-                trans.multiply(offset);
-                mesh.setMatrixAt(numLinks, trans);
-                mesh.setColorAt(numLinks, color);
-                numLinks++;
-            }
-            if (numLinks) {
-                mesh.count = numLinks;
-                mesh.instanceMatrix.needsUpdate = true;
-                mesh.instanceColor!.needsUpdate = true;
-                objects.push(mesh);
-            }
-        }
-        return objects;
+        return { objects, beltMesh };
     };
 
+    /**
+     * 分拣器：横梁在上、货物在下，两者垂直分离（方案 §6.4）。
+     *
+     * 姿态仍由 `inserterTrans` 决定（**不改它**，拾取盒 `buildBVH` 与它共用几何，方案 §3.3）：
+     *   - 货物：基础姿态**先 `copy` 再下移** `CARGO_DROP`（必须在 `trans` 被 multiply 之前，
+     *     否则货物会被缩放/偏移污染，方案 §6.6-S3）；
+     *   - 横梁：同一基础姿态再抬高 `BEAM_EXTRA_LIFT`、按 `len` 缩放并前推半个梁长。
+     *
+     * 垂直预算（局部法线方向，`INSERTER_HEIGHT = 0.3`）：
+     *   横梁 [0.37, 0.43]、货物 [0.05, 0.35] → 间隙 0.02（方案 §6.4 / §9.1-D-1）。
+     *
+     * 边界：`modelRef` 仍指向横梁 mesh（其矩阵多了 +0.1 抬升），`SpitterInfo` 的投影位置
+     * 同步偏移 0.1，视觉一致、不影响拾取。
+     */
     const buildInserters = (inserters: BlueprintBuilding[]) => {
         const inserterThickness = 0.06;
+        /** 横梁在 `INSERTER_HEIGHT` 之上再抬高（方案 §10.2-Q7 默认值） */
+        const BEAM_EXTRA_LIFT = 0.1;
+        /** 货物相对基础姿态下移（方案 §10.2-Q7 默认值） */
+        const CARGO_DROP = 0.1;
+
         const geometry = new BoxGeometry(0.15, inserterThickness, 1.0);
         const material = new MeshLambertMaterial();
         const mesh = new InstancedMesh(geometry, material, inserters.length);
         const offset = new Matrix4().makeTranslation(0, 0, -0.5);
         const temp = new Matrix4();
         const trans = new Matrix4();
+        const cargoTrans = new Matrix4();
         for (let i = 0; i < inserters.length; i++) {
             const b = inserters[i];
 
             const len = inserterTrans(transforms[b.index], trans);
-            const color = colorOf(b.modelIndex);
-            addCargo(trans, color, len);
 
+            // ① 货物：基础姿态下移；颜色与分拣器横梁（元数据色）区分开
+            cargoTrans.copy(trans);
+            cargoTrans.multiply(temp.makeTranslation(0, -CARGO_DROP, 0));
+            addCargo(cargoTrans, CARGO_COLOR, len);
+
+            // ② 横梁：基础姿态抬高 + 缩放 + 前推半梁长
+            trans.multiply(temp.makeTranslation(0, BEAM_EXTRA_LIFT, 0));
             trans.multiply(temp.makeScale(1, 1, len));
             trans.multiply(offset);
+
             mesh.setMatrixAt(i, trans);
-            mesh.setColorAt(i, color);
+            mesh.setColorAt(i, colorOf(b.modelIndex));
             modelRef[b.index] = { mesh, instance: i };
         }
         mesh.instanceMatrix.needsUpdate = true;
-        mesh.instanceColor!.needsUpdate = true;
+        if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
         return [mesh];
     };
 
@@ -471,14 +522,22 @@ export function buildBuildings(
     const meshes: Object3D[] = [];
     const built = buildBoxes(boxes);
 
-    if (belts.length) meshes.push(...buildBelts(belts));
+    /** 条带 mesh 引用（只给帧循环写 `cargoMove`）；没有条带时为 null */
+    let beltMesh: Belts | null = null;
+    if (belts.length) {
+        const builtBelts = buildBelts(belts);
+        meshes.push(...builtBelts.objects);
+        beltMesh = builtBelts.beltMesh;
+    }
 
     if (inserters.length) meshes.push(...buildInserters(inserters));
 
     if (numCargos) {
         cargosMesh.count = numCargos;
         cargosMesh.instanceMatrix.needsUpdate = true;
-        cargosMesh.instanceColor!.needsUpdate = true;
+        if (cargosMesh.instanceColor !== null)
+            cargosMesh.instanceColor.needsUpdate = true;
+        // 每实例滑动距离只在构建收尾标脏一次（方案 §6.5）
         cargosMesh.geometry.cargoDistance.needsUpdate = true;
     }
 
@@ -508,7 +567,9 @@ export function buildBuildings(
         cargosMesh,
         modelRef,
         iconBuilt.subscriptsMesh,
-        iconBuilt.subscriptMap
+        iconBuilt.subscriptMap,
+        // 条带 mesh（可能是 null）；帧循环据此写 cargoMove 让箭头滚动
+        beltMesh
     );
 
     const glbInstanceCount = Object.values(built.perModelGlbCounts).reduce(

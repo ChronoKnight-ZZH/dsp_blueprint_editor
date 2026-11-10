@@ -3,6 +3,7 @@ import { IconTexture } from "@/iconTexture";
 import { Icons } from "@/icons";
 import { IconSubscript } from "@/iconSubscript";
 import { Cargos } from "@/cargos";
+import { Belts } from "@/belt";
 import type { BlueprintBuilding } from "@/blueprint/parser";
 import type { BuildingModelRef } from "./types";
 
@@ -24,7 +25,15 @@ export class AllBuildings extends Object3D {
         public readonly subscriptMap: Map<
             BlueprintBuilding,
             { startIdx: number; length: number }
-        > = new Map()
+        > = new Map(),
+        /**
+         * 条带 mesh，**只用于每帧写 `cargoMove`**（箭头滚动相位）。
+         *
+         * 省略或为 `null` 表示本次构建没有条带（没有带子 / 全部是孤立段），
+         * 帧循环必须判空。条带 mesh 已随 `objects` 挂到本对象下，`dispose()` 的
+         * `traverse` 会覆盖它的几何，因此这里**不需要**为它单写释放逻辑。
+         */
+        public readonly belts: Belts | null = null
     ) {
         super();
         this.add(...objects);
@@ -44,6 +53,9 @@ export class AllBuildings extends Object3D {
      * - `userData.sharedResource` 的几何来自 GLB 缓存，跨场景复用，**不能**在这里释放
      * - 图标图集是 RenderCore 级别的单例，由调用方在 `dispose()` 里统一释放，
      *   这里只释放网格与下标（`IconTexture` 另有 `dispose()`）
+     *
+     * 条带 mesh 是 `objects` 的一员，几何已被下面的 `traverse` 覆盖；`belts` 只是
+     * 帧循环用的引用，**不重复释放**。材质按现状不释放（方案 §6.6-S7）。
      */
     public dispose() {
         this.traverse((o) => {

@@ -1070,8 +1070,14 @@ export class RenderCore {
                 );
             this.lastTimestamp = time;
 
-            if (this.bundle !== null)
-                this.bundle.buildings.cargos.cargoMove = (time % 1000) / 1000;
+            if (this.bundle !== null) {
+                // 货物位移与条带箭头共用一个 0..1 相位，保证「箭头与货物同向同速」
+                const cargoMove = (time % 1000) / 1000;
+                this.bundle.buildings.cargos.cargoMove = cargoMove;
+                // 没有条带（无带子 / 全部孤立段）时 belts 为 null，必须判空
+                const belts = this.bundle.buildings.belts;
+                if (belts !== null) belts.cargoMove = cargoMove;
+            }
 
             const cameraUpdated = this.controls.update();
             this.planet.dirLight.position.copy(this._camera.position);
