@@ -22,13 +22,13 @@ import type { WebGLProgramParametersWithUniforms } from "three";
  */
 
 /** 横梁宽度（世界单位）：原 0.15 翻倍，顶面才容得下可辨识箭头（G12 / Q16） */
-export const INSERTER_BEAM_WIDTH = 0.30;
+export const INSERTER_BEAM_WIDTH = 0.45;
 
 /** 横梁厚度（世界单位）：侧面过矮，不画箭头 */
 export const INSERTER_BEAM_THICKNESS = 0.06;
 
 /** 横梁不透明度：0.5 太淡、0.75 太实（G13 / Q17） */
-export const INSERTER_OPACITY = 0.62;
+export const INSERTER_OPACITY = 0.58;
 
 /** 箭头滚动周期（世界单位）：1 格臂（约 1.2578）上约 2.5 个箭头（G14 / Q19） */
 export const INSERTER_ARROW_PERIOD = 0.5;

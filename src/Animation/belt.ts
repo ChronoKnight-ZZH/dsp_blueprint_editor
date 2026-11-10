@@ -222,7 +222,7 @@ export class BeltMaterial extends MeshLambertMaterial {
                 "#include <common>",
                 `attribute vec4 aBeltArc;   // (theta0, theta1, cx, cz)：几何空间的圆弧参数
 attribute vec4 aBeltAux;   // (slope, extend, exitDirX, exitDirZ)
-attribute vec2 aBeltStub;  // (backStub, frontStub)：圆环两端伸入邻格的直线段长度（世界单位）
+attribute vec2 aBeltEnds;  // (backEnd, frontEnd)：端面沿外向的位移，正=伸出、负=内收
 uniform float cargoMove;
 varying float vBeltPhase;
 varying float vBeltX;
@@ -251,8 +251,8 @@ if (abs(sweep) > ${BELT_ARC_EPS}) {
     float uRaw = 0.5 - position.z / ${BELT_LEN};
     float u = clamp(
         uRaw,
-        -aBeltStub.x / ${BELT_LEN},
-        1.0 + aBeltStub.y / ${BELT_LEN}
+        -aBeltEnds.x / ${BELT_LEN},
+        1.0 + aBeltEnds.y / ${BELT_LEN}
     );
     float uc = clamp(u, 0.0, 1.0);
     float th = aBeltArc.x + sweep * uc;
@@ -261,6 +261,11 @@ if (abs(sweep) > ${BELT_ARC_EPS}) {
     float tn = sign(sweep);                       // 流向切向 = tn·(−sinθ, cosθ)
     transformed.x = aBeltArc.z + r * cos(th) - tn * over * sin(th);
     transformed.z = aBeltArc.w + r * sin(th) + tn * over * cos(th);
+} else {
+    // ②b 直段端头：正值 = 沿流向伸出格子；负值 = 内收（端帽压住的那一段，线因此变短）。
+    //     只挪端面那一圈顶点，条带被"拉长/缩短"而不是整体平移，另一端仍与邻格贴合。
+    if (position.z > 0.0) transformed.z += aBeltEnds.x;
+    else transformed.z -= aBeltEnds.y;
 }
 
 // ③ 支线贴边：只把前缘顶点沿出口切线外推，后缘不动 —— 条带是被"拉长"而不是
@@ -308,8 +313,13 @@ export class BeltGeometry extends BoxGeometry {
     readonly beltArc: InstancedBufferAttribute;
     /** 逐实例 `(slope, extend, exitX, exitZ)`；默认全 0 = 平地、不外延 */
     readonly beltAux: InstancedBufferAttribute;
-    /** 逐实例 `(backStub, frontStub)`；条带恒为 0（不伸进邻格），圆环才用 */
-    readonly beltStub: InstancedBufferAttribute;
+    /**
+     * 逐实例 `(backEnd, frontEnd)`：两端端面沿**外向**的位移（世界单位）。
+     *
+     * 正值 = 伸出格子（圆环的 stub，用来把接缝埋进环里）；
+     * 负值 = 内收（端帽压住的那一段，让线变短）。
+     */
+    readonly beltEnds: InstancedBufferAttribute;
 
     constructor(count: number) {
         super(BELT_WIDTH, BELT_HEIGHT, BELT_LEN);
@@ -321,14 +331,26 @@ export class BeltGeometry extends BoxGeometry {
             new Float32Array(count * 4),
             4
         );
-        this.beltStub = new InstancedBufferAttribute(
+        this.beltEnds = new InstancedBufferAttribute(
             new Float32Array(count * 2),
             2
         );
         this.setAttribute("aBeltArc", this.beltArc);
         this.setAttribute("aBeltAux", this.beltAux);
-        this.setAttribute("aBeltStub", this.beltStub);
+        this.setAttribute("aBeltEnds", this.beltEnds);
     }
+}
+
+/** 逐实例写端头位移（条带与圆环共用） */
+export function writeBeltEnds(
+    geometry: { beltEnds: InstancedBufferAttribute },
+    i: number,
+    back: number,
+    front: number
+): void {
+    const a = geometry.beltEnds.array as Float32Array;
+    a[i * 2] = back;
+    a[i * 2 + 1] = front;
 }
 
 /** 逐实例写弧参数（条带与圆环共用的属性布局） */
@@ -396,5 +418,14 @@ export class Belts extends BeltMesh {
      */
     public setArcAt(i: number, p: BeltArcParams): void {
         writeBeltArc(this.geometry, i, p);
+    }
+
+    /**
+     * 写第 i 个条带两端的端面位移（世界单位，外向为正）。
+     *
+     * 端帽压住的那一端给负值（内收，线变短）；分拣器式的外延给正值。
+     */
+    public setEndsAt(i: number, back: number, front: number): void {
+        writeBeltEnds(this.geometry, i, back, front);
     }
 }

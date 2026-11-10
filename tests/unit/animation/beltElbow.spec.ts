@@ -1,4 +1,4 @@
-import { Matrix4, Vector3 } from "three";
+﻿import { Matrix4, Vector3 } from "three";
 import {
     BELT_ARC_RADIUS,
     BELT_ELBOW_COVER,
@@ -345,21 +345,21 @@ describe("BeltElbowGeometry · 转角带坡度（高度）", () => {
 });
 
 describe("BeltElbowGeometry · 与条带的属性同构", () => {
-    it("aBeltArc / aBeltAux / aBeltStub 都是逐实例属性，默认 0", () => {
+    it("aBeltArc / aBeltAux / aBeltEnds 都是逐实例属性，默认 0", () => {
         const geometry = new BeltElbowGeometry(3);
         expect(geometry.beltArc.itemSize).toBe(4);
         expect(geometry.beltAux.itemSize).toBe(4);
-        expect(geometry.beltStub.itemSize).toBe(2);
+        expect(geometry.beltEnds.itemSize).toBe(2);
         expect((geometry.beltArc.array as Float32Array).length).toBe(12);
-        expect((geometry.beltStub.array as Float32Array).length).toBe(6);
+        expect((geometry.beltEnds.array as Float32Array).length).toBe(6);
         for (const v of geometry.beltArc.array as Float32Array)
             expect(v).toBe(0);
-        for (const v of geometry.beltStub.array as Float32Array)
+        for (const v of geometry.beltEnds.array as Float32Array)
             expect(v).toBe(0);
         // 属性名必须与着色器里的 attribute 一致
         expect(geometry.getAttribute("aBeltArc")).toBe(geometry.beltArc);
         expect(geometry.getAttribute("aBeltAux")).toBe(geometry.beltAux);
-        expect(geometry.getAttribute("aBeltStub")).toBe(geometry.beltStub);
+        expect(geometry.getAttribute("aBeltEnds")).toBe(geometry.beltEnds);
     });
 
     it("几何只生成一次，多个实例共用同一份顶点（圆环形状不随格子变化）", () => {

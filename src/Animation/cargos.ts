@@ -26,6 +26,15 @@ export const CARGO_SIZE = 0.3;
  */
 export const CARGO_COLOR = new Color(0xf5e6c8);
 
+/**
+ * 条带货物的端点淡出宽度（`cargoMove` 单位，0..0.5）。
+ *
+ * 立方体在 `cargoMove ∈ [0, FADE]`（刚在端点"生成"）和 `[1−FADE, 1]`（到达端点"消失"）
+ * 两段里缩到 0，因此货物**不会被画到条带端点之外**；相邻格子的货物会在接缝处一收一放，
+ * 正好接上。0.06 ≈ 一格的 6%（默认约 7.5cm 行程），肉眼看是"在端点出现/消失"。
+ */
+export const CARGO_FADE = 0.06;
+
 /** 货物需要的圆弧子集（不含支线贴边的外延信息） */
 export type CargoArcShape = Pick<
     BeltArcParams,
@@ -44,6 +53,14 @@ class CargoGeometry extends BoxGeometry {
      */
     cargoArc: InstancedBufferAttribute;
 
+    /**
+     * 逐实例端点淡出宽度（`cargoMove` 的单位，0..0.5）：立方体在两端缩到 0 的行程占比。
+     *
+     * 条带给 `CARGO_FADE`（见 `belt.ts`），分拣器给 0 —— 分拣器的货物本来就该
+     * 从抓取点整块出现、到投放点整块消失，不需要缩放。
+     */
+    cargoFade: InstancedBufferAttribute;
+
     constructor(count: number) {
         super(CARGO_SIZE, CARGO_SIZE, CARGO_SIZE);
         this.cargoDistance = new InstancedBufferAttribute(
@@ -61,6 +78,11 @@ class CargoGeometry extends BoxGeometry {
             4
         );
         this.setAttribute("aCargoArc", this.cargoArc);
+        this.cargoFade = new InstancedBufferAttribute(
+            new Float32Array(count),
+            1
+        );
+        this.setAttribute("aCargoFade", this.cargoFade);
     }
 }
 
@@ -80,6 +102,7 @@ class CargoMaterial extends MeshLambertMaterial {
                 `attribute float cargoDistance;
 attribute float aCargoSlope;
 attribute vec4 aCargoArc;   // (theta0, theta1, cx, cz)：与条带同一份圆弧参数
+attribute float aCargoFade; // 端点淡出宽度（0..0.5，0 = 不淡出，分拣器走这里）
 uniform float cargoMove;
 
 #include <common>`
@@ -87,8 +110,17 @@ uniform float cargoMove;
             .replace(
                 "#include <skinning_vertex>",
                 `#include <skinning_vertex>
-// 直段滑动（转角分支里会重写 transformed.z，这里只是先算好坡度用的 z）
-transformed.z -= cargoMove * cargoDistance;
+// 端点「生成 / 消失」：立方体在刚好踩到格子两端时缩到 0，走开一点才长到全尺寸。
+// 这样货物不会被画到条带端点之外（线头线尾尤其明显），也正好实现
+// 「在端点生成、到端点后消失」。aCargoFade = 0 时这一段退化为 1（分拣器不受影响）。
+float fadeIn = smoothstep(0.0, aCargoFade, cargoMove);
+float fadeOut = 1.0 - smoothstep(1.0 - aCargoFade, 1.0, cargoMove);
+float sizeScale = aCargoFade > 0.0 ? fadeIn * fadeOut : 1.0;
+
+// 直段滑动（转角分支里会重写 transformed.x/z，这里只是先算好坡度用的 z）
+transformed.x = position.x * sizeScale;
+transformed.y = position.y * sizeScale;
+transformed.z = position.z * sizeScale - cargoMove * cargoDistance;
 
 // 坡度：对 transformed.z 做剪切，同时给出「中心抬升 m·slope」与「沿坡面的倾斜」，
 // 使立方体底面与条带顶面严格平行（用 position.z 只会平移不倾斜 → 一角插进条带）
@@ -104,9 +136,9 @@ if (abs(sweep) > 1e-4) {
     float cb = cos(beta);
     float sb = sin(beta);
 
-    // 先存再写：边写边读 transformed 会读到已改写的值（S14）
-    float lx = position.x;
-    float lz = position.z;
+    // 先存再写：边写边读 transformed 会读到已改写的值（S14）；局部尺寸已乘 sizeScale
+    float lx = position.x * sizeScale;
+    float lz = position.z * sizeScale;
     // 货物实例矩阵比条带多一个 +z 位移 R（见 buildBelts 的 cargoTrans），这里减回去
     transformed.x = aCargoArc.z + R * cos(th) + lx * cb - lz * sb;
     transformed.z = aCargoArc.w + R * sin(th) - R + lx * sb + lz * cb;
@@ -140,6 +172,15 @@ export class Cargos extends InstancedMesh {
         a[i * 4 + 2] = arc?.centerX ?? 0;
         a[i * 4 + 3] = arc?.centerZ ?? 0;
         (this.geometry.cargoSlope.array as Float32Array)[i] = arc?.slope ?? 0;
+    }
+
+    /**
+     * 写第 i 个货物的端点淡出宽度（`cargoMove` 单位；0 = 不淡出）。
+     *
+     * 条带给 `CARGO_FADE`，分拣器给 0。
+     */
+    setCargoFadeAt(i: number, fade: number) {
+        (this.geometry.cargoFade.array as Float32Array)[i] = fade;
     }
 
     public get cargoMove() {

@@ -1,4 +1,11 @@
-import { Color, Matrix4, Quaternion, ShaderLib, Vector3 } from "three";
+import {
+    Color,
+    InstancedMesh,
+    Matrix4,
+    Quaternion,
+    ShaderLib,
+    Vector3,
+} from "three";
 import type { BoxGeometry, WebGLProgramParametersWithUniforms } from "three";
 import { readFileSync } from "fs";
 import { findPosForAreas, calcBuildingTrans } from "@/planet/planet";
@@ -24,7 +31,20 @@ import {
     CARGO_LIFT,
 } from "@/Animation/belt";
 import { BeltElbows } from "@/Animation/beltElbow";
-import { CARGO_COLOR, CARGO_SIZE, Cargos } from "@/Animation/cargos";
+import {
+    BELT_CAP_DIAMETER,
+    BELT_CAP_LIFT,
+    BELT_CAP_OVERLAP,
+    BELT_CAP_RADIUS,
+    BELT_CAP_SHORTEN,
+    BELT_CAP_TIP_INSET,
+} from "@/Animation/beltCaps";
+import {
+    CARGO_COLOR,
+    CARGO_FADE,
+    CARGO_SIZE,
+    Cargos,
+} from "@/Animation/cargos";
 import { isBelt, isInserter } from "@/data/items";
 
 /**
@@ -168,8 +188,11 @@ function dotMeshes(result: BuildBuildingsResult) {
 }
 
 /** 端帽 mesh（半圆盘，v4 新增） */
-function capMeshes(result: BuildBuildingsResult) {
-    return result.buildings.children.filter((o) => o.name === "beltCaps");
+function capMeshes(result: BuildBuildingsResult): InstancedMesh[] {
+    return result.buildings.children.filter(
+        (o): o is InstancedMesh =>
+            o instanceof InstancedMesh && o.name === "beltCaps"
+    );
 }
 
 /** 圆环弯头 mesh（转角格，v5 新增） */
@@ -179,9 +202,9 @@ function elbowMeshes(result: BuildBuildingsResult): BeltElbows[] {
     );
 }
 
-/** 读第 i 个圆环两端允许伸出的直线段长度 */
-function stubAt(mesh: Belts | BeltElbows, i: number) {
-    const a = mesh.geometry.beltStub.array as Float32Array;
+/** 读第 i 个条带/圆环两端的端面位移（正=伸出格子，负=内收） */
+function endsAt(mesh: Belts | BeltElbows, i: number) {
+    const a = mesh.geometry.beltEnds.array as Float32Array;
     return { back: a[i * 2], front: a[i * 2 + 1] };
 }
 
@@ -266,8 +289,8 @@ describe("buildBuildings · 传送带条带与圆点", () => {
             // 线头（#0，无前驱）+ 线尾（#2，无后继）各一个半圆帽
             expect(caps).toHaveLength(1);
             expect(instanceCount(caps[0])).toBe(2);
-            // 货物只挂在有输出的格上（#0、#1）
-            expect(result.stats.cargoCount).toBe(2);
+            // 每个非圆点带子格都挂货物（含线尾格 #2）
+            expect(result.stats.cargoCount).toBe(3);
         } finally {
             result.buildings.dispose();
             result.iconTexture.dispose();
@@ -443,7 +466,8 @@ describe("buildBuildings · 货物几何与垂直预算", () => {
                 expect(scale.y).toBeCloseTo(1, 6);
                 expect(scale.z).toBeCloseTo(1, 6);
             }
-            expect(result.stats.cargoCount).toBe(2);
+            // 2 个带子格（线尾格也挂货物）+ 1 个分拣器 = 3 件货物
+            expect(result.stats.cargoCount).toBe(3);
         } finally {
             result.buildings.dispose();
             result.iconTexture.dispose();
@@ -638,7 +662,7 @@ describe("buildBuildings · 转角与坡度", () => {
             expect(tangent.dot(dir)).toBeCloseTo(1, 2);
 
             // 两端都邻接直段 → 两端都伸出，把接缝埋进环里（属性是 Float32，precision 取 6）
-            const stub = stubAt(ring, 0);
+            const stub = endsAt(ring, 0);
             expect(stub.back).toBeCloseTo(BELT_ELBOW_STUB, 6);
             expect(stub.front).toBeCloseTo(BELT_ELBOW_STUB, 6);
             // 圆的弧长 R·π/2 = 0.785L，加上两端 stub 正好 = 1 格 → 箭头间距与直段一致
@@ -668,7 +692,7 @@ describe("buildBuildings · 转角与坡度", () => {
             expect(elbows).toHaveLength(1);
             expect(instanceCount(elbows[0])).toBe(4);
             for (let i = 0; i < 4; i += 1) {
-                const stub = stubAt(elbows[0], i);
+                const stub = endsAt(elbows[0], i);
                 expect(stub.back).toBe(0);
                 expect(stub.front).toBe(0);
                 const arc = shapeAt(elbows[0], i);
@@ -871,12 +895,12 @@ describe("fixture 回归 · starting_base_01029", () => {
             expect((built.buildings.belts?.count ?? 0) + elbowCount).toBe(
                 strips.length
             );
-            // 货物口径不变：只有「有输出」的格挂货物（+ 每个分拣器一件）
+            // 货物口径：每个条带 / 圆环格一件（含线尾格）+ 每个分拣器一件
             const inserterCount = data.buildings.filter((b) =>
                 isInserter(b.itemId)
             ).length;
             expect(built.stats.cargoCount).toBe(
-                withOutput.length + inserterCount
+                strips.length + inserterCount
             );
 
             const dots = dotMeshes(built);
@@ -894,5 +918,135 @@ describe("fixture 回归 · starting_base_01029", () => {
             built.iconTexture.dispose();
             warn.mockRestore();
         }
+    });
+});
+
+describe("buildBuildings · 端帽内收与货物端点淡出", () => {
+    it("端帽压进条带：条带端面内收，半圆尖点在格边界内侧（不再向格外鼓出）", () => {
+        nextIndex = 0;
+        const buildings = [
+            beltBuilding(10, 10, 1),
+            beltBuilding(10, 11, 2),
+            beltBuilding(10, 12, -1), // 线尾
+        ];
+        const result = build(buildings);
+        try {
+            const mesh = stripMeshes(result)[0];
+            // 中间格两端都接邻格 → 不内收
+            expect(endsAt(mesh, 1)).toEqual({ back: 0, front: 0 });
+            // 线尾格的前端内收，后端不动
+            const tail = endsAt(mesh, 2);
+            expect(tail.front).toBeCloseTo(-BELT_CAP_SHORTEN, 5);
+            expect(tail.back).toBe(0);
+
+            // 几何关系自洽：尖点 = 格边界 − 内收量；条带端面 = 直径面 + 重叠
+            expect(BELT_CAP_DIAMETER + BELT_CAP_RADIUS).toBeCloseTo(
+                BELT_LEN / 2 - BELT_CAP_TIP_INSET,
+                9
+            );
+            expect(BELT_LEN / 2 - BELT_CAP_SHORTEN).toBeCloseTo(
+                BELT_CAP_DIAMETER + BELT_CAP_OVERLAP,
+                9
+            );
+            // 关键：端帽整体不再超出格子（旧实现是 L/2 + R）
+            expect(BELT_CAP_DIAMETER + BELT_CAP_RADIUS).toBeLessThanOrEqual(
+                BELT_LEN / 2 + 1e-12
+            );
+
+            // 端帽实例：距各自格心 = (直径面, 抬升) 的斜边；两个帽（线头 #0 + 线尾 #2）
+            const caps = capMeshes(result);
+            expect(caps).toHaveLength(1);
+            expect(instanceCount(caps[0])).toBe(2);
+            const expected = Math.hypot(
+                BELT_CAP_DIAMETER,
+                BELT_LIFT + BELT_CAP_LIFT
+            );
+            const m = new Matrix4();
+            const p = new Vector3();
+            const centers = buildings.map((b) =>
+                cellCenter(result.transforms, b.index)
+            );
+            for (let i = 0; i < instanceCount(caps[0]); i++) {
+                caps[0].getMatrixAt(i, m);
+                p.setFromMatrixPosition(m);
+                const nearest = Math.min(
+                    ...centers.map((c) => p.distanceTo(c))
+                );
+                expect(nearest).toBeCloseTo(expected, 2);
+            }
+        } finally {
+            result.buildings.dispose();
+            result.iconTexture.dispose();
+        }
+    });
+
+    it("货物端点淡出：条带写 CARGO_FADE，分拣器为 0（整块出现/消失）", () => {
+        nextIndex = 0;
+        const result = build([
+            beltBuilding(10, 10, 1),
+            beltBuilding(10, 11, 2),
+            beltBuilding(10, 12, -1),
+            inserterBuilding({ x: 12, y: 10 }, { x: 12, y: 11 }),
+        ]);
+        try {
+            // 3 个带子格（含线尾 #2）+ 1 个分拣器
+            expect(result.stats.cargoCount).toBe(4);
+            const fades = result.buildings.cargos.geometry.cargoFade
+                .array as Float32Array;
+            expect(fades[0]).toBeCloseTo(CARGO_FADE, 6);
+            expect(fades[1]).toBeCloseTo(CARGO_FADE, 6);
+            expect(fades[2]).toBeCloseTo(CARGO_FADE, 6);
+            expect(fades[3]).toBe(0);
+            // 淡出窗口必须 < 半个周期，否则整段都在缩
+            expect(CARGO_FADE).toBeGreaterThan(0);
+            expect(CARGO_FADE).toBeLessThan(0.5);
+        } finally {
+            result.buildings.dispose();
+            result.iconTexture.dispose();
+        }
+    });
+
+    it("线尾格也生成货物，行程收到端帽尖点（m = 1 时刚好缩没在尖点上）", () => {
+        nextIndex = 0;
+        const result = build([
+            beltBuilding(10, 10, 1),
+            beltBuilding(10, 11, 2),
+            beltBuilding(10, 12, -1), // 线尾：前端是端帽
+        ]);
+        try {
+            expect(result.stats.cargoCount).toBe(3);
+            const dist = result.buildings.cargos.geometry.cargoDistance
+                .array as Float32Array;
+            expect(dist[0]).toBeCloseTo(BELT_LEN, 6);
+            expect(dist[1]).toBeCloseTo(BELT_LEN, 6);
+            // 线尾格少走 `BELT_CAP_TIP_INSET`：货物中心终点 = 端帽尖点
+            expect(dist[2]).toBeCloseTo(BELT_LEN - BELT_CAP_TIP_INSET, 6);
+            expect(BELT_LEN / 2 - dist[2]).toBeCloseTo(
+                -(BELT_CAP_DIAMETER + BELT_CAP_RADIUS),
+                6
+            );
+        } finally {
+            result.buildings.dispose();
+            result.iconTexture.dispose();
+        }
+    });
+
+    it("淡出窗口内货物缩到 0（复刻着色器公式：端点处 cubic 曲线两端为 0）", () => {
+        // 与 cargos.ts 的 GLSL 同式：sizeScale = smoothstep(0,F,m) * (1 - smoothstep(1-F,1,m))
+        const smoothstep = (a: number, b: number, x: number) => {
+            const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+            return t * t * (3 - 2 * t);
+        };
+        const scale = (m: number) =>
+            smoothstep(0, CARGO_FADE, m) *
+            (1 - smoothstep(1 - CARGO_FADE, 1, m));
+        expect(scale(0)).toBe(0);
+        expect(scale(1)).toBe(0);
+        expect(scale(0.5)).toBe(1);
+        expect(scale(CARGO_FADE)).toBe(1);
+        // 单调：刚出端点时变大、快到端点时变小
+        expect(scale(0.01)).toBeGreaterThan(0);
+        expect(scale(0.01)).toBeLessThan(scale(0.03));
+        expect(scale(0.99)).toBeLessThan(scale(0.97));
     });
 });

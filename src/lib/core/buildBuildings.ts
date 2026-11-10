@@ -14,7 +14,7 @@ import { IconTexture } from "@/icon/iconTexture";
 import { IconGeometry, Icons } from "@/icon/icons";
 import { IconSubscript } from "@/icon/iconSubscript";
 import type { TextStyle } from "@/icon/iconSubscript";
-import { CARGO_COLOR, Cargos } from "@/Animation/cargos";
+import { CARGO_COLOR, CARGO_FADE, Cargos } from "@/Animation/cargos";
 import type { CargoArcShape } from "@/Animation/cargos";
 import {
     BELT_ELBOW_LIFT,
@@ -29,6 +29,12 @@ import type { BeltMesh } from "@/Animation/belt";
 import { computeBeltShapes } from "@/Animation/beltArc";
 import type { BeltShape } from "@/Animation/beltArc";
 import { BeltCaps } from "@/Animation/beltCaps";
+import {
+    BELT_CAP_DIAMETER,
+    BELT_CAP_LIFT,
+    BELT_CAP_SHORTEN,
+    BELT_CAP_TIP_INSET,
+} from "@/Animation/beltCaps";
 import { BeltElbows } from "@/Animation/beltElbow";
 import { Inserters } from "@/Animation/inserter";
 import { buildingMeta, noIconBuildings } from "@/data/building";
@@ -188,7 +194,13 @@ export function buildBuildings(
             cargoTrans.multiply(
                 temp.makeTranslation(0, CARGO_LIFT, BELT_LEN / 2)
             );
-            addCargo(cargoTrans, CARGO_COLOR, BELT_LEN, shape);
+            // 线尾格（前端是端帽）的货物滑到端帽尖点就缩没：行程少 `BELT_CAP_TIP_INSET`，
+            // 否则货物的终点仍在端帽尖点之外 5cm（条带端面已被端帽向内收掉）。
+            // 起点不变（仍在本格后缘），与前一格的货物在接缝处照常一收一放。
+            const distance = shape.capFront
+                ? BELT_LEN - BELT_CAP_TIP_INSET
+                : BELT_LEN;
+            addCargo(cargoTrans, CARGO_COLOR, distance, shape, CARGO_FADE);
         };
 
         const beltMaterial = new BeltMaterial();
@@ -218,12 +230,21 @@ export function buildBuildings(
                 mesh.setColorAt(i, colorOf(b.modelIndex));
                 // 逐实例形状参数：CPU 算好的圆弧 + 坡度 + 贴边外延
                 mesh.setArcAt(i, shape);
+                // 端头内收：端帽压住的那一端把条带端面收进去（正=伸出 / 负=内收）
+                mesh.setEndsAt(
+                    i,
+                    shape.capBack ? -BELT_CAP_SHORTEN : 0,
+                    shape.capFront ? -BELT_CAP_SHORTEN : 0
+                );
                 // modelRef 只能用 base：指向条带 mesh 会让 getBuildingModel 返回被拉伸的矩阵
                 modelRef[b.index] = { matrix: transforms[b.index][0] };
 
-                if (shape.hasOut) addCellCargo(b, shape);
+                // 每格都有货物：线尾格（无后继、前端是端帽）同样挂一件，
+                // 否则最后一段永远看不到货物滑动（addCellCargo 会把行程收到端帽尖点）
+                addCellCargo(b, shape);
 
-                // 端帽：半圆的直径压在条带端面上，向格子外鼓出。
+                // 端帽：半圆的尖点落在格边界内侧 `BELT_CAP_TIP_INSET`，直径面压进条带
+                // `BELT_CAP_OVERLAP`（终端因此比 v5 短了 R+inset，不再向格外鼓出）。
                 // 乘序 base·Rx·S·Tlift·Tend·Rflip：Rflip 最先作用，S（坡度剪切）最后 ——
                 // 这样端帽和条带顶面在坡道上也是同一张斜面。
                 for (const front of [false, true]) {
@@ -233,13 +254,17 @@ export function buildBuildings(
                         shear.makeShear(0, 0, 0, 0, 0, -slope / BELT_LEN)
                     );
                     capTrans.multiply(
-                        temp.makeTranslation(0, BELT_LIFT + slope / 2, 0)
+                        temp.makeTranslation(
+                            0,
+                            BELT_LIFT + slope / 2 + BELT_CAP_LIFT,
+                            0
+                        )
                     );
                     capTrans.multiply(
                         temp.makeTranslation(
                             0,
                             0,
-                            front ? -BELT_LEN / 2 : BELT_LEN / 2
+                            front ? -BELT_CAP_DIAMETER : BELT_CAP_DIAMETER
                         )
                     );
                     if (front) capTrans.multiply(temp.makeRotationY(Math.PI));
@@ -250,7 +275,8 @@ export function buildBuildings(
                 }
             }
             mesh.instanceMatrix.needsUpdate = true;
-            if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
+            if (mesh.instanceColor !== null)
+                mesh.instanceColor.needsUpdate = true;
             mesh.geometry.beltArc.needsUpdate = true;
             mesh.geometry.beltAux.needsUpdate = true;
             objects.push(mesh);
@@ -275,19 +301,21 @@ export function buildBuildings(
                     const nb = index === null ? undefined : byIndex.get(index);
                     return nb !== undefined && shapeOf(nb)?.kind === "corner";
                 };
-                mesh.setStubAt(
+                mesh.setEndsAt(
                     i,
                     isElbow(shape.inIndex) ? 0 : BELT_ELBOW_STUB,
                     isElbow(shape.outIndex) ? 0 : BELT_ELBOW_STUB
                 );
                 modelRef[b.index] = { matrix: transforms[b.index][0] };
-                if (shape.hasOut) addCellCargo(b, shape);
+                // 每格都有货物（含线尾格）
+                addCellCargo(b, shape);
             }
             mesh.instanceMatrix.needsUpdate = true;
-            if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
+            if (mesh.instanceColor !== null)
+                mesh.instanceColor.needsUpdate = true;
             mesh.geometry.beltArc.needsUpdate = true;
             mesh.geometry.beltAux.needsUpdate = true;
-            mesh.geometry.beltStub.needsUpdate = true;
+            mesh.geometry.beltEnds.needsUpdate = true;
             objects.push(mesh);
             if (beltMesh === null) beltMesh = mesh;
         }
@@ -300,7 +328,8 @@ export function buildBuildings(
                 caps.setColorAt(i, capEntries[i].color);
             }
             caps.instanceMatrix.needsUpdate = true;
-            if (caps.instanceColor !== null) caps.instanceColor.needsUpdate = true;
+            if (caps.instanceColor !== null)
+                caps.instanceColor.needsUpdate = true;
             caps.computeBoundingSphere();
             objects.push(caps);
         }
@@ -328,7 +357,8 @@ export function buildBuildings(
                 modelRef[b.index] = { matrix: base };
             }
             dots.instanceMatrix.needsUpdate = true;
-            if (dots.instanceColor !== null) dots.instanceColor.needsUpdate = true;
+            if (dots.instanceColor !== null)
+                dots.instanceColor.needsUpdate = true;
             objects.push(dots);
         }
 
@@ -405,12 +435,15 @@ export function buildBuildings(
         color: Color,
         distance: number,
         /** 条带的圆弧形状；省略 = 直段平地（分拣器走这里） */
-        shape?: CargoArcShape
+        shape?: CargoArcShape,
+        /** 端点淡出宽度；省略 = 不淡出（分拣器的货物整块出现/消失） */
+        fade = 0
     ) => {
         cargosMesh.setMatrixAt(numCargos, trans);
         cargosMesh.setColorAt(numCargos, color);
         cargosMesh.setCargoDistanceAt(numCargos, distance);
         cargosMesh.setCargoShapeAt(numCargos, shape ?? null);
+        cargosMesh.setCargoFadeAt(numCargos, fade);
         numCargos++;
     };
 

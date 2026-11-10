@@ -13,6 +13,7 @@ import {
     BELT_WIDTH,
     BeltMesh,
     writeBeltArc,
+    writeBeltEnds,
 } from "./belt";
 import type { BeltArcParams, BeltMaterial } from "./belt";
 
@@ -166,7 +167,7 @@ function buildPrism(geometry: BufferGeometry): void {
 export class BeltElbowGeometry extends BufferGeometry {
     readonly beltArc: InstancedBufferAttribute;
     readonly beltAux: InstancedBufferAttribute;
-    readonly beltStub: InstancedBufferAttribute;
+    readonly beltEnds: InstancedBufferAttribute;
 
     constructor(count: number) {
         super();
@@ -179,13 +180,13 @@ export class BeltElbowGeometry extends BufferGeometry {
             new Float32Array(count * 4),
             4
         );
-        this.beltStub = new InstancedBufferAttribute(
+        this.beltEnds = new InstancedBufferAttribute(
             new Float32Array(count * 2),
             2
         );
         this.setAttribute("aBeltArc", this.beltArc);
         this.setAttribute("aBeltAux", this.beltAux);
-        this.setAttribute("aBeltStub", this.beltStub);
+        this.setAttribute("aBeltEnds", this.beltEnds);
     }
 }
 
@@ -203,13 +204,11 @@ export class BeltElbows extends BeltMesh {
     }
 
     /**
-     * 写第 i 个圆环两端的直线段长度（世界单位；0 = 该端不伸出）。
+     * 写第 i 个圆环两端的端面外向位移（世界单位；0 = 该端不伸出）。
      *
      * 邻格也是圆环时该端必须给 0：两个圆环的 stub 会互相穿插、并把顶面顶出重影。
      */
-    public setStubAt(i: number, back: number, front: number): void {
-        const a = this.geometry.beltStub.array as Float32Array;
-        a[i * 2] = back;
-        a[i * 2 + 1] = front;
+    public setEndsAt(i: number, back: number, front: number): void {
+        writeBeltEnds(this.geometry, i, back, front);
     }
 }

@@ -48,7 +48,12 @@ export interface BeltShape extends BeltArcParams {
     capBack: boolean;
     /** 前端开放（相邻格里没有任何建筑）→ 前端加半圆帽 */
     capFront: boolean;
-    /** 该格有后继（有输出）→ 挂货物；与旧实现的「有输出才画条带」口径一致 */
+    /**
+     * 该格有后继（`outputObjIdx >= 0`）。
+     *
+     * 只描述连接关系，**不再决定是否挂货物**：现在每个非圆点的条带格都有货物，
+     * 线尾格（`capFront`）的货物行程会收到端帽尖点，在那里缩没。
+     */
     hasOut: boolean;
     /** 一格相邻的传送带前驱 index（无则 null） */
     inIndex: number | null;
