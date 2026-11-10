@@ -477,6 +477,8 @@ onMounted(() => {
             const cargoMove = (time % 1000) / 1000;
             built.cargos.cargoMove = cargoMove;
             if (built.belts !== null) built.belts.cargoMove = cargoMove;
+            // 没有分拣器时 inserters 为 null，必须判空
+            if (built.inserters !== null) built.inserters.cargoMove = cargoMove;
         }
         lastTimeStamp = time;
         requestAnimationFrame(animate);

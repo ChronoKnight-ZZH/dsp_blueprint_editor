@@ -4,6 +4,7 @@ import { Icons } from "@/icons";
 import { IconSubscript } from "@/iconSubscript";
 import { Cargos } from "@/cargos";
 import { Belts } from "@/belt";
+import { Inserters } from "@/inserter";
 import type { BlueprintBuilding } from "@/blueprint/parser";
 import type { BuildingModelRef } from "./types";
 
@@ -33,7 +34,14 @@ export class AllBuildings extends Object3D {
          * 帧循环必须判空。条带 mesh 已随 `objects` 挂到本对象下，`dispose()` 的
          * `traverse` 会覆盖它的几何，因此这里**不需要**为它单写释放逻辑。
          */
-        public readonly belts: Belts | null = null
+        public readonly belts: Belts | null = null,
+        /**
+         * 分拣器横梁 mesh，同样**只用于每帧写 `cargoMove`**（箭头滚动相位）。
+         *
+         * 与 `belts` 对称：省略或为 `null` 表示本次构建没有分拣器，帧循环必须判空。
+         * 横梁 mesh 已随 `objects` 挂到本对象下，`dispose()` 的 `traverse` 覆盖释放。
+         */
+        public readonly inserters: Inserters | null = null
     ) {
         super();
         this.add(...objects);

@@ -22,6 +22,7 @@ import {
     CARGO_LIFT,
     Belts,
 } from "@/belt";
+import { Inserters } from "@/inserter";
 import { HEIGHT_GRID_SIZE } from "@/planetConstants";
 import { buildingMeta, noIconBuildings } from "@/data/building";
 import { isBelt, isInserter } from "@/data/items";
@@ -244,22 +245,24 @@ export function buildBuildings(
      *     否则货物会被缩放/偏移污染，方案 §6.6-S3）；
      *   - 横梁：同一基础姿态再抬高 `BEAM_EXTRA_LIFT`、按 `len` 缩放并前推半个梁长。
      *
+     * 横梁几何本身由 `Inserters` 提供（v3.1：宽度翻倍 + 半透明 + 顶面箭头），
+     * 这里只负责写实例矩阵与元数据色；臂长仍由实例 `scale(1,1,len)` 表达，
+     * 着色器从 `instanceMatrix[2]` 反推，因此逐实例臂长不同也能保持箭头密度一致。
+     *
      * 垂直预算（局部法线方向，`INSERTER_HEIGHT = 0.3`）：
-     *   横梁 [0.37, 0.43]、货物 [0.05, 0.35] → 间隙 0.02（方案 §6.4 / §9.1-D-1）。
+     *   横梁 [0.37, 0.43]、货物 [0.05, 0.35] → 间隙 0.02（方案 §6.4 / §9.1-D-1），
+     *   半透明横梁下仍能透过梁体看到货物（v3.1 G13）。
      *
      * 边界：`modelRef` 仍指向横梁 mesh（其矩阵多了 +0.1 抬升），`SpitterInfo` 的投影位置
      * 同步偏移 0.1，视觉一致、不影响拾取。
      */
     const buildInserters = (inserters: BlueprintBuilding[]) => {
-        const inserterThickness = 0.06;
         /** 横梁在 `INSERTER_HEIGHT` 之上再抬高（方案 §10.2-Q7 默认值） */
         const BEAM_EXTRA_LIFT = 0.1;
         /** 货物相对基础姿态下移（方案 §10.2-Q7 默认值） */
         const CARGO_DROP = 0.1;
 
-        const geometry = new BoxGeometry(0.15, inserterThickness, 1.0);
-        const material = new MeshLambertMaterial();
-        const mesh = new InstancedMesh(geometry, material, inserters.length);
+        const mesh = new Inserters(inserters.length);
         const offset = new Matrix4().makeTranslation(0, 0, -0.5);
         const temp = new Matrix4();
         const trans = new Matrix4();
@@ -285,7 +288,7 @@ export function buildBuildings(
         }
         mesh.instanceMatrix.needsUpdate = true;
         if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
-        return [mesh];
+        return mesh;
     };
 
     // 建筑分类：带子 / 分拣器 / 其余（元数据盒或 GLB）
@@ -583,7 +586,12 @@ export function buildBuildings(
         beltMesh = builtBelts.beltMesh;
     }
 
-    if (inserters.length) meshes.push(...buildInserters(inserters));
+    /** 横梁 mesh 引用（只给帧循环写 `cargoMove`）；没有分拣器时为 null */
+    let inserterMesh: Inserters | null = null;
+    if (inserters.length) {
+        inserterMesh = buildInserters(inserters);
+        meshes.push(inserterMesh);
+    }
 
     if (numCargos) {
         cargosMesh.count = numCargos;
@@ -623,7 +631,9 @@ export function buildBuildings(
         iconBuilt.subscriptsMesh,
         iconBuilt.subscriptMap,
         // 条带 mesh（可能是 null）；帧循环据此写 cargoMove 让箭头滚动
-        beltMesh
+        beltMesh,
+        // 横梁 mesh（可能是 null）；帧循环据此写 cargoMove 让箭头滚动
+        inserterMesh
     );
 
     const glbInstanceCount = Object.values(built.perModelGlbCounts).reduce(

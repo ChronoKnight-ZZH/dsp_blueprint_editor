@@ -1077,6 +1077,9 @@ export class RenderCore {
                 // 没有条带（无带子 / 全部孤立段）时 belts 为 null，必须判空
                 const belts = this.bundle.buildings.belts;
                 if (belts !== null) belts.cargoMove = cargoMove;
+                // 没有分拣器时 inserters 为 null，同样必须判空
+                const inserters = this.bundle.buildings.inserters;
+                if (inserters !== null) inserters.cargoMove = cargoMove;
             }
 
             const cameraUpdated = this.controls.update();
