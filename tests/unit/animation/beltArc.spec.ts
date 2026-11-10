@@ -277,7 +277,7 @@ describe("beltArc · 退化与异常连接", () => {
         expect(issues.join("")).toContain("反向");
     });
 
-    it("侧口 / 隔格输出（非一格）→ 视为无后继，加端帽、不猜转角", () => {
+    it("侧口 / 隔格输出（非一格）→ 不猜转角，但也**不封帽不内收**（那是真实接头）", () => {
         const list = cells([
             { x: 0, y: 0, out: 1 },
             { x: 0, y: 1, out: 2, yaw: 0 },
@@ -285,8 +285,48 @@ describe("beltArc · 退化与异常连接", () => {
         ]);
         const s = shapeOf(list, 1);
         expect(s.kind).toBe("straight");
-        expect(s.capFront).toBe(true);
+        // 认不出几何（不是一格）→ 不能画圆环；但这是一条真实连接，
+        // 封帽会把条带端面往里收 0.49，接头上就会凭空出现一条缝（v6 的 bug）
+        expect(s.capFront).toBe(false);
+        expect(s.capBack).toBe(false);
         expect(s.extend).toBe(0);
+        // 朝向仍由入向决定：入 (0,1) → dir(θ)=（-x?）——入向是 +y，所以 θ = 0
+        expect(s.yawDeg).toBeCloseTo(0, 6);
+    });
+
+    it("真·线尾（完全没有输出）才封帽", () => {
+        const list = cells([
+            { x: 5, y: 5, out: 1 },
+            { x: 5, y: 6 },
+        ]);
+        expect(shapeOf(list, 1).capFront).toBe(true);
+        expect(shapeOf(list, 0).capBack).toBe(true);
+    });
+
+    it("朝向由连线推导：数据 yaw 与连接方向不符时 yawDeg 仍按连线", () => {
+        // 流向 +y（θ = 0），但三格的 yaw 都写成 90（脏数据）
+        const northbound = cells([
+            { x: 0, y: 0, out: 1, yaw: 90 },
+            { x: 0, y: 1, out: 2, yaw: 90 },
+            { x: 0, y: 2, yaw: 90 },
+        ]);
+        for (const idx of [0, 1, 2]) {
+            expect(shapeOf(northbound, idx).yawDeg).toBeCloseTo(0, 6);
+        }
+        // 流向 +x（θ = 90）的格子照样是 90，与数据 yaw 无关
+        const eastbound = cells([
+            { x: 0, y: 0, out: 1, yaw: 12 },
+            { x: 1, y: 0, out: 2, yaw: 12 },
+            { x: 2, y: 0, yaw: 12 },
+        ]);
+        expect(shapeOf(eastbound, 1).yawDeg).toBeCloseTo(90, 6);
+        // 转角取角平分线：入 +y、出 +x → 45°
+        const corner = cells([
+            { x: 0, y: 0, out: 1 },
+            { x: 0, y: 1, out: 2, yaw: 0 },
+            { x: 1, y: 1, yaw: 0 },
+        ]);
+        expect(shapeOf(corner, 1).yawDeg).toBeCloseTo(45, 6);
     });
 
     it("自环 outputObjIdx === index 不会抛错，且不产生 NaN", () => {

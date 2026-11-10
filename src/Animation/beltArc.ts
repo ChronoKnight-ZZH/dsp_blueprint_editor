@@ -44,9 +44,15 @@ export type BeltShapeKind = "dot" | "straight" | "corner";
 /** 单格形状：圆弧参数 + 判定结果 + 端帽需求 */
 export interface BeltShape extends BeltArcParams {
     kind: BeltShapeKind;
-    /** 后端开放（没有一格相邻的传送带前驱）→ 后端加半圆帽 */
+    /**
+     * **后端**开放：本格没有任何入线（不含分拣器）→ 后端加半圆帽并把条带端面内收。
+     *
+     * 判据是「完全没有任何建筑链进来」，不是「没有一格相邻的传送带」：侧口 / 隔格这种
+     * 认不出几何的连线也算连线，此时**不加帽、不内收**，否则会在真实接头上凭空挖出
+     * 一条 0.49 的缝（v6 的 bug）。
+     */
     capBack: boolean;
-    /** 前端开放（相邻格里没有任何建筑）→ 前端加半圆帽 */
+    /** **前端**开放：本格没有出线（`outputObjIdx < 0`）→ 前端加半圆帽并内收 */
     capFront: boolean;
     /**
      * 该格有后继（`outputObjIdx >= 0`）。
@@ -59,6 +65,13 @@ export interface BeltShape extends BeltArcParams {
     inIndex: number | null;
     /** 一格相邻的传送带后继 index（无则 null） */
     outIndex: number | null;
+    /**
+     * 本格**渲染朝向**（度，`dir(θ) = (sin θ, cos θ)`）：由连接方向推导，不用数据里的 yaw。
+     *
+     * 直段 = 流向；转角 = 入/出方向的角平分线；单端连接 = 那一端的方向；无连接 = 数据 yaw。
+     * 调用方要把实例矩阵的 `Rz(数据yaw − 本值)` 补上，相邻格的端面才会严格对齐。
+     */
+    yawDeg: number;
 }
 
 export interface BeltShapesResult {
@@ -157,7 +170,6 @@ export function computeBeltShapes(
     for (const b of buildings) {
         if (!isBelt(b.itemId)) continue;
 
-        const yaw = (b.yaw[0] / 180) * Math.PI;
         const self = b.localOffset[0];
 
         // ── 入线：只认「一格相邻的传送带前驱」 ──
@@ -206,6 +218,54 @@ export function computeBeltShapes(
             } else if (ins.length > 2) {
                 issues.push(
                     `#${b.index} 三条以上入线且无直通主线，按出向画直段`
+                );
+            }
+        }
+
+        // ── 本格朝向：由**连接方向**推导，不再读数据里的 yaw ──
+        // 这是从 master 的「格心连线」学来的一条：那边每根连接杆直接画在两个格心之间，
+        // 与 yaw 无关，所以永远接得上。这里同理——直段取流向、转角取角平分线，
+        // 单个端连接就取那一端；只有彻底没连线（圆点）才回落到数据 yaw。
+        let flowX = 0;
+        let flowY = 0;
+        let hasFlow = false;
+        if (dirIn !== null && beltOutStep !== null) {
+            const sx = dirIn.dx + beltOutStep.dx;
+            const sy = dirIn.dy + beltOutStep.dy;
+            if (sx !== 0 || sy !== 0) {
+                // 直段 → 流向；转角 → 角平分线（两者都是单位向量相加后归一）
+                const len = Math.hypot(sx, sy);
+                flowX = sx / len;
+                flowY = sy / len;
+                hasFlow = true;
+            } else {
+                // 入出反向（掉头）：无解，取出向兜底
+                flowX = beltOutStep.dx;
+                flowY = beltOutStep.dy;
+                hasFlow = true;
+            }
+        } else if (dirIn !== null) {
+            flowX = dirIn.dx;
+            flowY = dirIn.dy;
+            hasFlow = true;
+        } else if (beltOutStep !== null) {
+            flowX = beltOutStep.dx;
+            flowY = beltOutStep.dy;
+            hasFlow = true;
+        }
+        const yawDeg = hasFlow
+            ? (Math.atan2(flowX, flowY) * 180) / Math.PI
+            : b.yaw[0];
+        const yaw = (yawDeg / 180) * Math.PI;
+        if (hasFlow) {
+            // 数据 yaw 与连线不符时按连线渲染（否则条带会斜着摆、端面对不上邻格）
+            const delta = Math.abs(((b.yaw[0] - yawDeg + 540) % 360) - 180);
+            if (delta > 20) {
+                issues.push(
+                    `#${b.index} 的 yaw=${b.yaw[0].toFixed(1)}° 与连线方向 ` +
+                        `${yawDeg.toFixed(1)}° 相差 ${delta.toFixed(
+                            1
+                        )}°，已按连线修正`
                 );
             }
         }
@@ -297,11 +357,14 @@ export function computeBeltShapes(
             extend,
             exitX,
             exitZ,
-            capBack: ins.length === 0,
-            capFront: outStep === null,
+            // 只有「完全没有连线」的一端才算开放：侧口 / 隔格这类认不出几何的连线
+            // 也算有连接，此时不封帽也不内收，避免在真实接头上挖出缝
+            capBack: (preds.get(b.index) ?? []).length === 0,
+            capFront: !hasOut,
             hasOut,
             inIndex,
             outIndex: beltOutStep !== null ? b.outputObjIdx : null,
+            yawDeg,
         });
     }
 

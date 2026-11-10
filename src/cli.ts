@@ -79,8 +79,8 @@ function processOne(inputFile: string): { ok: boolean; target?: string; error?: 
         const target = deriveOutputPath(inputFile);
         writeFileSync(target, result, "utf8");
         return { ok: true, target };
-    } catch (e: any) {
-        return { ok: false, error: e?.message ?? String(e) };
+    } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
 }
 

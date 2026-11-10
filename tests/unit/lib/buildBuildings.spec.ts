@@ -899,9 +899,7 @@ describe("fixture 回归 · starting_base_01029", () => {
             const inserterCount = data.buildings.filter((b) =>
                 isInserter(b.itemId)
             ).length;
-            expect(built.stats.cargoCount).toBe(
-                strips.length + inserterCount
-            );
+            expect(built.stats.cargoCount).toBe(strips.length + inserterCount);
 
             const dots = dotMeshes(built);
             if (isolated.length === 0) expect(dots).toHaveLength(0);
@@ -974,6 +972,47 @@ describe("buildBuildings · 端帽内收与货物端点淡出", () => {
                 );
                 expect(nearest).toBeCloseTo(expected, 2);
             }
+        } finally {
+            result.buildings.dispose();
+            result.iconTexture.dispose();
+        }
+    });
+
+    it("数据 yaw 与连线不符时，端面仍落在共享边中点（v7 连接修复）", () => {
+        nextIndex = 0;
+        // L 形：A(0,0) → B(1,0) → C(1,1)，但三格的 yaw 全部写错（0/0/180）
+        // 正确值应是 A=90(+x)、B=45(角平分线)、C=0(+y)
+        const a = beltBuilding(0, 0, 1, 0);
+        const b = beltBuilding(1, 0, 2, 0);
+        const c = beltBuilding(1, 1, -1, 180);
+        const result = build([a, b, c]);
+        try {
+            const strips = stripMeshes(result)[0];
+            const elbows = elbowMeshes(result);
+            expect(instanceCount(elbows[0])).toBe(1);
+            const ring = elbows[0];
+
+            const ab = sharedEdgeMid(
+                cellCenter(result.transforms, a.index),
+                cellCenter(result.transforms, b.index)
+            );
+            const bc = sharedEdgeMid(
+                cellCenter(result.transforms, b.index),
+                cellCenter(result.transforms, c.index)
+            );
+            // 竖直方向只有预期抬升（BELT_LIFT / BELT_LIFT+ELBOW_LIFT），水平误差应为 0
+            const flat = (p: Vector3, ref: Vector3) => {
+                const up = ref.clone().normalize();
+                const d = p.clone().sub(ref);
+                return d.sub(up.clone().multiplyScalar(d.dot(up))).length();
+            };
+            // A 的前端面中心（条带实例的 local -z 端）
+            expect(flat(stripEnds(strips, 0).down, ab)).toBeLessThan(0.02);
+            // 圆环的入端 / 出端
+            expect(flat(arcPoint(ring, 0, 1), ab)).toBeLessThan(0.06);
+            expect(flat(arcPoint(ring, 0, 0), bc)).toBeLessThan(0.06);
+            // C 的后端面中心（条带实例的 local +z 端）
+            expect(flat(stripEnds(strips, 1).up, bc)).toBeLessThan(0.02);
         } finally {
             result.buildings.dispose();
             result.iconTexture.dispose();

@@ -2,7 +2,6 @@
 import {
     BELT_ARC_RADIUS,
     BELT_ELBOW_COVER,
-    BELT_ELBOW_ROUND,
     BELT_ELBOW_STUB,
     BELT_HEIGHT,
     BELT_LEN,
@@ -31,7 +30,6 @@ import type { BlueprintBuilding } from "@/blueprint/parser";
 /** 截面半宽（只有径向外扩）/ 半高（**与条带完全一致**，不额外加高） */
 const HALF_W = (BELT_WIDTH + BELT_ELBOW_COVER * 2) / 2;
 const HALF_H = BELT_HEIGHT / 2;
-const DEG = Math.PI / 180;
 
 function cells(
     specs: { x: number; y: number; out?: number; yaw?: number; z?: number }[]

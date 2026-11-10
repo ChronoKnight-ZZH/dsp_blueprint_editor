@@ -172,17 +172,39 @@ export function buildBuildings(
         const trans = new Matrix4();
         const cargoTrans = new Matrix4();
         const temp = new Matrix4();
+        const frameFix = new Matrix4();
 
         /**
-         * 条带 / 圆环共同的基础姿态 = base · Rx(π/2) · T(0, BELT_LIFT + slope/2 + extra, 0)
+         * 本格的**渲染坐标系** = `base`，但把 yaw 换成由连线推导的朝向。
+         *
+         * `base = Ry(lon)·Rx(-lat)·Rz(-yaw数据)`，而 `base·Rz(yaw数据 − yaw连线)`
+         * 正好等于 `Ry(lon)·Rx(-lat)·Rz(-yaw连线)` —— 即绕本格法线（局部 +z）转一个差值。
+         * 这样即使蓝图里的 yaw 与连线不符（编辑器重排 / 侧口 / 手改），相邻格的端面
+         * 仍然严格对齐；数据自洽时差值为 0，是**零改动**。
+         */
+        const frameOf = (
+            b: BlueprintBuilding,
+            shape: BeltShape,
+            out: Matrix4
+        ): Matrix4 => {
+            const delta = ((b.yaw[0] - shape.yawDeg) / 180) * Math.PI;
+            out.copy(transforms[b.index][0]);
+            if (Math.abs(delta) > 1e-9) {
+                out.multiply(frameFix.makeRotationZ(delta));
+            }
+            return out;
+        };
+
+        /**
+         * 条带 / 圆环共同的基础姿态 = frame · Rx(π/2) · T(0, BELT_LIFT + slope/2 + extra, 0)
          *
          * `extra` 只有圆环用（`BELT_ELBOW_LIFT`）：转角厚度与直段一致后两者顶面共面，
          * 需要按厚度比例的极小抬升避免 z-fighting。
          */
-        const poseOf = (b: BlueprintBuilding, slope: number, extra = 0) => {
-            trans.copy(transforms[b.index][0]).multiply(rot);
+        const poseOf = (b: BlueprintBuilding, shape: BeltShape, extra = 0) => {
+            frameOf(b, shape, trans).multiply(rot);
             return trans.multiply(
-                temp.makeTranslation(0, BELT_LIFT + slope / 2 + extra, 0)
+                temp.makeTranslation(0, BELT_LIFT + shape.slope / 2 + extra, 0)
             );
         };
 
@@ -190,7 +212,7 @@ export function buildBuildings(
         // +z 是本格后缘（逆流向），货物从后缘滑到前缘正好走过一格 = 一个周期。
         // 抬升不加 slope/2：坡度由货物着色器对 transformed.z 的剪切项补上（§3.6）。
         const addCellCargo = (b: BlueprintBuilding, shape: BeltShape) => {
-            cargoTrans.copy(transforms[b.index][0]).multiply(rot);
+            frameOf(b, shape, cargoTrans).multiply(rot);
             cargoTrans.multiply(
                 temp.makeTranslation(0, CARGO_LIFT, BELT_LEN / 2)
             );
@@ -225,7 +247,7 @@ export function buildBuildings(
                 const { slope } = shape;
 
                 // 无 scale：BELT_LEN 已烘进几何（否则圆弧被压成椭圆，§3.6）
-                mesh.setMatrixAt(i, poseOf(b, slope));
+                mesh.setMatrixAt(i, poseOf(b, shape));
                 // 条带取元数据色（方案 §9.1-E-3 / G5）：材质色保持默认白，避免二次相乘
                 mesh.setColorAt(i, colorOf(b.modelIndex));
                 // 逐实例形状参数：CPU 算好的圆弧 + 坡度 + 贴边外延
@@ -249,7 +271,8 @@ export function buildBuildings(
                 // 这样端帽和条带顶面在坡道上也是同一张斜面。
                 for (const front of [false, true]) {
                     if (front ? !shape.capFront : !shape.capBack) continue;
-                    capTrans.copy(transforms[b.index][0]).multiply(rot);
+                    capTrans.copy(transforms[b.index][0]);
+                    frameOf(b, shape, capTrans).multiply(rot);
                     capTrans.multiply(
                         shear.makeShear(0, 0, 0, 0, 0, -slope / BELT_LEN)
                     );
@@ -293,7 +316,7 @@ export function buildBuildings(
                 const b = corners[i];
                 const shape = shapeOf(b);
                 if (shape === undefined) continue;
-                mesh.setMatrixAt(i, poseOf(b, shape.slope, BELT_ELBOW_LIFT));
+                mesh.setMatrixAt(i, poseOf(b, shape, BELT_ELBOW_LIFT));
                 mesh.setColorAt(i, colorOf(b.modelIndex));
                 mesh.setArcAt(i, shape);
                 // 邻格也是圆环的那一端不伸出：两个圆环的 stub 会互相穿插、顶面出重影
