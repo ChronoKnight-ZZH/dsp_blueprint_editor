@@ -17,7 +17,7 @@ import {
     CARGO_LIFT,
 } from '@/Animation/belt';
 import { CARGO_COLOR, CARGO_SIZE, Cargos } from '@/Animation/cargos';
-import { isBelt } from '@/data/items';
+import { isBelt, isInserter } from '@/data/items';
 
 /**
  * `buildBuildings` 的渲染层回归（方案 §9.1-A/C/D/E、§9.2、P6）。
@@ -150,13 +150,14 @@ function stripMeshes(result: BuildBuildingsResult): Belts[] {
     return result.buildings.children.filter((o): o is Belts => o instanceof Belts);
 }
 
-/** 圆点 mesh：本方案里只有孤立段用圆柱几何（条带 / 货物 / 元数据盒都是 BoxGeometry） */
+/** 圆点 mesh（真正孤立的格；名字写在 `buildBelts` 里） */
 function dotMeshes(result: BuildBuildingsResult) {
-    return result.buildings.children.filter(
-        (o) =>
-            (o as { geometry?: { type?: string } }).geometry?.type ===
-            'CylinderGeometry'
-    );
+    return result.buildings.children.filter((o) => o.name === 'beltDots');
+}
+
+/** 端帽 mesh（半圆盘，v4 新增） */
+function capMeshes(result: BuildBuildingsResult) {
+    return result.buildings.children.filter((o) => o.name === 'beltCaps');
 }
 
 function instanceCount(mesh: unknown): number {
@@ -178,15 +179,25 @@ function cellCenter(transforms: Matrix4[][], index: number): Vector3 {
     return new Vector3().setFromMatrixPosition(transforms[index][0]);
 }
 
-/** 读第 i 个条带的形状参数 `(bend, slope)`（写在实例属性 `aBeltCurve` 里） */
-function curveAt(mesh: Belts, i: number): { bend: number; slope: number } {
-    const a = mesh.geometry.beltCurve.array as Float32Array;
-    return { bend: a[i * 2], slope: a[i * 2 + 1] };
+/** 读第 i 个条带的形状参数（`aBeltArc` = 弧参数，`aBeltAux` = 坡度 / 外延 / 出口切线） */
+function shapeAt(mesh: Belts, i: number) {
+    const arc = mesh.geometry.beltArc.array as Float32Array;
+    const aux = mesh.geometry.beltAux.array as Float32Array;
+    return {
+        theta0: arc[i * 4],
+        theta1: arc[i * 4 + 1],
+        centerX: arc[i * 4 + 2],
+        centerZ: arc[i * 4 + 3],
+        slope: aux[i * 4],
+        extend: aux[i * 4 + 1],
+        exitX: aux[i * 4 + 2],
+        exitZ: aux[i * 4 + 3],
+    };
 }
 
 /**
- * 复刻 `BeltMaterial` 顶点着色器的弯折公式，返回相位 `phase`（1=后缘入射，0=前缘出射）
- * 处的中线点（世界坐标，含 `BELT_LIFT` 抬升）。
+ * 复刻 `BeltMaterial` 顶点着色器的圆弧公式（v4：圆心 / θ 范围由 CPU 给，着色器只插值），
+ * 返回相位 `phase`（1=后缘入射，0=前缘出射）处的中线点（世界坐标，含 `BELT_LIFT` 抬升）。
  *
  * 用途：验证转角两端的**落点**——正确时正好是相邻两格共享边的中点，
  * 圆心取错（本格中心 / 等弧长半径）会偏出 0.24 以上。
@@ -194,19 +205,13 @@ function curveAt(mesh: Belts, i: number): { bend: number; slope: number } {
 function arcPoint(mesh: Belts, i: number, phase: number): Vector3 {
     const m = new Matrix4();
     mesh.getMatrixAt(i, m);
-    const { bend } = curveAt(mesh, i);
-    const h = -Math.sign(bend);
-    const ang = h * Math.PI * 0.5 * (1 - phase);
-    const ca = Math.cos(ang);
-    const sa = Math.sin(ang);
-    const c0 = -h * Math.SQRT1_2;
-    const s0 = Math.SQRT1_2;
-    const dx = c0 * ca - s0 * sa;
-    const dz = c0 * sa + s0 * ca;
+    const s = shapeAt(mesh, i);
+    const u = 1 - phase; // u = 0 后缘（入射）、u = 1 前缘（出射）
+    const th = s.theta0 + (s.theta1 - s.theta0) * u;
     return new Vector3(
-        h * (BELT_LEN / Math.SQRT2) + (BELT_LEN / 2) * dx,
+        s.centerX + (BELT_LEN / 2) * Math.cos(th),
         0,
-        (BELT_LEN / 2) * dz
+        s.centerZ + (BELT_LEN / 2) * Math.sin(th)
     ).applyMatrix4(m);
 }
 
@@ -216,23 +221,27 @@ function sharedEdgeMid(a: Vector3, b: Vector3): Vector3 {
 }
 
 describe('buildBuildings · 传送带条带与圆点', () => {
-    it('有输出的格子出条带，孤立段出圆点（A-1）', () => {
+    it('有连接的格子出条带（含线尾格），真正孤立的格出圆点（A-1、v4 三态）', () => {
         nextIndex = 0;
         const buildings = [
             beltBuilding(10, 10, 1),
             beltBuilding(10, 11, 2),
-            beltBuilding(10, 12, -1), // 孤立段
-            beltBuilding(9, 10, -1), // 孤立段
+            beltBuilding(10, 12, -1), // 线尾：有入无出 → 条带 + 前端端帽
+            beltBuilding(9, 10, -1), // 真正孤立：无入无出 → 圆点
         ];
         const result = build(buildings);
         try {
             const strips = stripMeshes(result);
             const dots = dotMeshes(result);
+            const caps = capMeshes(result);
             expect(strips).toHaveLength(1);
-            expect(strips[0].count).toBe(2);
+            expect(strips[0].count).toBe(3);
             expect(dots).toHaveLength(1);
-            expect(instanceCount(dots[0])).toBe(2);
-            // 孤立段不产生货物
+            expect(instanceCount(dots[0])).toBe(1);
+            // 线头（#0，无前驱）+ 线尾（#2，无后继）各一个半圆帽
+            expect(caps).toHaveLength(1);
+            expect(instanceCount(caps[0])).toBe(2);
+            // 货物只挂在有输出的格上（#0、#1）
             expect(result.stats.cargoCount).toBe(2);
         } finally {
             result.buildings.dispose();
@@ -250,15 +259,18 @@ describe('buildBuildings · 传送带条带与圆点', () => {
         const result = build(buildings);
         try {
             const mesh = stripMeshes(result)[0];
-            expect(mesh.count).toBe(2);
+            // v4：线尾格也是条带（+ 端帽），所以是 3 段而不是 2 段
+            expect(mesh.count).toBe(3);
             for (let i = 0; i < mesh.count; i += 1) {
                 const { up, down } = stripEnds(mesh, i);
                 expect(up.distanceTo(down)).toBeCloseTo(BELT_LEN, 6);
             }
-            const first = stripEnds(mesh, 0);
-            const second = stripEnds(mesh, 1);
-            // 段 0 下游端点 ≡ 段 1 上游端点；残差只是球面弦高（远小于 0.01）
-            expect(first.down.distanceTo(second.up)).toBeLessThan(0.01);
+            for (let i = 0; i < 2; i += 1) {
+                const first = stripEnds(mesh, i);
+                const second = stripEnds(mesh, i + 1);
+                // 段 i 下游端点 ≡ 段 i+1 上游端点；残差只是球面弦高（远小于 0.01）
+                expect(first.down.distanceTo(second.up)).toBeLessThan(0.01);
+            }
         } finally {
             result.buildings.dispose();
             result.iconTexture.dispose();
@@ -267,6 +279,8 @@ describe('buildBuildings · 传送带条带与圆点', () => {
 
     it('条带朝向 = 本格 → 输出格的格方向，90° 转角不出现斜条（A-4）', () => {
         nextIndex = 0;
+        // 注意：这里只验实例矩阵（= base × Rx(π/2)）的朝向，不验弧参数；
+        // corner 的 yaw=90 是构造出来让实例 -z 与出向同轴的合成数据。
         const northward = beltBuilding(10, 10, 1);
         const corner = beltBuilding(10, 11, 2, 90);
         // 转角后继续向东，保证转角段有输出
@@ -274,9 +288,12 @@ describe('buildBuildings · 传送带条带与圆点', () => {
         const result = build([northward, corner, eastward]);
         try {
             const mesh = stripMeshes(result)[0];
-            expect(mesh.count).toBe(2);
+            expect(mesh.count).toBe(3);
+            const sources = [northward, corner, eastward];
             for (let i = 0; i < mesh.count; i += 1) {
-                const source = [northward, corner][i];
+                const source = sources[i];
+                // 线尾格没有后继，拿不到「本格 → 输出格」的方向，跳过
+                if (source.outputObjIdx < 0) continue;
                 const target = result.transforms[source.outputObjIdx][0];
                 const dir = new Vector3()
                     .setFromMatrixPosition(target)
@@ -391,7 +408,8 @@ describe('buildBuildings · 货物几何与垂直预算', () => {
         try {
             const mesh = stripMeshes(result)[0];
             const cargos = result.buildings.cargos;
-            expect(mesh.count).toBe(1);
+            // v4：线尾格也是条带（+ 端帽），所以是 2 段
+            expect(mesh.count).toBe(2);
 
             const beltM = new Matrix4();
             mesh.getMatrixAt(0, beltM);
@@ -465,7 +483,8 @@ describe('buildBuildings · 货物几何与垂直预算', () => {
         const result = build(buildings);
         try {
             const mesh = stripMeshes(result)[0];
-            expect(mesh.count).toBe(3);
+            // v4：4 格都是条带（末格 = 线尾 + 端帽）
+            expect(mesh.count).toBe(4);
             const lightness = (c: Color) =>
                 (Math.max(c.r, c.g, c.b) + Math.min(c.r, c.g, c.b)) / 2;
             const cargoL = lightness(CARGO_COLOR);
@@ -488,7 +507,7 @@ describe('buildBuildings · 货物几何与垂直预算', () => {
 });
 
 describe('buildBuildings · 转角与坡度', () => {
-    it('转角格 bend = ±π/2，弧线两端落在相邻两格共享边的中点（A-4、A-6）', () => {
+    it('转角格：弧参数来自 CPU，弧线两端落在相邻两格共享边的中点（A-4、A-6）', () => {
         nextIndex = 0;
         const north = beltBuilding(10, 10, 1, 0);
         // 转角格的 yaw 是入 (+y) / 出 (+x) 方向的角平分线 = 45°
@@ -497,10 +516,12 @@ describe('buildBuildings · 转角与坡度', () => {
         const result = build([north, corner, east]);
         try {
             const mesh = stripMeshes(result)[0];
-            expect(mesh.count).toBe(2);
-            // 实例 0 = 直段，实例 1 = 转角
-            expect(curveAt(mesh, 0).bend).toBe(0);
-            expect(Math.abs(curveAt(mesh, 1).bend)).toBeCloseTo(Math.PI / 2, 6);
+            expect(mesh.count).toBe(3);
+            // 实例 0 = 直段（扫角 0），实例 1 = 转角（扫角 ±π/2）
+            const straight = shapeAt(mesh, 0);
+            expect(straight.theta1 - straight.theta0).toBe(0);
+            const arc = shapeAt(mesh, 1);
+            expect(Math.abs(arc.theta1 - arc.theta0)).toBeCloseTo(Math.PI / 2, 6);
 
             const entry = sharedEdgeMid(
                 cellCenter(result.transforms, north.index),
@@ -513,6 +534,16 @@ describe('buildBuildings · 转角与坡度', () => {
             // 残差只有 BELT_LIFT(0.04) + 球面弦高；圆心取错会偏出 0.24 以上
             expect(arcPoint(mesh, 1, 1).distanceTo(entry)).toBeLessThan(0.06);
             expect(arcPoint(mesh, 1, 0).distanceTo(exit)).toBeLessThan(0.06);
+
+            // 出口切线 = 本格 → 输出格的格方向（支线贴边与货物转向都靠它）
+            const m = new Matrix4();
+            mesh.getMatrixAt(1, m);
+            const tangent = new Vector3(arc.exitX, 0, arc.exitZ).transformDirection(m);
+            const dir = new Vector3()
+                .setFromMatrixPosition(result.transforms[east.index][0])
+                .sub(cellCenter(result.transforms, corner.index))
+                .normalize();
+            expect(tangent.dot(dir)).toBeCloseTo(1, 2);
         } finally {
             result.buildings.dispose();
             result.iconTexture.dispose();
@@ -527,14 +558,14 @@ describe('buildBuildings · 转角与坡度', () => {
         const result = build([flat, up, noise]);
         try {
             const mesh = stripMeshes(result)[0];
-            expect(mesh.count).toBe(2);
-            expect(curveAt(mesh, 0).bend).toBe(0);
-            expect(curveAt(mesh, 0).slope).toBeCloseTo(
+            expect(mesh.count).toBe(3);
+            expect(shapeAt(mesh, 0).theta1 - shapeAt(mesh, 0).theta0).toBe(0);
+            expect(shapeAt(mesh, 0).slope).toBeCloseTo(
                 0.5 * HEIGHT_GRID_SIZE,
                 6
             );
             // 0.02 格 = 0.027 世界单位 < BELT_SLOPE_EPS → 视为平地
-            expect(curveAt(mesh, 1).slope).toBe(0);
+            expect(shapeAt(mesh, 1).slope).toBe(0);
         } finally {
             result.buildings.dispose();
             result.iconTexture.dispose();
@@ -590,9 +621,12 @@ describe('BeltMaterial · 箭头着色器注入结构', () => {
         expect(vs).toContain('+ 0.5;');
         expect(vs).toContain('vBeltX = position.x;');
         expect(vs).toContain('vBeltNY = normal.y;');
-        expect(vs).toContain('attribute vec2 aBeltCurve;');
+        expect(vs).toContain('attribute vec4 aBeltArc;');
+        expect(vs).toContain('attribute vec4 aBeltAux;');
         expect(vs).toContain('transformed.y -= (position.z /');
-        expect(vs).toContain('if (abs(bend) >');
+        // v4：判据从 "bend" 变成 CPU 给的扫角，直段 sweep = 0 不进分支（GL11）
+        expect(vs).toContain('if (abs(sweep) >');
+        expect(vs).toContain('aBeltArc.z + r * cos(th)');
         expect(vs).not.toContain('vUv');
     });
 
@@ -621,7 +655,7 @@ describe('BeltMaterial · 箭头着色器注入结构', () => {
     it('customProgramCacheKey 与 CargoMaterial 不同（G-5）', () => {
         const belts = new Belts(1);
         const cargos = new Cargos(1);
-        expect(belts.material.customProgramCacheKey()).toBe('dsp-belt-arrow-v2');
+        expect(belts.material.customProgramCacheKey()).toBe('dsp-belt-arrow-v4');
         expect(belts.material.customProgramCacheKey()).not.toBe(
             cargos.material.customProgramCacheKey()
         );
@@ -637,7 +671,7 @@ describe('BeltMaterial · 箭头着色器注入结构', () => {
 });
 
 describe('fixture 回归 · starting_base_01029', () => {
-    it('条带实例数 = 有输出带子数，圆点实例数 = 孤立带子数', () => {
+    it('条带实例数 = 有连接的带子数（含线尾格），圆点实例数 = 真孤立带子数', () => {
         // fixture 里的非带子建筑会触发 GLB 懒加载；node 环境没有 XHR，加载必然失败并 warn。
         // 这里屏蔽该噪音（只影响本用例，不影响断言）。
         const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -659,15 +693,42 @@ describe('fixture 回归 · starting_base_01029', () => {
         try {
             const beltsInData = data.buildings.filter((b) => isBelt(b.itemId));
             const withOutput = beltsInData.filter((b) => b.outputObjIdx >= 0);
-            const isolated = beltsInData.filter((b) => b.outputObjIdx < 0);
+            // 线尾格（有入无出）：v4 里是条带 + 端帽，不再算孤立方点
+            const fedByBelt = new Set(
+                data.buildings
+                    .filter((b) => isBelt(b.itemId) && b.outputObjIdx >= 0)
+                    .map((b) => b.outputObjIdx)
+            );
+            const strips = beltsInData.filter(
+                (b) => b.outputObjIdx >= 0 || fedByBelt.has(b.index)
+            );
+            const isolated = beltsInData.filter(
+                (b) => b.outputObjIdx < 0 && !fedByBelt.has(b.index)
+            );
             expect(withOutput.length).toBeGreaterThan(0);
-            expect(isolated.length).toBeGreaterThan(0);
+            expect(strips.length + isolated.length).toBe(beltsInData.length);
+            expect(strips.length).toBeGreaterThanOrEqual(withOutput.length);
 
             expect(built.buildings.belts).not.toBeNull();
-            expect(built.buildings.belts?.count).toBe(withOutput.length);
+            expect(built.buildings.belts?.count).toBe(strips.length);
+            // 货物口径不变：只有「有输出」的格挂货物（+ 每个分拣器一件）
+            const inserterCount = data.buildings.filter((b) =>
+                isInserter(b.itemId)
+            ).length;
+            expect(built.stats.cargoCount).toBe(
+                withOutput.length + inserterCount
+            );
+
             const dots = dotMeshes(built);
-            expect(dots).toHaveLength(1);
-            expect(instanceCount(dots[0])).toBe(isolated.length);
+            if (isolated.length === 0) expect(dots).toHaveLength(0);
+            else {
+                expect(dots).toHaveLength(1);
+                expect(instanceCount(dots[0])).toBe(isolated.length);
+            }
+            // 线头 / 线尾都要有半圆帽
+            const caps = capMeshes(built);
+            expect(caps).toHaveLength(1);
+            expect(instanceCount(caps[0])).toBeGreaterThan(0);
         } finally {
             built.buildings.dispose();
             built.iconTexture.dispose();

@@ -12,7 +12,7 @@ import { CARGO_SIZE } from "./cargos";
 /**
  * 传送带条带（Belt）。
  *
- * 职责：为「有输出的传送带格」提供一段可实例化渲染的条带几何，并在片元阶段
+ * 职责：为「有连接的传送带格」提供一段可实例化渲染的条带几何，并在片元阶段
  * 画出随 `cargoMove` 滚动的箭头图案（箭头逻辑见 `BeltMaterial`）。
  *
  * 使用：只被 `lib/core/buildBuildings.ts` 的 `buildBelts` 构造；条带 mesh 随
@@ -23,14 +23,17 @@ import { CARGO_SIZE } from "./cargos";
  *     `base × Rx(π/2)` 保证（`base` 已含 yaw，不可再乘一次 yaw）；本文件不做朝向推导。
  *   - 段长恒为「一格」（DSP 蓝图里一条传送带记录只代表 1 格，见方案 §3.4-F1/F2），
  *     不支持可变段长；跨格连续由「每格一段、段长=格长」自然成立。
- *   - 转角与坡度是**逐实例属性**（`aBeltCurve`），在顶点着色器里弯折/剪切（§3.6）。
- *   - 含 GLSL 注入，Jest/CI 无 WebGL 无法验证编译，只能人工冒烟（方案 §3.5）。
+ *   - 几何形状（直段 / 转角圆弧 / 支线贴边外延）**全部由 CPU 算好**，以逐实例属性
+ *     `aBeltArc` / `aBeltAux` 传入；着色器只做一次 `mix(theta0, theta1, u)` 和一次
+ *     三角函数。圆心、半径、θ 范围都不再写死在 GLSL 里（v4，见 `beltArc.ts`）。
+ *   - 含 GLSL 注入，Jest/CI 无 WebGL 无法验证编译，只能人工冒烟（方案 §3.5）；
+ *     但几何本身已经搬到 CPU（`beltArc.ts`），**可以**被单测覆盖。
  */
 
 /**
  * 条带宽度（世界单位）：一格 1.2578，两侧各留约 0.15 间隙（方案 P1-2）。
  *
- * 转角内圈半径 = `BELT_LEN/2 - BELT_WIDTH/2`，必须 > 0，否则圆弧翻面（§3.6）。
+ * 转角内圈半径 = `BELT_ARC_RADIUS - BELT_WIDTH/2`，必须 > 0，否则圆弧翻面（§3.6）。
  * 当前 0.629 - 0.475 = 0.154，余量很紧，**不要**再加大。
  */
 export const BELT_WIDTH = 0.95;
@@ -53,14 +56,53 @@ export const BELT_LEN = GRID_HORIZONTAL;
  */
 export const BELT_SLOPE_EPS = 0.1;
 
-/** 直段保护：`abs(bend)` 小于该值时跳过弯折，避免整段被压成一个点（方案 §3.6 / GL11） */
-export const BELT_BEND_EPS = 1e-4;
+/**
+ * 直段保护：`abs(theta1 - theta0)`（弧度）小于该值时跳过弯折。
+ *
+ * 弧退化成点时整段会被压成一个点，且法线归一化会得到 NaN（方案 §3.6 / GL11）。
+ * CPU 侧已经保证「只有直段（sweep = 0）和 90° 弧（sweep = ±π/2）」两种取值，
+ * 这里只是着色器侧的兜底。
+ */
+export const BELT_ARC_EPS = 1e-4;
 
-/** 转角圆弧半径 = 半段长；圆心落在「入射边与出射边共享的本格角点」上（方案 §3.6） */
-const BELT_ARC_RADIUS = BELT_LEN / 2;
+/**
+ * 转角圆弧半径 = 半段长。
+ *
+ * 这不是可调参数：正方形格里「入射边中点 → 出射边中点」的切向连续解唯一——
+ * 圆心必落在两边共享的角点上，半径必然是半格长（`beltArc.ts` 里有推导）。
+ */
+export const BELT_ARC_RADIUS = BELT_LEN / 2;
 
-/** 角点到本格中心的距离 = `L/√2`，即弯折后圆弧圆心的局部 x 坐标 */
-const BELT_ARC_CENTER = BELT_LEN / Math.SQRT2;
+/**
+ * 支线贴边外延量（世界单位）= 半格长 − 半条带宽。
+ *
+ * 条带比格子窄，所以「垂直支线的端面」离「主线侧边」总差这么一截；支线末端
+ * 沿出口切线加长这么多才能真的贴上主线。主线一侧一个像素都不动。
+ */
+export const BELT_EDGE_GAP = (BELT_LEN - BELT_WIDTH) / 2;
+
+/**
+ * 逐实例的几何形状参数，全部已在**几何空间**（实例矩阵之前）算好。
+ *
+ * 由 `beltArc.computeBeltShapes` 产出、`buildBelts` 写入；直段取全 0（默认值）。
+ */
+export interface BeltArcParams {
+    /** 弧的起始角（弧度）：`u = 0`（后缘 / 入射端）落在 `center + R·(cos, sin)` */
+    theta0: number;
+    /** 弧的结束角（弧度）：`u = 1`（前缘 / 出射端）；直段时等于 theta0 */
+    theta1: number;
+    /** 圆心（几何空间的 x，世界单位） */
+    centerX: number;
+    /** 圆心（几何空间的 z，世界单位） */
+    centerZ: number;
+    /** 后端 → 前端的坡度（世界单位，平地 0） */
+    slope: number;
+    /** 前缘沿出口切线外延的长度（世界单位，无需外延为 0） */
+    extend: number;
+    /** 出口切线方向（几何空间单位向量，xz 分量） */
+    exitX: number;
+    exitZ: number;
+}
 
 /** 箭头颜色（方案 §10.2-Q4）；只经 `uArrowColor` uniform 生效，不参与元数据色相乘 */
 export const BELT_ARROW_COLOR = new Color(0x9aa0a6);
@@ -84,7 +126,7 @@ export const CARGO_LIFT =
  * 必须与 `CargoMaterial` 不同（后者靠默认的 `onBeforeCompile.toString()` 区分），
  * 否则两份注入会串味。
  */
-const BELT_PROGRAM_KEY = "dsp-belt-arrow-v2";
+const BELT_PROGRAM_KEY = "dsp-belt-arrow-v4";
 
 /**
  * 箭头图案：条带顶面的人字形斜纹，随 `cargoMove` 向条带局部 -z（流动方向）滚动。
@@ -137,7 +179,8 @@ class BeltMaterial extends MeshLambertMaterial {
         parameters.vertexShader = parameters.vertexShader
             .replace(
                 "#include <common>",
-                `attribute vec2 aBeltCurve;   // x = bend（0 / ±π/2），y = slope（世界单位）
+                `attribute vec4 aBeltArc;   // (theta0, theta1, cx, cz)：几何空间的圆弧参数
+attribute vec4 aBeltAux;   // (slope, extend, exitDirX, exitDirZ)
 uniform float cargoMove;
 varying float vBeltPhase;
 varying float vBeltX;
@@ -148,8 +191,8 @@ varying float vBeltNY;
             .replace(
                 "#include <begin_vertex>",
                 `#include <begin_vertex>
-float bend = aBeltCurve.x;
-float slope = aBeltCurve.y;
+float slope = aBeltAux.x;
+float sweep = aBeltArc.y - aBeltArc.x;
 
 vBeltPhase = position.z / ${BELT_LEN} + 0.5;
 vBeltX = position.x;
@@ -159,22 +202,21 @@ vBeltNY = normal.y;
 //    实例中心已抬 slope/2，因此后缘落在 h_i、前缘落在 h_{i+1}（§3.6）
 transformed.y -= (position.z / ${BELT_LEN}) * slope;
 
-// ② 转角：绕「入射边与出射边共享的本格角点」的 90° 圆弧（§3.6）。
-//    角点局部坐标 = (h·L/√2, 0)，半径 L/2；宽度方向 position.x 走径向。
-//    直段必须跳过，否则 θ 退化成常数、整段被压成一个点（GL11）
-if (abs(bend) > ${BELT_BEND_EPS}) {
-    float h = -sign(bend);
-    float s = 1.0 - vBeltPhase;          // 0 = 后缘（入射），1 = 前缘（出射）
-    float ang = h * (PI * 0.5) * s;
-    float ca = cos(ang);
-    float sa = sin(ang);
-    float c0 = -h * ${Math.SQRT1_2};
-    float s0 = ${Math.SQRT1_2};
-    float dx = c0 * ca - s0 * sa;
-    float dz = c0 * sa + s0 * ca;
+// ② 转角：圆心 / 半径 / θ 范围都由 CPU 算好（beltArc.ts），这里只做一次插值
+//    和一次三角函数。直段 sweep = 0，连分支都不进（GL11 的退化保护）
+if (abs(sweep) > ${BELT_ARC_EPS}) {
+    float u = 0.5 - position.z / ${BELT_LEN};
+    float th = aBeltArc.x + sweep * u;
     float r = ${BELT_ARC_RADIUS} + position.x;
-    transformed.x = h * ${BELT_ARC_CENTER} + r * dx;
-    transformed.z = r * dz;
+    transformed.x = aBeltArc.z + r * cos(th);
+    transformed.z = aBeltArc.w + r * sin(th);
+}
+
+// ③ 支线贴边：只把前缘顶点沿出口切线外推，后缘不动 —— 条带是被"拉长"而不是
+//    整体平移，因此与前一格仍然首尾相接（BELT_EDGE_GAP）
+if (aBeltAux.y > 0.0 && position.z < 0.0) {
+    transformed.x += aBeltAux.y * aBeltAux.z;
+    transformed.z += aBeltAux.y * aBeltAux.w;
 }
 `
             );
@@ -205,22 +247,29 @@ ${ARROW_FRAGMENT}`
 }
 
 /**
- * 条带几何：尺寸即最终尺寸（`BELT_LEN` 烘进几何），并挂一个逐实例形状属性。
+ * 条带几何：尺寸即最终尺寸（`BELT_LEN` 烘进几何），并挂两个逐实例形状属性。
  *
  * 边界：**不能**再用实例 `scale(1,1,BELT_LEN)`——非等比缩放会作用在顶点着色器输出上，
  * 把圆弧压成椭圆、端点对不上邻格（方案 §3.6 / GL10 / S13）。
  */
 class BeltGeometry extends BoxGeometry {
-    /** 逐实例 `(bend, slope)`；默认全 0 = 直段平地 */
-    readonly beltCurve: InstancedBufferAttribute;
+    /** 逐实例 `(theta0, theta1, cx, cz)`；默认全 0 = 直段平地 */
+    readonly beltArc: InstancedBufferAttribute;
+    /** 逐实例 `(slope, extend, exitX, exitZ)`；默认全 0 = 平地、不外延 */
+    readonly beltAux: InstancedBufferAttribute;
 
     constructor(count: number) {
         super(BELT_WIDTH, BELT_HEIGHT, BELT_LEN);
-        this.beltCurve = new InstancedBufferAttribute(
-            new Float32Array(count * 2),
-            2
+        this.beltArc = new InstancedBufferAttribute(
+            new Float32Array(count * 4),
+            4
         );
-        this.setAttribute("aBeltCurve", this.beltCurve);
+        this.beltAux = new InstancedBufferAttribute(
+            new Float32Array(count * 4),
+            4
+        );
+        this.setAttribute("aBeltArc", this.beltArc);
+        this.setAttribute("aBeltAux", this.beltAux);
     }
 }
 
@@ -230,7 +279,7 @@ class BeltGeometry extends BoxGeometry {
  * 职责：承载「每格一段」的条带几何与每实例颜色（元数据色），并对外暴露
  * `cargoMove` 存取器供帧循环驱动。
  *
- * 使用：由 `buildBelts` 构造，数量 = 有输出的传送带格数；每实例矩阵由调用方写入。
+ * 使用：由 `buildBelts` 构造，数量 = 有连接的传送带格数；每实例矩阵由调用方写入。
  *
  * 边界：顶点局部 z ∈ [-BELT_LEN/2, +BELT_LEN/2]（箭头相位归一化的前提），局部
  * `+z` 是本格后缘（逆流向）。释放责任归 `AllBuildings.dispose()`。
@@ -241,18 +290,25 @@ export class Belts extends InstancedMesh {
 
     constructor(count: number) {
         super(new BeltGeometry(count), new BeltMaterial(), count);
+        this.name = "belts";
     }
 
     /**
      * 写第 i 个实例的形状参数（构建期一次性调用）。
      *
-     * `bend ∈ {0, ±π/2}`（0 = 直段），`slope = h_{i+1} − h_i`（世界单位，不在时给 0）。
-     * 不调用则默认 `(0, 0)` = 直段平地。
+     * 不调用则默认全 0 = 直段平地：`(theta0, theta1, 0, 0)` + `(0, 0, 0, 0)`。
      */
-    public setCurveAt(i: number, bend: number, slope: number): void {
-        const a = this.geometry.beltCurve.array as Float32Array;
-        a[i * 2] = bend;
-        a[i * 2 + 1] = slope;
+    public setArcAt(i: number, p: BeltArcParams): void {
+        const arc = this.geometry.beltArc.array as Float32Array;
+        arc[i * 4] = p.theta0;
+        arc[i * 4 + 1] = p.theta1;
+        arc[i * 4 + 2] = p.centerX;
+        arc[i * 4 + 3] = p.centerZ;
+        const aux = this.geometry.beltAux.array as Float32Array;
+        aux[i * 4] = p.slope;
+        aux[i * 4 + 1] = p.extend;
+        aux[i * 4 + 2] = p.exitX;
+        aux[i * 4 + 3] = p.exitZ;
     }
 
     public get cargoMove(): number {
