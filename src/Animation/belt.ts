@@ -36,7 +36,7 @@ import { CARGO_SIZE } from "./cargos";
  * 转角内圈半径 = `BELT_ARC_RADIUS - BELT_WIDTH/2`，必须 > 0，否则圆弧翻面（§3.6）。
  * 当前 0.629 - 0.475 = 0.154，余量很紧，**不要**再加大。
  */
-export const BELT_WIDTH = 0.95;
+export const BELT_WIDTH = 0.64;
 
 /** 条带厚度（世界单位）；同时决定条带顶面高度 */
 export const BELT_HEIGHT = 0.08;
@@ -72,6 +72,42 @@ export const BELT_ARC_EPS = 1e-4;
  * 圆心必落在两边共享的角点上，半径必然是半格长（`beltArc.ts` 里有推导）。
  */
 export const BELT_ARC_RADIUS = BELT_LEN / 2;
+
+/** 圆弧中心线长度（世界单位）：`u ∈ [0, 1]` 对应的弧长 = `R·π/2` = 0.785L */
+export const BELT_ARC_LENGTH = (BELT_ARC_RADIUS * Math.PI) / 2;
+
+/**
+ * 圆环弯头（转角格）截面相对条带轮廓的**外扩量**（每侧，世界单位）。
+ *
+ * 圆环是「压在接缝上」的一件套环：外扩 4mm 后它的轮廓完整包住条带的矩形端面，
+ * 于是端面被埋进环里、顶面也不会与条带共面（共面会 z-fighting）。
+ */
+export const BELT_ELBOW_COVER = 0.004;
+
+/** 圆环弯头截面四角的倒圆半径（世界单位；实际使用时还会被半高/半宽夹住，见 `beltElbow.ts`） */
+export const BELT_ELBOW_ROUND = 0.03;
+
+/**
+ * 圆环弯头整体的额外抬升（世界单位），按厚度的比例给。
+ *
+ * 转角厚度和直段完全一致（都是 `BELT_HEIGHT`），所以圆环与条带伸进彼此的那一小段顶面
+ * **共面**；不抬一点就会 z-fighting。1.6mm（默认厚度下）肉眼不可见，但改 `BELT_HEIGHT`
+ * 时它会一起缩放，不会变成固定 bug。
+ */
+export const BELT_ELBOW_LIFT = BELT_HEIGHT * 0.02;
+
+/**
+ * 圆环弯头两端伸入邻格的**直线段**长度（世界单位）。
+ *
+ * 取 `(格长 − 弧长)/2` ≈ 0.1349（即"约 0.12"），有两个作用：
+ *   1. 把「弯头 ↔ 直段」的接缝埋进圆环里，接缝不再暴露在格边界上；
+ *   2. 弯头的总路径长度 = 弧 0.785L + 两端 stub 0.215L = **一格**，所以圆环在格子
+ *      里的占地仍然是一格，不会挤到第三格去。
+ *
+ * 注意：箭头相位仍是 `position.z / L`（与直段完全同一套），所以转角弧上箭头会随
+ * 弧长被压密一些 —— 这是 v3 以来就有的既存观感，本改动不改变它。
+ */
+export const BELT_ELBOW_STUB = (BELT_LEN - BELT_ARC_LENGTH) / 2;
 
 /**
  * 支线贴边外延量（世界单位）= 半格长 − 半条带宽。
@@ -140,9 +176,13 @@ const BELT_PROGRAM_KEY = "dsp-belt-arrow-v4";
  *
  * `smoothstep` 用 `1 - smoothstep(升序参数)` 而不是降序参数：GLSL 规范规定
  * `edge0 ≥ edge1` 时结果未定义，这里换取等价且良定义的写法（视觉完全一致）。
+ *
+ * 顶面判定用 `step(0.9, ...)` 而不是 0.5：圆环弯头的截面四角倒了圆，肩部法线的 y 分量
+ * 落在 0.5~0.9 之间；用 0.5 会把箭头色（`0x9aa0a6`，灰蓝）糊到肩部，转角看着比直段
+ * 灰一大截（"颜色不一致"）。0.9 让箭头只落在**平坦顶面**，与方条带的行为一致。
  */
 const ARROW_FRAGMENT = `
-    float topMask = step(0.5, vBeltNY);
+    float topMask = step(0.9, vBeltNY);
     float phase = fract(vBeltPhase + cargoMove);
     float across = abs(vBeltX) / (${BELT_WIDTH} * 0.5);
     float slant = 0.10 + across * 0.26;
@@ -158,7 +198,8 @@ const ARROW_FRAGMENT = `
  * 职责：条带顶面的流动箭头；每帧 CPU 只写 `cargoMove` 一个 float，图案在片元着色器里算，
  * 因此每实例零 CPU 开销、零额外属性（方案 §3.2）。
  *
- * 使用：由 `Belts` 构造，与 `Belts` 同生命周期。
+ * 使用：由 `buildBuildings` 构造**一份**，条带（`Belts`）与圆环（`BeltElbows`）共用，
+ * 因此每帧写一次 `cargoMove` 两边的箭头就同步滚动。
  *
  * 边界：
  *   - `customProgramCacheKey` 必须与 `CargoMaterial` 不同，否则 three 会复用错 program，
@@ -168,7 +209,7 @@ const ARROW_FRAGMENT = `
  *   - 材质不设 `color`（默认白），条带颜色完全由 `setColorAt` 提供（§6.6-S9）；
  *   - GLSL 无法在 Jest/CI 编译验证，只能人工冒烟（方案 §3.5）。
  */
-class BeltMaterial extends MeshLambertMaterial {
+export class BeltMaterial extends MeshLambertMaterial {
     /** 0..1 相位；每帧由渲染循环写入，GPU 侧据此滚动箭头（无需每实例属性） */
     readonly cargoMoveUniform = { value: 0 };
     /** 箭头色；独立 uniform，避免被每实例条带色影响（§6.5-GL7） */
@@ -181,6 +222,7 @@ class BeltMaterial extends MeshLambertMaterial {
                 "#include <common>",
                 `attribute vec4 aBeltArc;   // (theta0, theta1, cx, cz)：几何空间的圆弧参数
 attribute vec4 aBeltAux;   // (slope, extend, exitDirX, exitDirZ)
+attribute vec2 aBeltStub;  // (backStub, frontStub)：圆环两端伸入邻格的直线段长度（世界单位）
 uniform float cargoMove;
 varying float vBeltPhase;
 varying float vBeltX;
@@ -205,11 +247,20 @@ transformed.y -= (position.z / ${BELT_LEN}) * slope;
 // ② 转角：圆心 / 半径 / θ 范围都由 CPU 算好（beltArc.ts），这里只做一次插值
 //    和一次三角函数。直段 sweep = 0，连分支都不进（GL11 的退化保护）
 if (abs(sweep) > ${BELT_ARC_EPS}) {
-    float u = 0.5 - position.z / ${BELT_LEN};
-    float th = aBeltArc.x + sweep * u;
+    // u ∈ [0,1] 对应整段 90° 弧；超出部分是圆环伸进邻格的**直线段**（不跟着继续弯）
+    float uRaw = 0.5 - position.z / ${BELT_LEN};
+    float u = clamp(
+        uRaw,
+        -aBeltStub.x / ${BELT_LEN},
+        1.0 + aBeltStub.y / ${BELT_LEN}
+    );
+    float uc = clamp(u, 0.0, 1.0);
+    float th = aBeltArc.x + sweep * uc;
     float r = ${BELT_ARC_RADIUS} + position.x;
-    transformed.x = aBeltArc.z + r * cos(th);
-    transformed.z = aBeltArc.w + r * sin(th);
+    float over = (u - uc) * ${BELT_LEN};          // 端头直线段长度（世界单位）
+    float tn = sign(sweep);                       // 流向切向 = tn·(−sinθ, cosθ)
+    transformed.x = aBeltArc.z + r * cos(th) - tn * over * sin(th);
+    transformed.z = aBeltArc.w + r * sin(th) + tn * over * cos(th);
 }
 
 // ③ 支线贴边：只把前缘顶点沿出口切线外推，后缘不动 —— 条带是被"拉长"而不是
@@ -252,11 +303,13 @@ ${ARROW_FRAGMENT}`
  * 边界：**不能**再用实例 `scale(1,1,BELT_LEN)`——非等比缩放会作用在顶点着色器输出上，
  * 把圆弧压成椭圆、端点对不上邻格（方案 §3.6 / GL10 / S13）。
  */
-class BeltGeometry extends BoxGeometry {
+export class BeltGeometry extends BoxGeometry {
     /** 逐实例 `(theta0, theta1, cx, cz)`；默认全 0 = 直段平地 */
     readonly beltArc: InstancedBufferAttribute;
     /** 逐实例 `(slope, extend, exitX, exitZ)`；默认全 0 = 平地、不外延 */
     readonly beltAux: InstancedBufferAttribute;
+    /** 逐实例 `(backStub, frontStub)`；条带恒为 0（不伸进邻格），圆环才用 */
+    readonly beltStub: InstancedBufferAttribute;
 
     constructor(count: number) {
         super(BELT_WIDTH, BELT_HEIGHT, BELT_LEN);
@@ -268,28 +321,71 @@ class BeltGeometry extends BoxGeometry {
             new Float32Array(count * 4),
             4
         );
+        this.beltStub = new InstancedBufferAttribute(
+            new Float32Array(count * 2),
+            2
+        );
         this.setAttribute("aBeltArc", this.beltArc);
         this.setAttribute("aBeltAux", this.beltAux);
+        this.setAttribute("aBeltStub", this.beltStub);
+    }
+}
+
+/** 逐实例写弧参数（条带与圆环共用的属性布局） */
+export function writeBeltArc(
+    geometry: {
+        beltArc: InstancedBufferAttribute;
+        beltAux: InstancedBufferAttribute;
+    },
+    i: number,
+    p: BeltArcParams
+): void {
+    const arc = geometry.beltArc.array as Float32Array;
+    arc[i * 4] = p.theta0;
+    arc[i * 4 + 1] = p.theta1;
+    arc[i * 4 + 2] = p.centerX;
+    arc[i * 4 + 3] = p.centerZ;
+    const aux = geometry.beltAux.array as Float32Array;
+    aux[i * 4] = p.slope;
+    aux[i * 4 + 1] = p.extend;
+    aux[i * 4 + 2] = p.exitX;
+    aux[i * 4 + 3] = p.exitZ;
+}
+
+/**
+ * 条带 / 圆环共同的基类：只负责 `cargoMove`。
+ *
+ * 两者共用同一个 `BeltMaterial` 实例（同一份 GLSL、同一个 uniform），所以帧循环
+ * 只需要写其中任意一个，两边的箭头就同步滚动。
+ */
+export abstract class BeltMesh extends InstancedMesh {
+    declare material: BeltMaterial;
+
+    public get cargoMove(): number {
+        return this.material.cargoMoveUniform.value;
+    }
+    public set cargoMove(v: number) {
+        this.material.cargoMoveUniform.value = v;
     }
 }
 
 /**
- * 传送带条带实例化网格。
+ * 传送带条带实例化网格（直段格）。
  *
  * 职责：承载「每格一段」的条带几何与每实例颜色（元数据色），并对外暴露
  * `cargoMove` 存取器供帧循环驱动。
  *
- * 使用：由 `buildBelts` 构造，数量 = 有连接的传送带格数；每实例矩阵由调用方写入。
+ * 使用：由 `buildBelts` 构造，数量 = 直段格数；**转角格不在这里**，它们走
+ * `BeltElbows`（圆环弯头，见 `beltElbow.ts`）。
  *
  * 边界：顶点局部 z ∈ [-BELT_LEN/2, +BELT_LEN/2]（箭头相位归一化的前提），局部
  * `+z` 是本格后缘（逆流向）。释放责任归 `AllBuildings.dispose()`。
  */
-export class Belts extends InstancedMesh {
+export class Belts extends BeltMesh {
     declare geometry: BeltGeometry;
-    declare material: BeltMaterial;
 
-    constructor(count: number) {
-        super(new BeltGeometry(count), new BeltMaterial(), count);
+    constructor(count: number, material: BeltMaterial = new BeltMaterial()) {
+        super(new BeltGeometry(count), material, count);
         this.name = "belts";
     }
 
@@ -299,22 +395,6 @@ export class Belts extends InstancedMesh {
      * 不调用则默认全 0 = 直段平地：`(theta0, theta1, 0, 0)` + `(0, 0, 0, 0)`。
      */
     public setArcAt(i: number, p: BeltArcParams): void {
-        const arc = this.geometry.beltArc.array as Float32Array;
-        arc[i * 4] = p.theta0;
-        arc[i * 4 + 1] = p.theta1;
-        arc[i * 4 + 2] = p.centerX;
-        arc[i * 4 + 3] = p.centerZ;
-        const aux = this.geometry.beltAux.array as Float32Array;
-        aux[i * 4] = p.slope;
-        aux[i * 4 + 1] = p.extend;
-        aux[i * 4 + 2] = p.exitX;
-        aux[i * 4 + 3] = p.exitZ;
-    }
-
-    public get cargoMove(): number {
-        return this.material.cargoMoveUniform.value;
-    }
-    public set cargoMove(v: number) {
-        this.material.cargoMoveUniform.value = v;
+        writeBeltArc(this.geometry, i, p);
     }
 }

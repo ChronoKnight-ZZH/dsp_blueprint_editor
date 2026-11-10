@@ -3,7 +3,7 @@ import { IconTexture } from "@/icon/iconTexture";
 import { Icons } from "@/icon/icons";
 import { IconSubscript } from "@/icon/iconSubscript";
 import { Cargos } from "@/Animation/cargos";
-import { Belts } from "@/Animation/belt";
+import type { BeltMesh } from "@/Animation/belt";
 import { Inserters } from "@/Animation/inserter";
 import type { BlueprintBuilding } from "@/blueprint/parser";
 import type { BuildingModelRef } from "./types";
@@ -28,13 +28,14 @@ export class AllBuildings extends Object3D {
             { startIdx: number; length: number }
         > = new Map(),
         /**
-         * 条带 mesh，**只用于每帧写 `cargoMove`**（箭头滚动相位）。
+         * 条带 / 圆环 mesh，**只用于每帧写 `cargoMove`**（箭头滚动相位）。
          *
-         * 省略或为 `null` 表示本次构建没有条带（没有带子 / 全部是孤立段），
-         * 帧循环必须判空。条带 mesh 已随 `objects` 挂到本对象下，`dispose()` 的
-         * `traverse` 会覆盖它的几何，因此这里**不需要**为它单写释放逻辑。
+         * 可能是直段条带（`Belts`）也可能是圆环弯头（`BeltElbows`）—— 两者共用同一个
+         * `BeltMaterial` 实例，写哪个都行。省略或为 `null` 表示本次构建没有任何带子，
+         * 帧循环必须判空。mesh 已随 `objects` 挂到本对象下，`dispose()` 的 `traverse`
+         * 会覆盖它的几何，因此这里**不需要**为它单写释放逻辑。
          */
-        public readonly belts: Belts | null = null,
+        public readonly belts: BeltMesh | null = null,
         /**
          * 分拣器横梁 mesh，同样**只用于每帧写 `cargoMove`**（箭头滚动相位）。
          *

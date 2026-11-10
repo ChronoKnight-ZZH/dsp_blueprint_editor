@@ -50,6 +50,10 @@ export interface BeltShape extends BeltArcParams {
     capFront: boolean;
     /** 该格有后继（有输出）→ 挂货物；与旧实现的「有输出才画条带」口径一致 */
     hasOut: boolean;
+    /** 一格相邻的传送带前驱 index（无则 null） */
+    inIndex: number | null;
+    /** 一格相邻的传送带后继 index（无则 null） */
+    outIndex: number | null;
 }
 
 export interface BeltShapesResult {
@@ -179,8 +183,11 @@ export function computeBeltShapes(
 
         // ── 主线选取 ──
         let dirIn: Step | null = null;
-        if (ins.length === 1) dirIn = ins[0].step;
-        else if (ins.length > 1) {
+        let inIndex: number | null = null;
+        if (ins.length === 1) {
+            dirIn = ins[0].step;
+            inIndex = ins[0].index;
+        } else if (ins.length > 1) {
             const main = ins.find(
                 (s) =>
                     beltOutStep !== null &&
@@ -190,6 +197,7 @@ export function computeBeltShapes(
             if (main !== undefined) {
                 // 扇入但有直通主线（丁字）：形状完全确定，不算异常，不打日志
                 dirIn = main.step;
+                inIndex = main.index;
             } else if (ins.length > 2) {
                 issues.push(
                     `#${b.index} 三条以上入线且无直通主线，按出向画直段`
@@ -287,6 +295,8 @@ export function computeBeltShapes(
             capBack: ins.length === 0,
             capFront: outStep === null,
             hasOut,
+            inIndex,
+            outIndex: beltOutStep !== null ? b.outputObjIdx : null,
         });
     }
 

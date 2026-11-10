@@ -16,9 +16,20 @@ import { IconSubscript } from "@/icon/iconSubscript";
 import type { TextStyle } from "@/icon/iconSubscript";
 import { CARGO_COLOR, Cargos } from "@/Animation/cargos";
 import type { CargoArcShape } from "@/Animation/cargos";
-import { BELT_LEN, BELT_LIFT, CARGO_LIFT, Belts } from "@/Animation/belt";
+import {
+    BELT_ELBOW_LIFT,
+    BELT_ELBOW_STUB,
+    BELT_LEN,
+    BELT_LIFT,
+    CARGO_LIFT,
+    Belts,
+    BeltMaterial,
+} from "@/Animation/belt";
+import type { BeltMesh } from "@/Animation/belt";
 import { computeBeltShapes } from "@/Animation/beltArc";
+import type { BeltShape } from "@/Animation/beltArc";
 import { BeltCaps } from "@/Animation/beltCaps";
+import { BeltElbows } from "@/Animation/beltElbow";
 import { Inserters } from "@/Animation/inserter";
 import { buildingMeta, noIconBuildings } from "@/data/building";
 import { isBelt, isInserter } from "@/data/items";
@@ -142,61 +153,82 @@ export function buildBuildings(
         const { shapes, issues } = computeBeltShapes(buildings);
         if (issues.length) console.warn(`[belt] ${issues.join("；")}`);
         const shapeOf = (b: BlueprintBuilding) => shapes.get(b.index);
-        const strips = belts.filter((b) => (shapeOf(b)?.kind ?? "dot") !== "dot");
-        const isolated = belts.filter((b) => (shapeOf(b)?.kind ?? "dot") === "dot");
+        const byIndex = new Map(buildings.map((b) => [b.index, b]));
+        // 三态 + 转角：直段走条带（方条），转角走圆环（倒圆棱柱）；两者共用一份材质
+        const strips = belts.filter((b) => shapeOf(b)?.kind === "straight");
+        const corners = belts.filter((b) => shapeOf(b)?.kind === "corner");
+        const isolated = belts.filter(
+            (b) => (shapeOf(b)?.kind ?? "dot") === "dot"
+        );
 
-        // ── ① 条带：所有有连接的格（每格一段） ──
+        // Rx(π/2) 对所有带子相同，构造一次即可（yaw 已在 base 内）
+        const rot = new Matrix4().makeRotationX(Math.PI / 2);
+        const trans = new Matrix4();
+        const cargoTrans = new Matrix4();
+        const temp = new Matrix4();
+
+        /**
+         * 条带 / 圆环共同的基础姿态 = base · Rx(π/2) · T(0, BELT_LIFT + slope/2 + extra, 0)
+         *
+         * `extra` 只有圆环用（`BELT_ELBOW_LIFT`）：转角厚度与直段一致后两者顶面共面，
+         * 需要按厚度比例的极小抬升避免 z-fighting。
+         */
+        const poseOf = (b: BlueprintBuilding, slope: number, extra = 0) => {
+            trans.copy(transforms[b.index][0]).multiply(rot);
+            return trans.multiply(
+                temp.makeTranslation(0, BELT_LIFT + slope / 2 + extra, 0)
+            );
+        };
+
+        // 货物：**必须从 base 重新 copy**（不能复用 trans，否则继承抬升，方案 §6.6-S3）；
+        // +z 是本格后缘（逆流向），货物从后缘滑到前缘正好走过一格 = 一个周期。
+        // 抬升不加 slope/2：坡度由货物着色器对 transformed.z 的剪切项补上（§3.6）。
+        const addCellCargo = (b: BlueprintBuilding, shape: BeltShape) => {
+            cargoTrans.copy(transforms[b.index][0]).multiply(rot);
+            cargoTrans.multiply(
+                temp.makeTranslation(0, CARGO_LIFT, BELT_LEN / 2)
+            );
+            addCargo(cargoTrans, CARGO_COLOR, BELT_LEN, shape);
+        };
+
+        const beltMaterial = new BeltMaterial();
+        /** 供帧循环写 `cargoMove` 的 mesh：条带与圆环共用材质，返回任意一个即可 */
+        let beltMesh: BeltMesh | null = null;
+
         /** 端帽实例：姿态在这里拼好，独立 InstancedMesh 承载（见 beltCaps.ts） */
         const capEntries: { matrix: Matrix4; color: Color }[] = [];
-        let beltMesh: Belts | null = null;
-        if (strips.length) {
-            beltMesh = new Belts(strips.length);
-            // Rx(π/2) 对所有带子相同，构造一次即可（yaw 已在 base 内）
-            const rot = new Matrix4().makeRotationX(Math.PI / 2);
-            const trans = new Matrix4();
-            const cargoTrans = new Matrix4();
-            const temp = new Matrix4();
-            const capTrans = new Matrix4();
-            const shear = new Matrix4();
+        const capTrans = new Matrix4();
+        const shear = new Matrix4();
 
+        // ── ① 直段条带 ──
+        if (strips.length) {
+            const mesh = new Belts(strips.length, beltMaterial);
+            // 顶点是被着色器**弯折**的，几何包围球只覆盖"未弯折的方条"（半径约 0.79），
+            // 弯折后实际范围到 1.1 —— 按包围球做视锥剔除会让贴边的条带整段消失。
+            mesh.frustumCulled = false;
             for (let i = 0; i < strips.length; i++) {
                 const b = strips[i];
-                const base = transforms[b.index][0];
                 const shape = shapeOf(b);
                 if (shape === undefined) continue; // 不可达：strips 就是按 shapes 过滤出来的
                 const { slope } = shape;
 
                 // 无 scale：BELT_LEN 已烘进几何（否则圆弧被压成椭圆，§3.6）
-                trans.copy(base).multiply(rot);
-                trans.multiply(
-                    temp.makeTranslation(0, BELT_LIFT + slope / 2, 0)
-                );
-
-                beltMesh.setMatrixAt(i, trans);
+                mesh.setMatrixAt(i, poseOf(b, slope));
                 // 条带取元数据色（方案 §9.1-E-3 / G5）：材质色保持默认白，避免二次相乘
-                beltMesh.setColorAt(i, colorOf(b.modelIndex));
+                mesh.setColorAt(i, colorOf(b.modelIndex));
                 // 逐实例形状参数：CPU 算好的圆弧 + 坡度 + 贴边外延
-                beltMesh.setArcAt(i, shape);
+                mesh.setArcAt(i, shape);
                 // modelRef 只能用 base：指向条带 mesh 会让 getBuildingModel 返回被拉伸的矩阵
-                modelRef[b.index] = { matrix: base };
+                modelRef[b.index] = { matrix: transforms[b.index][0] };
 
-                // 货物：**必须从 base 重新 copy**（不能复用 trans，否则继承抬升，方案 §6.6-S3）；
-                // +z 是本格后缘（逆流向），货物从后缘滑到前缘正好走过一格 = 一个周期。
-                // 抬升不加 slope/2：坡度由货物着色器对 transformed.z 的剪切项补上（§3.6）。
-                if (shape.hasOut) {
-                    cargoTrans.copy(base).multiply(rot);
-                    cargoTrans.multiply(
-                        temp.makeTranslation(0, CARGO_LIFT, BELT_LEN / 2)
-                    );
-                    addCargo(cargoTrans, CARGO_COLOR, BELT_LEN, shape);
-                }
+                if (shape.hasOut) addCellCargo(b, shape);
 
                 // 端帽：半圆的直径压在条带端面上，向格子外鼓出。
-                // 乘序 base·Rx·S·Tlift·Tend·Rflip：Rflip 最先作用，S（坡度剪切）最后 —— 
+                // 乘序 base·Rx·S·Tlift·Tend·Rflip：Rflip 最先作用，S（坡度剪切）最后 ——
                 // 这样端帽和条带顶面在坡道上也是同一张斜面。
                 for (const front of [false, true]) {
                     if (front ? !shape.capFront : !shape.capBack) continue;
-                    capTrans.copy(base).multiply(rot);
+                    capTrans.copy(transforms[b.index][0]).multiply(rot);
                     capTrans.multiply(
                         shear.makeShear(0, 0, 0, 0, 0, -slope / BELT_LEN)
                     );
@@ -217,15 +249,50 @@ export function buildBuildings(
                     });
                 }
             }
-            beltMesh.instanceMatrix.needsUpdate = true;
-            if (beltMesh.instanceColor !== null)
-                beltMesh.instanceColor.needsUpdate = true;
-            beltMesh.geometry.beltArc.needsUpdate = true;
-            beltMesh.geometry.beltAux.needsUpdate = true;
-            objects.push(beltMesh);
+            mesh.instanceMatrix.needsUpdate = true;
+            if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
+            mesh.geometry.beltArc.needsUpdate = true;
+            mesh.geometry.beltAux.needsUpdate = true;
+            objects.push(mesh);
+            beltMesh = mesh;
         }
 
-        // ── ①b 端帽：独立 InstancedMesh（半圆盘），数量 = 开放端数 ──
+        // ── ①b 圆环弯头：转角格（见 beltElbow.ts） ──
+        if (corners.length) {
+            const mesh = new BeltElbows(corners.length, beltMaterial);
+            // 同上：圆环是被着色器弯出来的，未弯折棱柱的包围球（半径 ~1.0）远小于
+            // 弯折后的真实范围（~2.0），必须关掉视锥剔除，否则转角会随机整块消失。
+            mesh.frustumCulled = false;
+            for (let i = 0; i < corners.length; i++) {
+                const b = corners[i];
+                const shape = shapeOf(b);
+                if (shape === undefined) continue;
+                mesh.setMatrixAt(i, poseOf(b, shape.slope, BELT_ELBOW_LIFT));
+                mesh.setColorAt(i, colorOf(b.modelIndex));
+                mesh.setArcAt(i, shape);
+                // 邻格也是圆环的那一端不伸出：两个圆环的 stub 会互相穿插、顶面出重影
+                const isElbow = (index: number | null) => {
+                    const nb = index === null ? undefined : byIndex.get(index);
+                    return nb !== undefined && shapeOf(nb)?.kind === "corner";
+                };
+                mesh.setStubAt(
+                    i,
+                    isElbow(shape.inIndex) ? 0 : BELT_ELBOW_STUB,
+                    isElbow(shape.outIndex) ? 0 : BELT_ELBOW_STUB
+                );
+                modelRef[b.index] = { matrix: transforms[b.index][0] };
+                if (shape.hasOut) addCellCargo(b, shape);
+            }
+            mesh.instanceMatrix.needsUpdate = true;
+            if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
+            mesh.geometry.beltArc.needsUpdate = true;
+            mesh.geometry.beltAux.needsUpdate = true;
+            mesh.geometry.beltStub.needsUpdate = true;
+            objects.push(mesh);
+            if (beltMesh === null) beltMesh = mesh;
+        }
+
+        // ── ①c 端帽：独立 InstancedMesh（半圆盘），数量 = 开放端数 ──
         if (capEntries.length) {
             const caps = new BeltCaps(capEntries.length);
             for (let i = 0; i < capEntries.length; i++) {
@@ -609,8 +676,8 @@ export function buildBuildings(
     const meshes: Object3D[] = [];
     const built = buildBoxes(boxes);
 
-    /** 条带 mesh 引用（只给帧循环写 `cargoMove`）；没有条带时为 null */
-    let beltMesh: Belts | null = null;
+    /** 条带 / 圆环 mesh 引用（只给帧循环写 `cargoMove`）；没有带子时为 null */
+    let beltMesh: BeltMesh | null = null;
     if (belts.length) {
         const builtBelts = buildBelts(belts);
         meshes.push(...builtBelts.objects);
