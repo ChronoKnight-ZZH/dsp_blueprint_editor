@@ -1,9 +1,4 @@
-import {
-    BoxGeometry,
-    Color,
-    InstancedMesh,
-    MeshLambertMaterial,
-} from "three";
+import { BoxGeometry, Color, InstancedMesh, MeshLambertMaterial } from "three";
 import type { WebGLProgramParametersWithUniforms } from "three";
 import { GRID_HORIZONTAL } from "@/planetConstants";
 import { CARGO_SIZE } from "@/cargos";
@@ -26,10 +21,10 @@ import { CARGO_SIZE } from "@/cargos";
  */
 
 /** 条带宽度（世界单位）：一格 1.2578，两侧各留约 0.15 间隙 */
-export const BELT_WIDTH = 0.95;
+export const BELT_WIDTH = 0.64;
 
 /** 条带厚度（世界单位）；同时决定条带顶面高度 */
-export const BELT_HEIGHT = 0.08;
+export const BELT_HEIGHT = 0.12;
 
 /** 条带中心抬升：盒体以原点为中心，抬升半个厚度后底面正好贴球面（方案 §3.4-F3） */
 export const BELT_LIFT = BELT_HEIGHT / 2;
