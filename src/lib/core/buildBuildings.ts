@@ -25,7 +25,7 @@ import {
     Belts,
     BeltMaterial,
 } from "@/Animation/belt";
-import type { BeltMesh } from "@/Animation/belt";
+import type { BeltMesh, BeltArcParams } from "@/Animation/belt";
 import { computeBeltShapes } from "@/Animation/beltArc";
 import type { BeltShape } from "@/Animation/beltArc";
 import { BeltCaps } from "@/Animation/beltCaps";
@@ -173,56 +173,237 @@ export function buildBuildings(
         const cargoTrans = new Matrix4();
         const temp = new Matrix4();
         const frameFix = new Matrix4();
+        const oldMatrix = new Matrix4();
+        // lookAt 临时向量（直段 + 转角朝向推导）
+        const lookSelf = new Vector3();
+        const lookTarget = new Vector3();
+        const lookUp = new Vector3();
+        const lookDir = new Vector3();
+        const lookProjected = new Vector3();
+        // 转角专用：前驱位置、角平分线、旧帧方向、叉积
+        const lookPred = new Vector3();
+        const dirIn = new Vector3();
+        const dirOut = new Vector3();
+        const bisector = new Vector3();
+        const oldDir = new Vector3();
+        const phiCross = new Vector3();
 
         /**
-         * 本格的**渲染坐标系** = `base`，但把 yaw 换成由连线推导的朝向。
+         * 转角弧参数修正角（弧度）：lookAt 平分线 vs CPU yawDeg 的差值。
          *
-         * `base = Ry(lon)·Rx(-lat)·Rz(-yaw数据)`，而 `base·Rz(yaw数据 − yaw连线)`
-         * 正好等于 `Ry(lon)·Rx(-lat)·Rz(-yaw连线)` —— 即绕本格法线（局部 +z）转一个差值。
-         * 这样即使蓝图里的 yaw 与连线不符（编辑器重排 / 侧口 / 手改），相邻格的端面
-         * 仍然严格对齐；数据自洽时差值为 0，是**零改动**。
+         * 非 0 时，弧的圆心和 θ 范围需要按 phi 旋转补偿，否则弧会偏转。
+         * key = building index（`BlueprintBuilding.index`）。
          */
-        const frameOf = (
+        const cornerPhi = new Map<number, number>();
+
+        /**
+         * 直段世界距离（本格 → 后继格的切面投影距离）。
+         *
+         * 用于 scale 和货物行程：条带几何仍为 BELT_LEN，实例矩阵按 dist/BELT_LEN 缩放。
+         * key = building index。
+         */
+        const beltDist = new Map<number, number>();
+
+        /**
+         * 取本格的世界法线（base 矩阵的局部 +z 轴）。
+         *
+         * **不能**用 `position.normalize()`：那只在球面模式下等于法线；切平面模式下
+         * base = `Rz(yaw)` + 平移 `(gx·cell, gy·cell, radius + z·HG)`，位置矢量的水平
+         * 分量会把它拉斜（蓝图跨度越大越斜），lookAt 的 up 一斜，条带就绕流向滚转，
+         * 表现为"同位置多出一条垂直/倾斜的条带"。base 的 +z 轴在两种模式下都严格是法线。
+         */
+        const normalOf = (b: BlueprintBuilding, out: Vector3) =>
+            out.setFromMatrixColumn(transforms[b.index][0], 2).normalize();
+
+        /** 尺度安全钳制：防止退化连线（同格 / 极近目标）把实例矩阵压成 0 或炸开 */
+        const clampScale = (s: number) => Math.min(2, Math.max(0.5, s));
+
+        /**
+         * 该格的后继是否是一条**真正相邻的传送带**（`computeBeltShapes` 用整数格判定过）。
+         *
+         * 只有这种「带-带」链路才用 lookAt + scale：侧口 / 隔格 / 输出到机器都算不出可靠的
+         * 流向，强行 lookAt 会拿到极短且带噪声的方向 —— 条带会被摆到垂直方向、缩成半截，
+         * 看上去就是"同位置凭空多出一条垂直条带"。这类格统一回落到网格帧 + 固定段长。
+         */
+        const isChained = (shape: BeltShape) => shape.outIndex !== null;
+
+        // 预计算有「相邻带后继」的格的世界距离
+        // 标准格邻接时世界距离 ≈ BELT_LEN（浮点误差 ±1e-5），snap 到 BELT_LEN 保持精度
+        const snapLen = (d: number) =>
+            Math.abs(d - BELT_LEN) < 1e-4 ? BELT_LEN : d;
+        for (const b of belts) {
+            const shape = shapes.get(b.index);
+            if (shape === undefined || !isChained(shape)) continue;
+            if (b.outputObjIdx < 0 || b.outputObjIdx >= transforms.length)
+                continue;
+            lookSelf.setFromMatrixPosition(transforms[b.index][0]);
+            lookTarget.setFromMatrixPosition(transforms[b.outputObjIdx][0]);
+            normalOf(b, lookUp);
+            lookDir.subVectors(lookTarget, lookSelf);
+            lookDir.addScaledVector(lookUp, -lookDir.dot(lookUp));
+            beltDist.set(b.index, snapLen(lookDir.length()));
+        }
+
+        /**
+         * 统一姿态帧（返回"条带约定"：局部 -z = 流向、+y = 法线）。
+         *
+         * - **直段**：lookAt(self → 相邻后继格)；
+         * - **转角**：lookAt(世界空间角平分线)，与直段同约定 → 接缝对齐。
+         *   弧参数由 CPU 算好（grid-step yaw），帧旋转了 phi → 写 mesh 时用 `arcOf` 补偿。
+         *   补偿后 `F_new · Ry(−phi)` 恒等于旧帧，所以转角的**世界几何与改动前完全一致**。
+         * - **圆点 / 开放端 / 链路不连续（侧口、隔格、输出到机器）**：
+         *   回退 base × Rz(yaw修正) × Rx(π/2)，段长固定为 BELT_LEN。
+         */
+        const beltFrame = (
             b: BlueprintBuilding,
             shape: BeltShape,
             out: Matrix4
         ): Matrix4 => {
+            // 直段：lookAt(self → 相邻后继格)
+            if (shape.kind === "straight" && isChained(shape)) {
+                lookSelf.setFromMatrixPosition(transforms[b.index][0]);
+                lookTarget.setFromMatrixPosition(
+                    transforms[b.outputObjIdx][0]
+                );
+                normalOf(b, lookUp);
+                lookDir.subVectors(lookTarget, lookSelf);
+                lookDir.addScaledVector(lookUp, -lookDir.dot(lookUp));
+                // 方向必须有「一格的量级」才算可靠；退化连线（近同格 / 侧口）
+                // 的归一化方向是噪声，会让条带随机转 90° → 回退网格帧
+                if (lookDir.lengthSq() > (BELT_LEN * 0.5) ** 2) {
+                    lookProjected.copy(lookSelf).add(lookDir);
+                    out.lookAt(lookSelf, lookProjected, lookUp);
+                    out.setPosition(lookSelf);
+                    return out;
+                }
+            }
+
+            // 转角：lookAt(世界空间角平分线)
+            if (shape.kind === "corner" && shape.inIndex !== null && isChained(shape)) {
+                lookSelf.setFromMatrixPosition(transforms[b.index][0]);
+                lookPred.setFromMatrixPosition(
+                    transforms[shape.inIndex][0]
+                );
+                lookTarget.setFromMatrixPosition(
+                    transforms[b.outputObjIdx][0]
+                );
+                normalOf(b, lookUp);
+                // 切面投影：去掉径向分量
+                dirIn.subVectors(lookSelf, lookPred);
+                dirIn.addScaledVector(lookUp, -dirIn.dot(lookUp));
+                dirOut.subVectors(lookTarget, lookSelf);
+                dirOut.addScaledVector(lookUp, -dirOut.dot(lookUp));
+                bisector.copy(dirIn).add(dirOut);
+                const minLen = BELT_LEN * 0.5;
+                if (
+                    dirIn.lengthSq() > minLen * minLen &&
+                    dirOut.lengthSq() > minLen * minLen &&
+                    bisector.lengthSq() > (minLen * 0.2) ** 2
+                ) {
+                    bisector.normalize();
+                    // 旧帧的 -z 方向（CPU yawDeg 平分线在世界空间中的指向）
+                    const delta =
+                        ((b.yaw[0] - shape.yawDeg) / 180) * Math.PI;
+                    oldMatrix.copy(transforms[b.index][0]);
+                    if (Math.abs(delta) > 1e-9) {
+                        oldMatrix.multiply(frameFix.makeRotationZ(delta));
+                    }
+                    oldMatrix.multiply(rot);
+                    oldDir.set(0, 0, -1).transformDirection(oldMatrix);
+                    // phi = 旧帧 → 新帧的旋转角（绕法线）
+                    phiCross.crossVectors(oldDir, bisector);
+                    const phi = Math.atan2(
+                        phiCross.dot(lookUp),
+                        oldDir.dot(bisector)
+                    );
+                    cornerPhi.set(b.index, phi);
+                    // 用 lookAt 平分线作为帧方向
+                    lookProjected.copy(lookSelf).add(bisector);
+                    out.lookAt(lookSelf, lookProjected, lookUp);
+                    out.setPosition(lookSelf);
+                    return out;
+                }
+            }
+
+            // 回退：圆点 / 开放端 / 退化方向
             const delta = ((b.yaw[0] - shape.yawDeg) / 180) * Math.PI;
             out.copy(transforms[b.index][0]);
             if (Math.abs(delta) > 1e-9) {
                 out.multiply(frameFix.makeRotationZ(delta));
             }
-            return out;
+            return out.multiply(rot);
         };
 
         /**
-         * 条带 / 圆环共同的基础姿态 = frame · Rx(π/2) · T(0, BELT_LIFT + slope/2 + extra, 0)
+         * 逐格的**流向缩放系数**（相对 BELT_LEN）。
          *
-         * `extra` 只有圆环用（`BELT_ELBOW_LIFT`）：转角厚度与直段一致后两者顶面共面，
-         * 需要按厚度比例的极小抬升避免 z-fighting。
+         * 只有直段按世界距离缩放；转角 / 圆点的弧半径已烘死为半格长，恒为 1。
+         */
+        const scaleOf = (b: BlueprintBuilding, shape: BeltShape): number =>
+            shape.kind === "straight"
+                ? clampScale((beltDist.get(b.index) ?? BELT_LEN) / BELT_LEN)
+                : 1;
+
+        /**
+         * 逐格的**最终弧参数**：转角按 `cornerPhi` 补偿帧旋转，直段原样返回。
+         *
+         * 条带（圆环）与货物必须用**同一份**返回值，否则货物会走出圆环。
+         * 依赖 `beltFrame` 已经对该格跑过一次（phi 在那里计算并写入 `cornerPhi`）。
+         */
+        const arcOf = (b: BlueprintBuilding, shape: BeltShape): BeltArcParams => {
+            if (shape.kind !== "corner") return shape;
+            const phi = cornerPhi.get(b.index) ?? 0;
+            if (Math.abs(phi) <= 1e-9) return shape;
+            const c = Math.cos(phi);
+            const s = Math.sin(phi);
+            return {
+                theta0: shape.theta0 + phi,
+                theta1: shape.theta1 + phi,
+                centerX: c * shape.centerX - s * shape.centerZ,
+                centerZ: s * shape.centerX + c * shape.centerZ,
+                slope: shape.slope,
+                extend: shape.extend,
+                exitX: c * shape.exitX - s * shape.exitZ,
+                exitZ: s * shape.exitX + c * shape.exitZ,
+            };
+        };
+
+        /**
+         * 条带 / 圆环共同的基础姿态 = beltFrame · [S(1,1,s)] · T(0, lift + slope/2 + extra, 0)
+         *
+         * 直段按世界距离缩放（BELT_LEN 烘进几何，实例矩阵补差）；
+         * 转角 / 圆点不缩放（弧几何固定为 BELT_LEN）。
          */
         const poseOf = (b: BlueprintBuilding, shape: BeltShape, extra = 0) => {
-            frameOf(b, shape, trans).multiply(rot);
+            beltFrame(b, shape, trans);
+            const s = scaleOf(b, shape);
+            if (s !== 1) trans.multiply(temp.makeScale(1, 1, s));
             return trans.multiply(
                 temp.makeTranslation(0, BELT_LIFT + shape.slope / 2 + extra, 0)
             );
         };
 
         // 货物：**必须从 base 重新 copy**（不能复用 trans，否则继承抬升，方案 §6.6-S3）；
-        // +z 是本格后缘（逆流向），货物从后缘滑到前缘正好走过一格 = 一个周期。
-        // 抬升不加 slope/2：坡度由货物着色器对 transformed.z 的剪切项补上（§3.6）。
+        // 直段同样按 s 缩放，行程改为世界距离（弧段的 R = distance/2 必须等于 BELT_LEN/2）
         const addCellCargo = (b: BlueprintBuilding, shape: BeltShape) => {
-            frameOf(b, shape, cargoTrans).multiply(rot);
+            beltFrame(b, shape, cargoTrans);
+            const s = scaleOf(b, shape);
+            if (s !== 1) cargoTrans.multiply(temp.makeScale(1, 1, s));
             cargoTrans.multiply(
                 temp.makeTranslation(0, CARGO_LIFT, BELT_LEN / 2)
             );
-            // 线尾格（前端是端帽）的货物滑到端帽尖点就缩没：行程少 `BELT_CAP_TIP_INSET`，
-            // 否则货物的终点仍在端帽尖点之外 5cm（条带端面已被端帽向内收掉）。
-            // 起点不变（仍在本格后缘），与前一格的货物在接缝处照常一收一放。
+            // 线尾格（前端是端帽）的货物滑到端帽尖点就缩没：行程少 `BELT_CAP_TIP_INSET`
+            const len = BELT_LEN * s;
             const distance = shape.capFront
-                ? BELT_LEN - BELT_CAP_TIP_INSET
-                : BELT_LEN;
-            addCargo(cargoTrans, CARGO_COLOR, distance, shape, CARGO_FADE);
+                ? len - BELT_CAP_TIP_INSET
+                : len;
+            addCargo(
+                cargoTrans,
+                CARGO_COLOR,
+                distance,
+                arcOf(b, shape),
+                CARGO_FADE
+            );
         };
 
         const beltMaterial = new BeltMaterial();
@@ -243,36 +424,29 @@ export function buildBuildings(
             for (let i = 0; i < strips.length; i++) {
                 const b = strips[i];
                 const shape = shapeOf(b);
-                if (shape === undefined) continue; // 不可达：strips 就是按 shapes 过滤出来的
+                if (shape === undefined) continue;
                 const { slope } = shape;
+                const s = scaleOf(b, shape);
 
-                // 无 scale：BELT_LEN 已烘进几何（否则圆弧被压成椭圆，§3.6）
                 mesh.setMatrixAt(i, poseOf(b, shape));
-                // 条带取元数据色（方案 §9.1-E-3 / G5）：材质色保持默认白，避免二次相乘
                 mesh.setColorAt(i, colorOf(b.modelIndex));
-                // 逐实例形状参数：CPU 算好的圆弧 + 坡度 + 贴边外延
                 mesh.setArcAt(i, shape);
-                // 端头内收：端帽压住的那一端把条带端面收进去（正=伸出 / 负=内收）
+                // 端头内收（几何空间，会被 S 放大 → 除以 s 补偿）
                 mesh.setEndsAt(
                     i,
-                    shape.capBack ? -BELT_CAP_SHORTEN : 0,
-                    shape.capFront ? -BELT_CAP_SHORTEN : 0
+                    shape.capBack ? -BELT_CAP_SHORTEN / s : 0,
+                    shape.capFront ? -BELT_CAP_SHORTEN / s : 0
                 );
-                // modelRef 只能用 base：指向条带 mesh 会让 getBuildingModel 返回被拉伸的矩阵
                 modelRef[b.index] = { matrix: transforms[b.index][0] };
 
-                // 每格都有货物：线尾格（无后继、前端是端帽）同样挂一件，
-                // 否则最后一段永远看不到货物滑动（addCellCargo 会把行程收到端帽尖点）
                 addCellCargo(b, shape);
 
-                // 端帽：半圆的尖点落在格边界内侧 `BELT_CAP_TIP_INSET`，直径面压进条带
-                // `BELT_CAP_OVERLAP`（终端因此比 v5 短了 R+inset，不再向格外鼓出）。
-                // 乘序 base·Rx·S·Tlift·Tend·Rflip：Rflip 最先作用，S（坡度剪切）最后 ——
-                // 这样端帽和条带顶面在坡道上也是同一张斜面。
+                // 端帽：乘序 beltFrame·S·shear·Tlift·Tdiameter·Rflip
+                // shear 作用在**几何空间**（S 之前的局部 z），系数必须仍是 -slope/BELT_LEN
                 for (const front of [false, true]) {
                     if (front ? !shape.capFront : !shape.capBack) continue;
-                    capTrans.copy(transforms[b.index][0]);
-                    frameOf(b, shape, capTrans).multiply(rot);
+                    beltFrame(b, shape, capTrans);
+                    if (s !== 1) capTrans.multiply(temp.makeScale(1, 1, s));
                     capTrans.multiply(
                         shear.makeShear(0, 0, 0, 0, 0, -slope / BELT_LEN)
                     );
@@ -318,7 +492,8 @@ export function buildBuildings(
                 if (shape === undefined) continue;
                 mesh.setMatrixAt(i, poseOf(b, shape, BELT_ELBOW_LIFT));
                 mesh.setColorAt(i, colorOf(b.modelIndex));
-                mesh.setArcAt(i, shape);
+                // 弧参数与货物同源：`poseOf` 已写好 phi，这里取补偿后的弧（见 arcOf）
+                mesh.setArcAt(i, arcOf(b, shape));
                 // 邻格也是圆环的那一端不伸出：两个圆环的 stub 会互相穿插、顶面出重影
                 const isElbow = (index: number | null) => {
                     const nb = index === null ? undefined : byIndex.get(index);
