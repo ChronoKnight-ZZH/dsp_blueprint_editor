@@ -27,10 +27,13 @@ import {
     BELT_HEIGHT,
     BELT_LEN,
     BELT_LIFT,
+    BELT_RISER_BASE,
     BELT_WIDTH,
     CARGO_LIFT,
+    RISER_CARGO_SIDE,
 } from "@/Animation/belt";
 import { BeltElbows } from "@/Animation/beltElbow";
+import { computeBeltShapes } from "@/Animation/beltArc";
 import {
     BELT_CAP_DIAMETER,
     BELT_CAP_LIFT,
@@ -266,6 +269,22 @@ function arcPoint(mesh: Belts | BeltElbows, i: number, phase: number): Vector3 {
 /** 两格中心连线的中点 ≈ 它们共享边的中点（仅差球面弦高） */
 function sharedEdgeMid(a: Vector3, b: Vector3): Vector3 {
     return a.clone().add(b).multiplyScalar(0.5);
+}
+
+/** 世界点 → 相对某格地板的（高度 h，沿流向 along），两者都以该格的 base 帧为准 */
+function localOf(
+    transforms: Matrix4[][],
+    index: number,
+    p: Vector3
+): { h: number; along: number } {
+    const up = new Vector3()
+        .setFromMatrixColumn(transforms[index][0], 2)
+        .normalize();
+    const flow = new Vector3()
+        .setFromMatrixColumn(transforms[index][0], 1)
+        .normalize();
+    const d = p.clone().sub(cellCenter(transforms, index));
+    return { h: d.dot(up), along: d.dot(flow) };
 }
 
 describe("buildBuildings · 传送带条带与圆点", () => {
@@ -1019,6 +1038,41 @@ describe("buildBuildings · 端帽内收与货物端点淡出", () => {
         }
     });
 
+    it("转角的圆环与货物必须用**同一份**弧参数（cornerPhi 补偿不能只给圆环）", () => {
+        nextIndex = 0;
+        // yaw 全写错（0/0/180）→ 转角帧要绕法线转 phi ≠ 0，补偿必须同时作用在圆环和货物上
+        const buildings = [
+            beltBuilding(0, 0, 1, 0),
+            beltBuilding(1, 0, 2, 0),
+            beltBuilding(1, 1, -1, 180),
+        ];
+        const result = build(buildings);
+        try {
+            const ring = elbowMeshes(result)[0];
+            expect(instanceCount(ring)).toBe(1);
+            const ringArc = ring.geometry.beltArc.array as Float32Array;
+
+            // 直段 2 格（#0 / #2）先入 cargo，转角那一格排第 3 件
+            const cargoIdx = 2;
+            const cargoArc = result.buildings.cargos.geometry.cargoArc
+                .array as Float32Array;
+            for (let k = 0; k < 4; k++) {
+                expect(cargoArc[cargoIdx * 4 + k]).toBeCloseTo(
+                    ringArc[k],
+                    6
+                );
+            }
+
+            // 同样的弧参数也来自 CPU（`beltArc`），只是叠了 phi 补偿：
+            // 断言两者差 ≤ 一格的量级，防止以后又有人把补偿整段丢掉
+            const raw = computeBeltShapes(buildings).shapes.get(1)!;
+            expect(Math.abs(ringArc[0] - raw.theta0)).toBeLessThan(0.1);
+        } finally {
+            result.buildings.dispose();
+            result.iconTexture.dispose();
+        }
+    });
+
     it("货物端点淡出：条带写 CARGO_FADE，分拣器为 0（整块出现/消失）", () => {
         nextIndex = 0;
         const result = build([
@@ -1087,5 +1141,234 @@ describe("buildBuildings · 端帽内收与货物端点淡出", () => {
         expect(scale(0.01)).toBeGreaterThan(0);
         expect(scale(0.01)).toBeLessThan(scale(0.03));
         expect(scale(0.99)).toBeLessThan(scale(0.97));
+    });
+});
+
+describe("传送带 · 垂直段（riser）", () => {
+    /**
+     * 实测 `data/三种坡度上升的高度1.txt` 的 y=2 行：
+     * `#0(4,2,0) → #1(3.002,2,0) → #2(3,2,1) → #3(2,2,1)`，流向 -x。
+     */
+    function buildRiserChain() {
+        nextIndex = 0;
+        return build([
+            beltBuilding(11, 10, 1, 270), // #0 水平来料
+            beltBuilding(10.002, 10, 2, 270), // #1 上升格（同格，中心偏 1.58e-3）
+            beltBuilding(10, 10, 3, 270, 2001, 35, 1), // #2 上层水平（z = 1）
+            beltBuilding(9, 10, -1, 270, 2001, 35, 1), // #3 上层线尾
+        ]);
+    }
+
+    it("渲染成刚性竖条：两端面落在上下层条带的中面上，板站在两格公共边上", () => {
+        const result = buildRiserChain();
+        try {
+            const mesh = stripMeshes(result)[0];
+            // 3 个直段 + 1 个垂直段共用同一个 Belts mesh
+            expect(instanceCount(mesh)).toBe(4);
+            const riserIndex = 1; // strips 顺序 = 建筑顺序
+
+            const m = new Matrix4();
+            mesh.getMatrixAt(riserIndex, m);
+            const up = new Vector3()
+                .setFromMatrixColumn(result.transforms[1][0], 2)
+                .normalize();
+            // 局部 +z 朝下（局部 -z = 行进方向 = 上），即整根刚性竖起来、没有斜坡剪切
+            const zAxis = new Vector3().setFromMatrixColumn(m, 2).normalize();
+            expect(zAxis.dot(up)).toBeCloseTo(-1, 6);
+
+            // 板心 = 半格高（BELT_LIFT + rise/2），X/Y 落在**本格格心**（along = 0）
+            const centre = new Vector3().setFromMatrixPosition(m);
+            const c = localOf(result.transforms, 1, centre);
+            expect(c.h).toBeCloseTo(BELT_LIFT + HEIGHT_GRID_SIZE / 2, 4);
+            expect(c.along).toBeCloseTo(0, 3);
+
+            // 端面：后缘（局部 +z）= 本层中面；前缘（局部 -z）= 上层中面
+            const ends = stripEnds(mesh, riserIndex);
+            const back = localOf(result.transforms, 1, ends.up);
+            const front = localOf(result.transforms, 1, ends.down);
+            expect(back.h).toBeCloseTo(BELT_RISER_BASE, 4);
+            expect(front.h).toBeCloseTo(BELT_RISER_BASE + HEIGHT_GRID_SIZE, 4);
+            // 两端水平位置相同：板是竖直的，没有沿流向倾倒
+            expect(back.along).toBeCloseTo(front.along, 6);
+        } finally {
+            result.buildings.dispose();
+            result.iconTexture.dispose();
+        }
+    });
+
+    it("货物贴在板外侧、行程 = |rise|（从下端滑到上端）", () => {
+        const result = buildRiserChain();
+        try {
+            const dist = result.buildings.cargos.geometry.cargoDistance
+                .array as Float32Array;
+            // cargo 下标 = strips 顺序；#1 是垂直段
+            expect(dist[1]).toBeCloseTo(HEIGHT_GRID_SIZE, 6);
+
+            const m = new Matrix4();
+            result.buildings.cargos.getMatrixAt(1, m);
+            const p = new Vector3().setFromMatrixPosition(m);
+            const loc = localOf(result.transforms, 1, p);
+            // 起点 = 板的下端面；横向离开**格心处的板中面**「板半厚 + 货物半边长 + 间隙」
+            expect(loc.h).toBeCloseTo(BELT_RISER_BASE, 4);
+            expect(Math.abs(loc.along)).toBeCloseTo(RISER_CARGO_SIDE, 3);
+            expect(RISER_CARGO_SIDE).toBeCloseTo(
+                BELT_HEIGHT / 2 + CARGO_SIZE / 2 + 0.02,
+                9
+            );
+        } finally {
+            result.buildings.dispose();
+            result.iconTexture.dispose();
+        }
+    });
+
+    it("来料格用 extend 把条带接到板近面，货物也一路滑到贴着板面", () => {
+        const result = buildRiserChain();
+        try {
+            const mesh = stripMeshes(result)[0];
+            // 0 号实例 = 来料格 #0（条带顺序 = 建筑顺序）
+            const s = shapeAt(mesh, 0);
+            // 缺口 ≈ 半格 − 板半厚 = 0.629 − 0.04
+            expect(s.extend).toBeCloseTo(0.589, 2);
+            // 出口切线 = 本格流向（帧的局部 −z）
+            expect(s.exitX).toBe(0);
+            expect(s.exitZ).toBe(-1);
+
+            // 复刻着色器：只推前缘顶点，沿出口切线
+            const m = new Matrix4();
+            mesh.getMatrixAt(0, m);
+            const front = new Vector3(
+                s.extend * s.exitX,
+                0,
+                -BELT_LEN / 2 + s.extend * s.exitZ
+            ).applyMatrix4(m);
+            // 前缘落在板近面：沿流向距板格中心 = 板半厚（取负号 = 来料侧）
+            expect(localOf(result.transforms, 1, front).along).toBeCloseTo(
+                -BELT_HEIGHT / 2,
+                2
+            );
+
+            // 货物：终点（cargoMove = 1）的**鼻尖**贴着板面 = 板半厚 + 半个货
+            const dist = result.buildings.cargos.geometry.cargoDistance
+                .array as Float32Array;
+            expect(dist[0]).toBeGreaterThan(BELT_LEN);
+            const cm = new Matrix4();
+            result.buildings.cargos.getMatrixAt(0, cm);
+            const end = new Vector3(0, 0, -dist[0]).applyMatrix4(cm);
+            expect(localOf(result.transforms, 1, end).along).toBeCloseTo(
+                -(BELT_HEIGHT / 2 + CARGO_SIZE / 2),
+                2
+            );
+        } finally {
+            result.buildings.dispose();
+            result.iconTexture.dispose();
+        }
+    });
+
+    it("垂直段不加端帽（两端被上下层条带盖住），端面也不内收", () => {
+        nextIndex = 0;
+        const result = build([
+            beltBuilding(10, 10, 1, 0), // #0 线头就是垂直段：capBack = true
+            beltBuilding(10, 10, -1, 0, 2001, 35, 1), // #1 上层线尾：capFront = true
+        ]);
+        try {
+            const mesh = stripMeshes(result)[0];
+            expect(instanceCount(mesh)).toBe(2);
+            expect(endsAt(mesh, 0)).toEqual({ back: 0, front: 0 });
+            // 只有上层那一格（真·线尾）出端帽，垂直段本身不出
+            const caps = capMeshes(result);
+            expect(caps).toHaveLength(1);
+            expect(instanceCount(caps[0])).toBe(1);
+        } finally {
+            result.buildings.dispose();
+            result.iconTexture.dispose();
+        }
+    });
+});
+
+describe("传送带 · 非一格后继（两点连线兜底）", () => {
+    it("弦长与一格同量级时按世界弦连线：长度 = 弦长、前端面落在两格中点", () => {
+        nextIndex = 0;
+        const result = build([
+            beltBuilding(10, 10, 1, 90), // #0 → #1 偏了 1.1 格（异尺度数据）
+            beltBuilding(11.1, 10, -1, 90),
+        ]);
+        try {
+            const mesh = stripMeshes(result)[0];
+            expect(instanceCount(mesh)).toBe(2);
+            const ends = stripEnds(mesh, 0);
+            // 长度 = 世界弦长（1.1 格），不再是固定的一格
+            expect(ends.down.distanceTo(ends.up)).toBeCloseTo(
+                1.1 * BELT_LEN,
+                2
+            );
+            // 前端（局部 -z = 流向）正好落在两格中点
+            const mid = sharedEdgeMid(
+                cellCenter(result.transforms, 0),
+                cellCenter(result.transforms, 1)
+            );
+            const up = new Vector3()
+                .setFromMatrixColumn(result.transforms[0][0], 2)
+                .normalize();
+            const d = ends.down.clone().sub(mid);
+            const flatErr = d.sub(up.clone().multiplyScalar(d.dot(up))).length();
+            expect(flatErr).toBeLessThan(0.02);
+        } finally {
+            result.buildings.dispose();
+            result.iconTexture.dispose();
+        }
+    });
+
+    it("太短的侧口（0.2 格）不缩成短桩：保持满格条带 + 网格帧朝向", () => {
+        nextIndex = 0;
+        const result = build([
+            beltBuilding(10, 10, 1, 0), // 侧口：目标只偏 0.2 格
+            beltBuilding(10.2, 10, -1, 0),
+        ]);
+        try {
+            const mesh = stripMeshes(result)[0];
+            const ends = stripEnds(mesh, 0);
+            // 条带仍占满自己那一格（侧口是真实接头，缩短会在接头上挖出缝）
+            expect(ends.down.distanceTo(ends.up)).toBeCloseTo(BELT_LEN, 4);
+            // 朝向仍由网格帧（数据 yaw = 0 → +y）决定，不会被 0.2 格的方向带偏
+            const flow = ends.down.clone().sub(ends.up).normalize();
+            const want = new Vector3()
+                .setFromMatrixColumn(result.transforms[0][0], 1)
+                .normalize();
+            expect(flow.dot(want)).toBeCloseTo(1, 3);
+        } finally {
+            result.buildings.dispose();
+            result.iconTexture.dispose();
+        }
+    });
+
+    it("非一格后继带高度差：按弦长缩放 + 按高度差剪切（坡度写进实例属性）", () => {
+        nextIndex = 0;
+        const result = build([
+            beltBuilding(10, 10, 1, 90, 2001, 35, 0),
+            beltBuilding(11.1, 10, -1, 90, 2001, 35, 0.5), // 高处半层
+        ]);
+        try {
+            const mesh = stripMeshes(result)[0];
+            // 坡度 = 世界高度差（0.5 层 × 4/3），写进 aBeltAux.x → 着色器剪切
+            expect(shapeAt(mesh, 0).slope).toBeCloseTo(
+                0.5 * HEIGHT_GRID_SIZE,
+                4
+            );
+            // 实例抬升 = slope/2（后缘落在本格中面、前缘落在上一层中面）
+            const m = new Matrix4();
+            mesh.getMatrixAt(0, m);
+            const c = localOf(
+                result.transforms,
+                0,
+                new Vector3().setFromMatrixPosition(m)
+            );
+            expect(c.h).toBeCloseTo(
+                BELT_LIFT + (0.5 * HEIGHT_GRID_SIZE) / 2,
+                3
+            );
+        } finally {
+            result.buildings.dispose();
+            result.iconTexture.dispose();
+        }
     });
 });

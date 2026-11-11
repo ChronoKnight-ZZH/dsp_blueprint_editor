@@ -1,4 +1,4 @@
-import { computeBeltShapes } from "@/Animation/beltArc";
+import { computeBeltShapes, ISSUE_SAMPLE_LIMIT } from "@/Animation/beltArc";
 import type { BeltShape } from "@/Animation/beltArc";
 import { BELT_EDGE_GAP, BELT_LEN, BELT_WIDTH } from "@/Animation/belt";
 import { HEIGHT_GRID_SIZE } from "@/planet/planetConstants";
@@ -354,6 +354,116 @@ describe("beltArc · 退化与异常连接", () => {
         expect(s.kind).toBe("straight");
         // 后继建筑就在相邻格（机器会盖住端面）→ 不加端帽
         expect(s.capFront).toBe(false);
+    });
+});
+
+describe("beltArc · 分数偏移（上升格的邻格）", () => {
+    /**
+     * 实测 `data/三种坡度上升的高度1.txt` 的 `#5(4.000,2,0) → #6(3.002,2,0) → #7(3,2,1)`：
+     * DSP 给「上升格」记录的中心是偏的，与邻格差 `0.998`（带 1.58e-3 偏移），
+     * 不是整数格 —— 旧阈值 1e-3 会把这两条真实连线判成侧口。
+     */
+    function riserChain() {
+        return cells([
+            { x: 4, y: 2, z: 0, out: 1, yaw: 270 }, // #0 平地来向
+            { x: 3.002, y: 2, z: 0, out: 2, yaw: 270 }, // #1 上升格（中心偏 1.58e-3）
+            { x: 3, y: 2, z: 1, yaw: 270 }, // #2 上一层（与 #1 同格，Δz = 1）
+        ]);
+    }
+
+    it("1.58e-3 的横向偏移仍算「一格」：不掉回退帧、朝向按连线", () => {
+        const { shapes } = computeBeltShapes(riserChain());
+        // #0 ↔ #1 互相认作一格相邻 → 条带走 lookAt + 世界距离，而不是固定段长回退帧
+        expect(shapes.get(0)!.outIndex).toBe(1);
+        expect(shapes.get(1)!.inIndex).toBe(0);
+        // 朝向由连线推导（沿 -x），与数据 yaw 无关
+        expect(shapes.get(0)!.yawDeg).toBeCloseTo(-90, 6);
+        expect(shapes.get(1)!.yawDeg).toBeCloseTo(-90, 6);
+    });
+
+    it("容差边界：0.02 格仍判为非一格（不把真·侧口吞进一格）", () => {
+        const list = cells([
+            { x: 0, y: 0, out: 1 },
+            { x: 0.02, y: 0 },
+        ]);
+        expect(shapeOf(list, 0).outIndex).toBeNull();
+    });
+
+    it("上升格本体（同格 Δz=1）判成 riser，不再是「非一格前驱」", () => {
+        const { shapes, issues } = computeBeltShapes(riserChain());
+        expect(shapes.get(1)!.kind).toBe("riser");
+        expect(shapes.get(1)!.rise).toBeCloseTo(HEIGHT_GRID_SIZE, 9);
+        // 上层格的前驱是同格的垂直段 → 不参与转角判定，也不报「侧口」
+        expect(shapes.get(2)!.inIndex).toBeNull();
+        expect(issues).toHaveLength(0);
+    });
+});
+
+describe("beltArc · 垂直段（riser）", () => {
+    function chain(fromZ: number, toZ: number) {
+        return cells([
+            { x: 4, y: 2, z: fromZ, out: 1, yaw: 270 }, // #0 水平来料
+            { x: 3.002, y: 2, z: fromZ, out: 2, yaw: 270 }, // #1 垂直段
+            { x: 3, y: 2, z: toZ, yaw: 270 }, // #2 另一层（同格）
+        ]);
+    }
+
+    it("上升：rise = Δz × HEIGHT_GRID_SIZE，且不取坡度、前端不封帽", () => {
+        const s = shapeOf(chain(0, 1), 1);
+        expect(s.kind).toBe("riser");
+        expect(s.rise).toBeCloseTo(HEIGHT_GRID_SIZE, 9);
+        expect(s.slope).toBe(0);
+        expect(s.capFront).toBe(false);
+        expect(s.hasOut).toBe(true);
+        // outIndex 只表示「一格**水平**后继」：垂直段没有，但连接确实存在（hasOut）
+        expect(s.outIndex).toBeNull();
+    });
+
+    it("下降：rise 为负，同样判成 riser", () => {
+        const s = shapeOf(chain(1, 0), 1);
+        expect(s.kind).toBe("riser");
+        expect(s.rise).toBeCloseTo(-HEIGHT_GRID_SIZE, 9);
+    });
+
+    it("亚台阶噪声（同格 Δz=0.02）不算垂直段", () => {
+        const s = shapeOf(chain(0, 0.02), 1);
+        expect(s.kind).toBe("straight");
+        expect(s.rise).toBe(0);
+    });
+
+    it("垂直段本身仍是「非圆点」：有连接就一定有货物", () => {
+        const { shapes } = computeBeltShapes(chain(0, 1));
+        for (const s of shapes.values()) expect(s.kind).not.toBe("dot");
+    });
+});
+
+describe("beltArc · 问题清单限流", () => {
+    /** n 条首尾相接、但每步偏 0.2 格的带子：每一步都会报一条「非一格前驱」 */
+    function manyBadLinks(n: number) {
+        const specs: Spec[] = [];
+        for (let i = 0; i < n; i++)
+            specs.push({ x: 0.2 * i, y: 0, out: i + 1 });
+        specs.push({ x: 0.2 * n, y: 0 });
+        return cells(specs);
+    }
+
+    it("大量同类问题：明细有限、汇总保留总数，日志不会再被刷爆", () => {
+        const { issues, issueCount } = computeBeltShapes(manyBadLinks(200));
+        // 总数（未限流）如实上报
+        expect(issueCount).toBe(200);
+        // 明细只保留每类 `ISSUE_SAMPLE_LIMIT` 条 + 一行汇总
+        expect(issues).toHaveLength(ISSUE_SAMPLE_LIMIT + 1);
+        expect(issues[0]).toContain("非一格前驱");
+        expect(issues[issues.length - 1]).toContain("另有 196 条");
+        // 关键指标：拼出来的日志长度必须可控（改动前是 2.6 万条 → 几十万字符）
+        expect(issues.join("；").length).toBeLessThan(1500);
+    });
+
+    it("少量问题时明细完整、不出现汇总行（诊断信息不缩水）", () => {
+        const { issues, issueCount } = computeBeltShapes(manyBadLinks(2));
+        expect(issueCount).toBe(2);
+        expect(issues).toHaveLength(2);
+        expect(issues.some((s) => s.includes("另有"))).toBe(false);
     });
 });
 

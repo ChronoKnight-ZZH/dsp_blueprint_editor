@@ -38,12 +38,28 @@ import type { BeltArcParams } from "./belt";
  * 偏差 ≤ 2.1e-4（即数据里的 yaw 自带一点浮点噪声，新实现改用精确的格方向，略微更准）。
  */
 
-/** 形状种类：圆点 / 直段 / 90° 转角 */
-export type BeltShapeKind = "dot" | "straight" | "corner";
+/**
+ * 形状种类：圆点 / 直段 / 90° 转角 / **垂直段**。
+ *
+ * `riser` = 本格把货送到「**同一格**的上/下一层」（`outputObjIdx` 指向同格不同层的带子）。
+ * 它不是圆弧：90° 的坡度剪切无解（`slope → ∞`），所以由 `buildBuildings` 用**刚性帧**
+ * 渲染成一根竖条（局部 -z 沿法线），不是走 `slope` 那条路。
+ *
+ * 判定互斥：`riser` 要求 `Δxy ≈ 0`，而 `straight / corner` 要求 `|Δx|+|Δy| = 1`，
+ * 所以一格只会是其中一种。
+ */
+export type BeltShapeKind = "dot" | "straight" | "corner" | "riser";
 
 /** 单格形状：圆弧参数 + 判定结果 + 端帽需求 */
 export interface BeltShape extends BeltArcParams {
     kind: BeltShapeKind;
+    /**
+     * 垂直段的高度差（世界单位，带符号：`> 0` 向上、`< 0` 向下；非垂直段为 0）。
+     *
+     * 与 `slope` 互斥且语义不同：`slope` 是「**格与格之间**的坡度」（顶点剪切，斜着爬一格），
+     * `rise` 是「**同一格内**上下层的高度差」（整条刚性竖起来）。`rise ≠ 0` 时 `slope` 恒为 0。
+     */
+    rise: number;
     /**
      * **后端**开放：本格没有任何入线（不含分拣器）→ 后端加半圆帽并把条带端面内收。
      *
@@ -77,15 +93,47 @@ export interface BeltShape extends BeltArcParams {
 export interface BeltShapesResult {
     /** key = `BlueprintBuilding.index`；只包含传送带格 */
     shapes: Map<number, BeltShape>;
-    /** 退化 / 需要人工关注的连接（构建期 `console.warn` 用） */
+    /**
+     * 退化 / 需要人工关注的连接（构建期 `console.warn` 用）。
+     *
+     * **已限流**：每类最多 `ISSUE_SAMPLE_LIMIT` 条明细，超出的折成一行汇总
+     * （「…另有 N 条（明细已省略）」），所以行数上限 ≈ 类别数 ×(1+limit)。
+     */
     issues: string[];
+    /** 问题**总条数**（未限流）：调用方拿它判断严重程度，明细看 `issues` */
+    issueCount: number;
 }
+
+/**
+ * 每类问题最多保留的明细条数。
+ *
+ * 为什么要在**收集侧**限流，而不是只在打印时截断：
+ *   - `data/全球白糖（带电源）`（5 万条带、异尺度退化数据）实测产生 **26592 条** 问题，
+ *     拼成一条 `console.warn` 就是几十万字符 —— 每次重建都把控制台刷爆，还拖慢构建；
+ *   - 数组本身也要分配 2.6 万个长字符串；限流后明细 ≤ 25 行，汇总里仍保留总数与每个类别。
+ */
+export const ISSUE_SAMPLE_LIMIT = 4;
 
 /** 恰好一格的整数方向；侧口 0.2 / 隔格 2.4 / 非整数偏移都返回 null */
 interface Step {
     dx: number;
     dy: number;
 }
+
+/**
+ * 「一格」判定的容差（格单位）。
+ *
+ * 不能取 1e-3：**上升格（垂直段）的邻格不是整数格**。实测
+ * `data/三种坡度上升的高度1.txt` 的 `#5(4.000)→#6(3.002)`、`#6(3.002)→#7(3.000)`
+ * 两条连线都带 `1.58e-3 ~ 1.59e-3` 的横向偏移（DSP 给上升格记录的中心是偏的），
+ * 旧阈值 1e-3 会把它们判成「侧口 / 隔格」→ 两条条带各自掉进固定段长的回退帧，
+ * 线头那一格也就跟着丢链（`issues` 里报「非一格前驱」，实测 2 条）。
+ *
+ * 取 5e-3：比实测偏移大 3 倍，又比「真的不是一格」的最小观测值小一个量级
+ * （退化样本里 0.02 格起）。**再调大要谨慎**：`data/全球白糖（带电源）` 的步长分布
+ * 在 0.02 处有一大簇（5549 条），容差跨过 0.02 会一次性改变那份蓝图的判定结果。
+ */
+export const GRID_STEP_EPS = 5e-3;
 
 function oneGridStep(
     from: BlueprintBuilding,
@@ -95,9 +143,31 @@ function oneGridStep(
     const b = to.localOffset[0];
     const dx = Math.round(b.x - a.x);
     const dy = Math.round(b.y - a.y);
-    if (Math.abs(b.x - a.x - dx) > 1e-3) return null;
-    if (Math.abs(b.y - a.y - dy) > 1e-3) return null;
+    if (Math.abs(b.x - a.x - dx) > GRID_STEP_EPS) return null;
+    if (Math.abs(b.y - a.y - dy) > GRID_STEP_EPS) return null;
     return Math.abs(dx) + Math.abs(dy) === 1 ? { dx, dy } : null;
+}
+
+/**
+ * 「同格上下层」判定：`Δxy ≈ 0` 且高度差有实质 → 返回**世界高度差**（带符号），否则 0。
+ *
+ * 实测 `data/三种坡度上升的高度1.txt` 的 `#6(3.002,2,0) → #7(3,2,1)`：两条记录在**同一格**
+ * （横向差 1.58e-3，比 `GRID_STEP_EPS` 小一个量级），高度差 `Δz = 1` 层 = `4/3` 世界单位。
+ * 这就是 DSP 的「上升格 / 垂直段」：一格的货直接上下到同格另一层，横向几乎不走。
+ *
+ * 高度差同样用 `BELT_SLOPE_EPS` 过滤：数据里存在 `Δz = ±0.01/0.02` 的亚台阶噪声，
+ * 不滤掉会把普通平地格误判成垂直段。
+ */
+function sameCellRise(
+    from: BlueprintBuilding,
+    to: BlueprintBuilding
+): number {
+    const a = from.localOffset[0];
+    const b = to.localOffset[0];
+    if (Math.abs(b.x - a.x) > GRID_STEP_EPS) return 0;
+    if (Math.abs(b.y - a.y) > GRID_STEP_EPS) return 0;
+    const raw = (b.z - a.z) * HEIGHT_GRID_SIZE;
+    return Math.abs(raw) < BELT_SLOPE_EPS ? 0 : raw;
 }
 
 /**
@@ -147,13 +217,30 @@ export function computeBeltShapes(
     const issues: string[] = [];
     const byIndex = new Map(buildings.map((b) => [b.index, b]));
 
+    /**
+     * 问题收集器：按**类别**计数，明细只留前 `ISSUE_SAMPLE_LIMIT` 条。
+     *
+     * `category` 同时是汇总行里显示的标签，所以取短名（不带 building index）。
+     */
+    const issueCounts = new Map<string, number>();
+    let issueCount = 0;
+    const report = (category: string, message: string) => {
+        issueCount++;
+        const n = (issueCounts.get(category) ?? 0) + 1;
+        issueCounts.set(category, n);
+        if (n <= ISSUE_SAMPLE_LIMIT) issues.push(message);
+    };
+
     // 前驱表：谁 output 到了我
     const preds = new Map<number, number[]>();
     for (const b of buildings) {
         if (b.outputObjIdx < 0) continue;
         const target = byIndex.get(b.outputObjIdx);
         if (target === undefined) {
-            issues.push(`#${b.index} 的 outputObjIdx=${b.outputObjIdx} 不存在`);
+            report(
+                "目标不存在",
+                `#${b.index} 的 outputObjIdx=${b.outputObjIdx} 不存在`
+            );
             continue;
         }
         const list = preds.get(target.index);
@@ -179,8 +266,12 @@ export function computeBeltShapes(
             if (p === undefined) continue;
             const step = oneGridStep(p, b);
             if (step === null) {
-                issues.push(
-                    `#${b.index} 有一条非一格前驱 #${pi}（侧口 / 隔格），按无连接处理`
+                // 同格上下层（前驱是正下方/正上方的上升格）：这是垂直段的另一端，
+                // 是真实接头但不是一格水平相邻 → 不参与转角判定，也不报异常
+                if (sameCellRise(p, b) !== 0) continue;
+                report(
+                    "非一格前驱",
+                    `#${b.index} 有一条非一格前驱 #${pi}（侧口 / 隔格），本格按自身朝向渲染`
                 );
                 continue;
             }
@@ -193,6 +284,11 @@ export function computeBeltShapes(
         const outStep = outB === undefined ? null : oneGridStep(b, outB);
         const beltOutStep =
             outB !== undefined && isBelt(outB.itemId) ? outStep : null;
+        /** 出线是同格的另一层 → 本格是垂直段（`rise` 带符号；否则 0） */
+        const outRise =
+            outB !== undefined && isBelt(outB.itemId)
+                ? sameCellRise(b, outB)
+                : 0;
 
         const hasOut = b.outputObjIdx >= 0;
         const isDot =
@@ -216,7 +312,8 @@ export function computeBeltShapes(
                 dirIn = main.step;
                 inIndex = main.index;
             } else if (ins.length > 2) {
-                issues.push(
+                report(
+                    "扇入无主线",
                     `#${b.index} 三条以上入线且无直通主线，按出向画直段`
                 );
             }
@@ -261,7 +358,8 @@ export function computeBeltShapes(
             // 数据 yaw 与连线不符时按连线渲染（否则条带会斜着摆、端面对不上邻格）
             const delta = Math.abs(((b.yaw[0] - yawDeg + 540) % 360) - 180);
             if (delta > 20) {
-                issues.push(
+                report(
+                    "yaw 与连线不符",
                     `#${b.index} 的 yaw=${b.yaw[0].toFixed(1)}° 与连线方向 ` +
                         `${yawDeg.toFixed(1)}° 相差 ${delta.toFixed(
                             1
@@ -271,7 +369,13 @@ export function computeBeltShapes(
         }
 
         // ── 形状 + 圆弧参数 ──
-        let kind: BeltShapeKind = isDot ? "dot" : "straight";
+        // 垂直段优先：出线是本格另一层 → 这一格不转弯、也不斜坡，整条刚性竖起来
+        let kind: BeltShapeKind = isDot
+            ? "dot"
+            : outRise !== 0
+            ? "riser"
+            : "straight";
+
         let centerX = 0;
         let centerZ = 0;
         let theta0 = 0;
@@ -303,7 +407,8 @@ export function computeBeltShapes(
                     );
             } else if (along < 0) {
                 // 入出反向 = 掉头：网格里无解（入点与出点重合），按直段兜底
-                issues.push(
+                report(
+                    "入出反向",
                     `#${b.index} 入 (${dirIn.dx},${dirIn.dy}) 与出 (${beltOutStep.dx},${beltOutStep.dy}) 反向，按直段渲染`
                 );
             }
@@ -349,6 +454,7 @@ export function computeBeltShapes(
 
         shapes.set(b.index, {
             kind,
+            rise: outRise,
             theta0,
             theta1,
             centerX,
@@ -368,5 +474,15 @@ export function computeBeltShapes(
         });
     }
 
-    return { shapes, issues };
+    // 汇总：每类被限流掉的条数折成一行，总数不丢（否则大蓝图上就只剩 4 条明细、看不出规模）
+    for (const [category, total] of issueCounts) {
+        const shown = Math.min(total, ISSUE_SAMPLE_LIMIT);
+        if (total > shown) {
+            issues.push(
+                `…「${category}」另有 ${total - shown} 条（明细已省略，该类共 ${total} 条）`
+            );
+        }
+    }
+
+    return { shapes, issues, issueCount };
 }

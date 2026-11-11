@@ -14,14 +14,18 @@ import { IconTexture } from "@/icon/iconTexture";
 import { IconGeometry, Icons } from "@/icon/icons";
 import { IconSubscript } from "@/icon/iconSubscript";
 import type { TextStyle } from "@/icon/iconSubscript";
-import { CARGO_COLOR, CARGO_FADE, Cargos } from "@/Animation/cargos";
+import { CARGO_COLOR, CARGO_FADE, CARGO_SIZE, Cargos } from "@/Animation/cargos";
 import type { CargoArcShape } from "@/Animation/cargos";
 import {
     BELT_ELBOW_LIFT,
     BELT_ELBOW_STUB,
+    BELT_HEIGHT,
     BELT_LEN,
     BELT_LIFT,
+    BELT_RISER_BASE,
+    BELT_SLOPE_EPS,
     CARGO_LIFT,
+    RISER_CARGO_SIDE,
     Belts,
     BeltMaterial,
 } from "@/Animation/belt";
@@ -52,6 +56,7 @@ import type {
     TextureSettings,
     ViewerRenderSettings,
 } from "@/render/renderSettingsTypes";
+import { HEIGHT_GRID_SIZE } from "@/planet/planetConstants";
 import { AllBuildings } from "./AllBuildings";
 import type { BuildStats, BuildingModelRef } from "./types";
 import {
@@ -127,6 +132,12 @@ export function buildBuildings(
      *     条带永远比线短一格（实测 data/T字路口.json 的 `#7(0,5)` 就是这种格）；
      *   - 2 个连接 → 直段或 90° 转角，由 `beltArc.computeBeltShapes` 判定。
      *
+     * 第 4 态是**垂直段**（`riser`）：出线指向「同一格的上/下一层」时，本格不转弯、
+     * 也不斜坡（90° 的坡度剪切无解），而是整根刚性竖起来 —— 局部 -z 沿法线、
+     * 局部 +y 是板面朝向（水平）。板立在**本格格心**（X/Y 居中），长度 = |rise|，
+     * 下端面贴下层条带顶面、上端面贴上层条带顶面（见 `BELT_RISER_BASE`）。
+     * 几何仍复用 `Belts` 方条（同一份几何与材质），只是姿态不同。
+     *
      * 条带姿态 = `base × Rx(π/2) × T(0, BELT_LIFT + slope/2, 0)`，乘序不可换：
      *   - `base`（`transforms[i][0]`）**已经包含建筑 yaw**：`Ry(lon)·Rx(-lat)·Rz(-yaw)·T`，
      *     其局部 +y 轴就是本格流向（与方案 §3.4-F5 的 `dir=(sin yaw, cos yaw)` 一致）；
@@ -156,12 +167,22 @@ export function buildBuildings(
 
         // ── ⓪ 形状：CPU 一次算完（连接 → 圆点 / 直段 / 转角 + 弧参数 + 端帽需求） ──
         // 纯函数、无 three 依赖 → Jest 可直接覆盖（tests/unit/animation/beltArc.spec.ts）
-        const { shapes, issues } = computeBeltShapes(buildings);
-        if (issues.length) console.warn(`[belt] ${issues.join("；")}`);
+        const { shapes, issues, issueCount } = computeBeltShapes(buildings);
+        if (issues.length) {
+            // 明细已在 `computeBeltShapes` 里按类别限流（`ISSUE_SAMPLE_LIMIT`），这里只补总数
+            console.warn(
+                `[belt] 连接问题 ${issueCount} 条（明细已限流）：` +
+                    issues.join("；")
+            );
+        }
+
         const shapeOf = (b: BlueprintBuilding) => shapes.get(b.index);
         const byIndex = new Map(buildings.map((b) => [b.index, b]));
-        // 三态 + 转角：直段走条带（方条），转角走圆环（倒圆棱柱）；两者共用一份材质
-        const strips = belts.filter((b) => shapeOf(b)?.kind === "straight");
+        // 直段 + 垂直段共用条带（方条）；转角走圆环（倒圆棱柱）—— 三者共用一份材质
+        const strips = belts.filter((b) => {
+            const kind = shapeOf(b)?.kind;
+            return kind === "straight" || kind === "riser";
+        });
         const corners = belts.filter((b) => shapeOf(b)?.kind === "corner");
         const isolated = belts.filter(
             (b) => (shapeOf(b)?.kind ?? "dot") === "dot"
@@ -187,6 +208,13 @@ export function buildBuildings(
         const bisector = new Vector3();
         const oldDir = new Vector3();
         const phiCross = new Vector3();
+        // 垂直段专用：法线、板面朝向（水平）、板心、三个基向量
+        const riserUp = new Vector3();
+        const riserSide = new Vector3();
+        const riserCenter = new Vector3();
+        const riserX = new Vector3();
+        const riserY = new Vector3();
+        const riserZ = new Vector3();
 
         /**
          * 转角弧参数修正角（弧度）：lookAt 平分线 vs CPU yawDeg 的差值。
@@ -221,37 +249,129 @@ export function buildBuildings(
         /**
          * 该格的后继是否是一条**真正相邻的传送带**（`computeBeltShapes` 用整数格判定过）。
          *
-         * 只有这种「带-带」链路才用 lookAt + scale：侧口 / 隔格 / 输出到机器都算不出可靠的
-         * 流向，强行 lookAt 会拿到极短且带噪声的方向 —— 条带会被摆到垂直方向、缩成半截，
-         * 看上去就是"同位置凭空多出一条垂直条带"。这类格统一回落到网格帧 + 固定段长。
+         * 相邻格用 lookAt + scale；**非一格但仍是一条带去**（侧口 / 隔格 / 异尺度数据的
+         * 半格偏移）另走 `chordOf` 的两点连线兜底，两者都拿不到时回落到网格帧 + 固定段长。
          */
         const isChained = (shape: BeltShape) => shape.outIndex !== null;
 
-        // 预计算有「相邻带后继」的格的世界距离
-        // 标准格邻接时世界距离 ≈ BELT_LEN（浮点误差 ±1e-5），snap 到 BELT_LEN 保持精度
-        const snapLen = (d: number) =>
-            Math.abs(d - BELT_LEN) < 1e-4 ? BELT_LEN : d;
-        for (const b of belts) {
-            const shape = shapes.get(b.index);
-            if (shape === undefined || !isChained(shape)) continue;
-            if (b.outputObjIdx < 0 || b.outputObjIdx >= transforms.length)
-                continue;
+        /**
+         * 用「本格 → 目标格」的世界弦摆一个条带帧（原版两点连线公式的正确用法）。
+         *
+         * 与原版的差别只有两处：up 用 `normalOf`（base 的 +z 列）而不是位置矢量 —— 位置矢量
+         * 只在球面模式下等于法线；方向先做**切面投影**，于是高度差不会把条带整体旋转，
+         * 而是交给 `slope` 去剪切（端面仍然竖直）。
+         *
+         * 返回 null 表示弦退化（近同格 / 侧口的方向是噪声），调用方继续走回退帧。
+         */
+        const chordFrame = (
+            b: BlueprintBuilding,
+            target: number,
+            out: Matrix4
+        ): Matrix4 | null => {
+            if (target < 0 || target >= transforms.length) return null;
             lookSelf.setFromMatrixPosition(transforms[b.index][0]);
-            lookTarget.setFromMatrixPosition(transforms[b.outputObjIdx][0]);
+            lookTarget.setFromMatrixPosition(transforms[target][0]);
             normalOf(b, lookUp);
             lookDir.subVectors(lookTarget, lookSelf);
             lookDir.addScaledVector(lookUp, -lookDir.dot(lookUp));
-            beltDist.set(b.index, snapLen(lookDir.length()));
+            // 方向必须有「半格的量级」才算可靠；退化连线（近同格 / 侧口）
+            // 的归一化方向是噪声，会让条带随机转 90° → 回退网格帧
+            if (lookDir.lengthSq() <= (BELT_LEN * 0.5) ** 2) return null;
+            lookProjected.copy(lookSelf).add(lookDir);
+            out.lookAt(lookSelf, lookProjected, lookUp);
+            out.setPosition(lookSelf);
+            return out;
+        };
+
+        /**
+         * 两点连线兜底的**适用区间**（相对 BELT_LEN）：弦长必须与一格同量级。
+         *
+         * - 太短（< 0.5 格）＝侧口 / 分流器侧面：条带本来就该占满自己那一格，
+         *   把它缩成一截 0.2 格的短桩反而会在接头上挖出缝；
+         * - 太长（> 2 格）＝隔格 / 异岛连线：拉一根长条会横穿中间那一格。
+         */
+        const CHORD_MIN = 0.5;
+        const CHORD_MAX = 2;
+
+        // 预计算：一格相邻的格记「世界距离」，非一格的后继记「世界弦长 + 高度差」
+        // 标准格邻接时世界距离 ≈ BELT_LEN（浮点误差 ±1e-5），snap 到 BELT_LEN 保持精度
+        const snapLen = (d: number) =>
+            Math.abs(d - BELT_LEN) < 1e-4 ? BELT_LEN : d;
+        /** 两点连线兜底的格：切面弦长 + 沿法线的高度差（两者都取世界单位） */
+        const chordOf = new Map<number, { len: number; slope: number }>();
+
+        /**
+         * 「来料格 → 上升格」的补接量（世界单位）：来料格中心到上升格**格心**的切面距离。
+         *
+         * 上升格立在自己那一格的格心（见 `beltFrame` 的 riser 分支），而来料条带只铺到自己
+         * 那一格的边界，于是两者之间空着一截（标准一格 ≈ 0.59 世界单位：半格 0.629 减去
+         * 板半厚 0.04）。这里**不缩放条带**（缩放以条带中心为原点、两端对称，会把后端压进前一格），
+         * 而是用 `extend` 只把**前缘顶点**沿流向拉过去，并给货物行程补上同样的量 ——
+         * 货一路滑到贴着板面，两端仍靠 `CARGO_FADE` 淡出。
+         *
+         * key = 来料格 index；value = 到上升格中心的切面距离。
+         */
+        const riserFeed = new Map<number, number>();
+
+        /** 后继若是传送带，返回它的 index；否则 null（输出到机器 / 悬空都算 null） */
+        const beltTargetOf = (b: BlueprintBuilding): number | null => {
+            if (b.outputObjIdx < 0 || b.outputObjIdx >= transforms.length)
+                return null;
+            const t = byIndex.get(b.outputObjIdx);
+            return t !== undefined && isBelt(t.itemId) ? t.index : null;
+        };
+
+        for (const b of belts) {
+            const shape = shapes.get(b.index);
+            if (shape === undefined || shape.kind === "riser") continue;
+            const target = beltTargetOf(b);
+            if (target === null) continue;
+            const targetB = byIndex.get(target);
+            if (targetB === undefined) continue;
+            lookSelf.setFromMatrixPosition(transforms[b.index][0]);
+            lookTarget.setFromMatrixPosition(transforms[target][0]);
+            normalOf(b, lookUp);
+            lookDir.subVectors(lookTarget, lookSelf);
+            // 高度差取 `localOffset.z`（与 `beltArc` 里的坡度同源），**不能**用弦的法线分量：
+            // 球面上两个水平隔开的格心，弦的径向分量还含 −d²/2R 的弦高（1.1 格 ≈ 4.8mm）。
+            const slope =
+                (targetB.localOffset[0].z - b.localOffset[0].z) *
+                HEIGHT_GRID_SIZE;
+            lookDir.addScaledVector(lookUp, -lookDir.dot(lookUp)); // 切面投影
+            const len = lookDir.length();
+            // 后继是上升格（同格上下层）：记「来料 → 格心」距离，后面用 extend 补到板面
+            if (shape.kind === "straight") {
+                const targetShape = shapes.get(target);
+                if (targetShape !== undefined && targetShape.kind === "riser")
+                    riserFeed.set(b.index, len);
+            }
+            if (isChained(shape)) {
+                beltDist.set(b.index, snapLen(len));
+                continue;
+            }
+            // 区间与 `chordFrame` 的「半格」门槛保持一致（严格大于 0.5 格才认）
+            if (len <= BELT_LEN * CHORD_MIN || len > BELT_LEN * CHORD_MAX)
+                continue;
+            beltDist.set(b.index, len);
+            chordOf.set(b.index, {
+                len,
+                slope: Math.abs(slope) < BELT_SLOPE_EPS ? 0 : slope,
+            });
         }
 
         /**
          * 统一姿态帧（返回"条带约定"：局部 -z = 流向、+y = 法线）。
          *
-         * - **直段**：lookAt(self → 相邻后继格)；
+         * - **直段**：lookAt(self → 后继带)，弦取自世界坐标（`chordFrame`）；
+         * - **非一格后继但弦长与一格同量级**（侧口外的半格 / 异尺度数据）：
+         *   同一套两点连线（`chordOf`），长度 = 世界弦长、坡度 = 世界高度差；
          * - **转角**：lookAt(世界空间角平分线)，与直段同约定 → 接缝对齐。
          *   弧参数由 CPU 算好（grid-step yaw），帧旋转了 phi → 写 mesh 时用 `arcOf` 补偿。
          *   补偿后 `F_new · Ry(−phi)` 恒等于旧帧，所以转角的**世界几何与改动前完全一致**。
-         * - **圆点 / 开放端 / 链路不连续（侧口、隔格、输出到机器）**：
+         * - **垂直段**：不用 lookAt（弦与 up 平行会退化 → 随机滚转），手工 `makeBasis`
+         *   组一个**刚性帧**：-z = 行进方向（法线方向）、+y = 板面朝向（水平，指向来料侧）；
+         *   位置固定在本格**格心**（X/Y 居中，垂直段占满自己那一格的正中间）。
+         * - **圆点 / 开放端 / 太短或太长的连线 / 输出到机器**：
          *   回退 base × Rz(yaw修正) × Rx(π/2)，段长固定为 BELT_LEN。
          */
         const beltFrame = (
@@ -259,23 +379,70 @@ export function buildBuildings(
             shape: BeltShape,
             out: Matrix4
         ): Matrix4 => {
-            // 直段：lookAt(self → 相邻后继格)
-            if (shape.kind === "straight" && isChained(shape)) {
+            // 垂直段：刚性帧（不能用 lookAt，也不能用坡度剪切）
+            if (shape.kind === "riser") {
+                const rise = shape.rise;
+                normalOf(b, riserUp);
                 lookSelf.setFromMatrixPosition(transforms[b.index][0]);
-                lookTarget.setFromMatrixPosition(
-                    transforms[b.outputObjIdx][0]
-                );
-                normalOf(b, lookUp);
-                lookDir.subVectors(lookTarget, lookSelf);
-                lookDir.addScaledVector(lookUp, -lookDir.dot(lookUp));
-                // 方向必须有「一格的量级」才算可靠；退化连线（近同格 / 侧口）
-                // 的归一化方向是噪声，会让条带随机转 90° → 回退网格帧
-                if (lookDir.lengthSq() > (BELT_LEN * 0.5) ** 2) {
-                    lookProjected.copy(lookSelf).add(lookDir);
-                    out.lookAt(lookSelf, lookProjected, lookUp);
-                    out.setPosition(lookSelf);
-                    return out;
+                riserCenter.copy(lookSelf);
+
+                // 板面朝向：优先「指向来料侧」——这样货物的外侧正对着线来的那一面，
+                // 与 DSP 里上升段的观感一致；没有水平前驱时退回本格流向。
+                let sideLen = 0;
+                if (shape.inIndex !== null) {
+                    lookPred.setFromMatrixPosition(
+                        transforms[shape.inIndex][0]
+                    );
+                    riserSide.subVectors(lookPred, lookSelf);
+                    riserSide.addScaledVector(
+                        riserUp,
+                        -riserSide.dot(riserUp)
+                    );
+                    sideLen = riserSide.length();
                 }
+                // 前驱必须「有个半格的量级」才算可信（斜向/同格前驱的方向是噪声）
+                if (sideLen > BELT_LEN * 0.2 && sideLen < BELT_LEN * 3) {
+                    riserSide.divideScalar(sideLen);
+                    // 板**只转不挪**：位置固定在本格格心（X/Y 居中），`riserSide` 只用来
+                    // 定板面朝向 —— 这样上升段正好立在自己那一格的正中间，不会压到邻格。
+                } else {
+                    riserSide.set(0, 1, 0).transformDirection(
+                        transforms[b.index][0]
+                    );
+                    riserSide.addScaledVector(
+                        riserUp,
+                        -riserSide.dot(riserUp)
+                    );
+                    if (riserSide.lengthSq() < 1e-6) riserSide.set(1, 0, 0);
+                    riserSide.normalize();
+                }
+
+                // 局部 -z = 行进方向（rise > 0 时向上）；x = y × z 保证右手系
+                riserZ.copy(riserUp).multiplyScalar(rise > 0 ? -1 : 1);
+                riserX.crossVectors(riserSide, riserZ);
+                if (riserX.lengthSq() < 1e-12) riserX.set(1, 0, 0);
+                riserX.normalize();
+                riserY.crossVectors(riserZ, riserX);
+                out.makeBasis(riserX, riserY, riserZ);
+                // 板心 = 场地基点 + (BELT_RISER_BASE + rise/2) × 法线：
+                // 下端面贴本层条带顶面、上端面贴上层条带顶面（belt.ts 有推导）
+                riserCenter.addScaledVector(
+                    riserUp,
+                    BELT_RISER_BASE + rise / 2
+                );
+                out.setPosition(riserCenter);
+                return out;
+            }
+
+            // 直段：两点连线（本格 → 后继带）。
+            // 一格相邻（`isChained`）与「非一格但弦长同量级」（`chordOf`）走同一条路：
+            // 位置、朝向、长度全部取自真实世界弦，不再用网格帧 + 固定段长硬摆。
+            if (
+                shape.kind === "straight" &&
+                (isChained(shape) || chordOf.has(b.index))
+            ) {
+                const frame = chordFrame(b, b.outputObjIdx, out);
+                if (frame !== null) return frame;
             }
 
             // 转角：lookAt(世界空间角平分线)
@@ -337,10 +504,13 @@ export function buildBuildings(
         /**
          * 逐格的**流向缩放系数**（相对 BELT_LEN）。
          *
-         * 只有直段按世界距离缩放；转角 / 圆点的弧半径已烘死为半格长，恒为 1。
+         * 只有直段按世界距离缩放；垂直段按高度差缩放（板长 = |rise|）；
+         * 转角 / 圆点的弧半径已烘死为半格长，恒为 1。
          */
         const scaleOf = (b: BlueprintBuilding, shape: BeltShape): number =>
-            shape.kind === "straight"
+            shape.kind === "riser"
+                ? clampScale(Math.abs(shape.rise) / BELT_LEN)
+                : shape.kind === "straight"
                 ? clampScale((beltDist.get(b.index) ?? BELT_LEN) / BELT_LEN)
                 : 1;
 
@@ -369,17 +539,76 @@ export function buildBuildings(
         };
 
         /**
+         * 逐格的**有效坡度**（世界单位，后端 → 前端）。
+         *
+         * 默认取 `shape.slope`（一格之间的坡度，`beltArc` 里算好）；**两点连线兜底**的格改用
+         * 世界弦的高度差 —— 这类格的 Δxy 不是整数格，`beltArc` 按设计不给坡度，
+         * 但两端确实差着高度，不补就在竖直方向断开（只在异尺度 / 半格数据里出现）。
+         */
+        const slopeOf = (b: BlueprintBuilding, shape: BeltShape): number =>
+            chordOf.get(b.index)?.slope ?? shape.slope;
+
+        /**
+         * 来料条带前沿 → 上升格板近面的水平缺口（世界单位；不是来料格时为 0）。
+         *
+         *   缺口 = 到上升格中心的距离 − 板半厚 − 本条带半长
+         *
+         * 标准一格 ≈ 0.59。用 `Math.max(0, …)` 兜底：若某份数据里来料条带已经够长
+         * （例如它本身走了两点连线、长度就等于格距），就不再多伸。
+         */
+        const riserGapOf = (b: BlueprintBuilding, shape: BeltShape): number => {
+            const feed = riserFeed.get(b.index);
+            if (feed === undefined) return 0;
+            const halfStrip = (BELT_LEN * scaleOf(b, shape)) / 2;
+            return Math.max(0, feed - BELT_HEIGHT / 2 - halfStrip);
+        };
+
+        /**
+         * 写进实例属性（`aBeltArc` / `aBeltAux` / `aCargoSlope`）的形状参数。
+         *
+         * **必须以 `arcOf(b, shape)` 为底**：转角的弧要叠加 `cornerPhi` 补偿，圆环与货物
+         * 拿到的必须是**同一份**值，否则货物会走出圆环（把 `arcOf` 换成 `shape` 就正好踩这个坑，
+         * 表现为转角上的货物跑到弧外）。两点连线兜底改写的坡度、上升格来料的 `extend`
+         * 作为覆盖层叠上去。
+         *
+         * 只有真的被改写时才产生新对象，其余情况原样返回，避免每条带子多一次分配。
+         */
+        const arcParamsOf = (b: BlueprintBuilding, shape: BeltShape) => {
+            const arc = arcOf(b, shape);
+            const slope = slopeOf(b, shape);
+            const gap = riserGapOf(b, shape);
+            if (slope === arc.slope && gap === 0) return arc;
+            const merged = { ...arc, slope };
+            if (gap > 0) {
+                // `extend` 在**几何空间**里加（之后实例再乘 S），所以缺口要除以 s。
+                // 出口切线写成本格流向：帧的局部 -z（上升格就在正前方，方向恒为 (0,−1)）。
+                merged.extend = arc.extend + gap / scaleOf(b, shape);
+                merged.exitX = 0;
+                merged.exitZ = -1;
+            }
+            return merged;
+        };
+
+        /**
          * 条带 / 圆环共同的基础姿态 = beltFrame · [S(1,1,s)] · T(0, lift + slope/2 + extra, 0)
          *
          * 直段按世界距离缩放（BELT_LEN 烘进几何，实例矩阵补差）；
          * 转角 / 圆点不缩放（弧几何固定为 BELT_LEN）。
+         *
+         * **垂直段的抬升已经烘进帧位置**（沿世界法线，见 `beltFrame`），这里不能再沿
+         * 局部 +y 抬一次 —— 垂直段的局部 +y 是水平的板面朝向，抬了就横着飞出去。
          */
         const poseOf = (b: BlueprintBuilding, shape: BeltShape, extra = 0) => {
             beltFrame(b, shape, trans);
             const s = scaleOf(b, shape);
             if (s !== 1) trans.multiply(temp.makeScale(1, 1, s));
+            if (shape.kind === "riser") return trans;
             return trans.multiply(
-                temp.makeTranslation(0, BELT_LIFT + shape.slope / 2 + extra, 0)
+                temp.makeTranslation(
+                    0,
+                    BELT_LIFT + slopeOf(b, shape) / 2 + extra,
+                    0
+                )
             );
         };
 
@@ -387,6 +616,19 @@ export function buildBuildings(
         // 直段同样按 s 缩放，行程改为世界距离（弧段的 R = distance/2 必须等于 BELT_LEN/2）
         const addCellCargo = (b: BlueprintBuilding, shape: BeltShape) => {
             beltFrame(b, shape, cargoTrans);
+            // 与条带**同源同值**的弧参数（含两点连线兜底改写过的坡度），否则货物会走出条带
+            const arc = arcParamsOf(b, shape);
+            if (shape.kind === "riser") {
+                // 垂直段：货物贴在**板的外侧**（局部 +y 是水平的板面法线），从下端滑到上端。
+                // 偏移与行程都用**世界单位** —— 板长本身就是 |rise|，实例矩阵这里不乘 S，
+                // 所以不会像条带那样被缩放两次（条带那条路的 s 恒 ≈ 1，误差看不见）。
+                const rise = Math.abs(shape.rise);
+                cargoTrans.multiply(
+                    temp.makeTranslation(0, RISER_CARGO_SIDE, rise / 2)
+                );
+                addCargo(cargoTrans, CARGO_COLOR, rise, arc, CARGO_FADE);
+                return;
+            }
             const s = scaleOf(b, shape);
             if (s !== 1) cargoTrans.multiply(temp.makeScale(1, 1, s));
             cargoTrans.multiply(
@@ -394,16 +636,18 @@ export function buildBuildings(
             );
             // 线尾格（前端是端帽）的货物滑到端帽尖点就缩没：行程少 `BELT_CAP_TIP_INSET`
             const len = BELT_LEN * s;
-            const distance = shape.capFront
-                ? len - BELT_CAP_TIP_INSET
-                : len;
-            addCargo(
-                cargoTrans,
-                CARGO_COLOR,
-                distance,
-                arcOf(b, shape),
-                CARGO_FADE
-            );
+            const feed = riserFeed.get(b.index);
+            let distance: number;
+            if (feed !== undefined) {
+                // 来料 → 上升格：货一路滑到**贴着板面**为止（板半厚 + 半个货，不插进板里）。
+                // 行程在几何空间，实例矩阵还要乘 s，所以按世界量换算回去。
+                distance =
+                    BELT_LEN / 2 +
+                    (feed - BELT_HEIGHT / 2 - CARGO_SIZE / 2) / s;
+            } else {
+                distance = shape.capFront ? len - BELT_CAP_TIP_INSET : len;
+            }
+            addCargo(cargoTrans, CARGO_COLOR, distance, arc, CARGO_FADE);
         };
 
         const beltMaterial = new BeltMaterial();
@@ -415,7 +659,7 @@ export function buildBuildings(
         const capTrans = new Matrix4();
         const shear = new Matrix4();
 
-        // ── ① 直段条带 ──
+        // ── ① 直段条带（含垂直段：同一份几何，姿态不同）──
         if (strips.length) {
             const mesh = new Belts(strips.length, beltMaterial);
             // 顶点是被着色器**弯折**的，几何包围球只覆盖"未弯折的方条"（半径约 0.79），
@@ -425,21 +669,31 @@ export function buildBuildings(
                 const b = strips[i];
                 const shape = shapeOf(b);
                 if (shape === undefined) continue;
-                const { slope } = shape;
+                // 有效坡度（两点连线兜底的格改用世界弦的高度差）
+                const slope = slopeOf(b, shape);
                 const s = scaleOf(b, shape);
+                /**
+                 * 垂直段：不加端帽、不内收端面。
+                 *
+                 * 端帽的几何预算是按「水平条带 + 局部 +y 抬升」做的，套到竖起来的板上会
+                 * 横着跑；而且垂直段的两端本来就被上下层条带盖住，**没有可见的开放端**。
+                 */
+                const isRiser = shape.kind === "riser";
 
                 mesh.setMatrixAt(i, poseOf(b, shape));
                 mesh.setColorAt(i, colorOf(b.modelIndex));
-                mesh.setArcAt(i, shape);
+                mesh.setArcAt(i, arcParamsOf(b, shape));
                 // 端头内收（几何空间，会被 S 放大 → 除以 s 补偿）
                 mesh.setEndsAt(
                     i,
-                    shape.capBack ? -BELT_CAP_SHORTEN / s : 0,
-                    shape.capFront ? -BELT_CAP_SHORTEN / s : 0
+                    !isRiser && shape.capBack ? -BELT_CAP_SHORTEN / s : 0,
+                    !isRiser && shape.capFront ? -BELT_CAP_SHORTEN / s : 0
                 );
                 modelRef[b.index] = { matrix: transforms[b.index][0] };
 
                 addCellCargo(b, shape);
+
+                if (isRiser) continue;
 
                 // 端帽：乘序 beltFrame·S·shear·Tlift·Tdiameter·Rflip
                 // shear 作用在**几何空间**（S 之前的局部 z），系数必须仍是 -slope/BELT_LEN

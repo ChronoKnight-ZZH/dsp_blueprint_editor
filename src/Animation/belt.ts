@@ -157,6 +157,26 @@ export const CARGO_LIFT =
     BELT_LIFT + BELT_HEIGHT / 2 + CARGO_SIZE / 2 + CARGO_GAP;
 
 /**
+ * 垂直段（riser）板心的基础抬升 = `BELT_LIFT`（世界单位）。
+ *
+ * 水平条带的**中面**就在 `BELT_LIFT`（底面贴地板、厚 `BELT_HEIGHT`），所以垂直段的
+ * 两端面都对齐到邻格的**中面**：下端面 = `BELT_LIFT`、上端面 = `BELT_LIFT + rise`
+ * （= 上层条带的中面）。两端都埋在上下层条带的**体内**，于是：
+ *   - 不留缝（端面被邻格的条带盖住）；
+ *   - 也不会与邻格的**顶面**共面 —— 若对齐到顶面（`BELT_LIFT + BELT_HEIGHT/2`），
+ *     板端面会与上层条带顶面重叠成一片 0.64×0.08 的共面区域，从上看会 z-fighting。
+ */
+export const BELT_RISER_BASE = BELT_LIFT;
+
+/**
+ * 垂直段货物的横向偏移（沿板面法线，世界单位）：板半厚 + 货物半边长 + 视觉间隙。
+ *
+ * 垂直段的板面法线是**水平**的（板是竖起来的一根），所以货物不能像水平条带那样沿
+ * 局部 +y 抬 `CARGO_LIFT`（那会横着飘出板外 0.25），只能用这个侧向偏移贴在板外侧。
+ */
+export const RISER_CARGO_SIDE = BELT_HEIGHT / 2 + CARGO_SIZE / 2 + CARGO_GAP;
+
+/**
  * 注入版本号；改了注入逻辑必须同步改它，否则 three 会复用旧 program（方案 §6.5-GL6）。
  *
  * 必须与 `CargoMaterial` 不同（后者靠默认的 `onBeforeCompile.toString()` 区分），
