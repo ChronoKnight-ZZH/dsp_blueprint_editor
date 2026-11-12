@@ -1,5 +1,5 @@
 import { PerspectiveCamera, Vector3 } from 'three';
-import { PlanetMapControls } from '@/PlanetMapControls';
+import { PlanetMapControls } from '@/planet/PlanetMapControls';
 
 const R = 200.2;
 const DEG = Math.PI / 180;

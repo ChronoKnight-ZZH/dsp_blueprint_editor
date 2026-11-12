@@ -3,7 +3,7 @@ import type { BlueprintBuilding } from "@/blueprint/parser";
 import type { BVH } from "@/bvh/bvh";
 import { buildingMeta } from "@/data/building";
 import { isBelt, isInserter } from "@/data/items";
-import type { ViewerRenderSettings } from "@/renderSettingsTypes";
+import type { ViewerRenderSettings } from "@/render/renderSettingsTypes";
 import type { BuildStats } from "./types";
 
 /**

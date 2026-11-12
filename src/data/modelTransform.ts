@@ -98,7 +98,7 @@ export const modelTransform: Readonly<Record<number, ModelTransform>> = {
     // ── 物流设备 ──────────────────────────────────────────────────────
     257: { x: 0, y: 0, z: -0.5, pitch: 0, yaw: 0, roll: 0, scale: 1.4 }, // 自动集装机 · piler.glb
     208: { x: 0, y: 0, z: -0.1, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 流速监测器 · monitor.glb
-    120: { x: -0, y: -0.3, z: -0.4, pitch: 0, yaw: -180, roll: 0, scale: 1.3 }, // 喷涂机 · spray-coater.glb
+    120: { x: -0, y: -0.3, z: -0.4, pitch: 0, yaw: -180, roll: 0, scale: 1.3, color: 0xedab5c }, // 喷涂机 · spray-coater.glb
     371: { x: 0, y: 0, z: -0.5, pitch: 0, yaw: 0, roll: 0, scale: 1.2 }, // 物流配送器 · delivery-machine.glb
     49: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 物流运输站 · logistic-station.glb
     50: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1 }, // 星际物流运输站 · interstellar-logistic-station.glb

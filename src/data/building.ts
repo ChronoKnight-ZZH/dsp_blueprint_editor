@@ -1,4 +1,7 @@
 import { Color, Matrix4 } from "three";
+/**
+ * 建筑元数据
+ */
 
 export interface BuildingMeta {
     color: Color;

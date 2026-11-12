@@ -1,7 +1,7 @@
 import { InstancedMesh, Mesh, Object3D } from "three";
-import { IconTexture } from "@/iconTexture";
-import { Icons } from "@/icons";
-import { IconSubscript } from "@/iconSubscript";
+import { IconTexture } from "@/icon/iconTexture";
+import { Icons } from "@/icon/icons";
+import { IconSubscript } from "@/icon/iconSubscript";
 import { Cargos } from "@/cargos";
 import type { BlueprintBuilding } from "@/blueprint/parser";
 import type { BuildingModelRef } from "./types";

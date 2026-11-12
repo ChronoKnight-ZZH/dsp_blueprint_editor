@@ -1,4 +1,12 @@
 // src/data/acceleratorData.ts
+/**
+ * 统计增产剂类型，用于计算增产剂的生产倍率加成
+ * 增产剂类型
+ * 0: 无
+ * 1: MkI
+ * 2: MkII
+ * 3: MkIII
+ */
 export enum AcceleratorItem {
     None = 0,
     MkI = 1,

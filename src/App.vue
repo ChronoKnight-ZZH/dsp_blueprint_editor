@@ -518,15 +518,15 @@ import BlueprintIcon from "./components/BlueprintIcon.vue";
 import IconPickerModal from "./components/IconPickerModal.vue";
 import ReplaceModal from "./components/ReplaceModal.vue";
 import ProductionStats from "./components/ProductionStats.vue";
-import { CommandQueue } from "./command";
+import { CommandQueue } from "@/render/command";
 import BuildingOverview from "./components/BuildingOverview.vue";
 import { useLang } from "./i18n";
 import {
     renderSettings,
     persistRenderSettings,
     captureRenderSettings,
-} from "@/renderSettings";
-import type { TextureChannel } from "@/renderSettings";
+} from "@/render/renderSettings";
+import type { TextureChannel } from "@/render/renderSettings";
 // 仅用于类型标注，编译时擦除，不影响 defineAsyncComponent 的异步分包
 import type BlueprintEditorImpl from "./components/BlueprintEditor.vue";
 const BlueprintEditor = defineAsyncComponent(

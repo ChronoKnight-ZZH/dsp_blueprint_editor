@@ -1,5 +1,5 @@
 import { BlueprintBuilding, BlueprintData } from "./parser";
-import { Command } from "@/command";
+import { Command } from "@/render/command";
 
 type LinkField = "outputObjIdx" | "inputObjIdx";
 const LINK_FIELDS: LinkField[] = ["outputObjIdx", "inputObjIdx"];

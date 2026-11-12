@@ -1,5 +1,5 @@
-import { IconTexture } from '@/iconTexture';
-import type { TextureSink } from '@/iconTexture';
+import { IconTexture } from '@/icon/iconTexture';
+import type { TextureSink } from '@/icon/iconTexture';
 import { allIconIds } from '@/data/icons';
 
 /**

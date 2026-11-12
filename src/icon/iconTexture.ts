@@ -6,7 +6,7 @@ import {
     Vector2,
     SRGBColorSpace,
 } from "three";
-import { allIconIds, iconUrl } from "./data/icons";
+import { allIconIds, iconUrl } from "@/data/icons";
 
 const WIDTH = 24;
 const HEIGHT = 24;

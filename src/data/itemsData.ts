@@ -1,5 +1,9 @@
 import { Item } from "./types";
 
+/**
+ * 图标数据表
+ * 包含所有物品和建筑的详细信息，包括模型、网格大小、名称、图标和是否生产能力
+ */
 export const items: Item[] = [
     {
         id: 1001,

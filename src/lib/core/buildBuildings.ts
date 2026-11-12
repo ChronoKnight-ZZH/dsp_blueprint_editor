@@ -9,11 +9,11 @@ import {
     CylinderGeometry,
     MeshLambertMaterial,
 } from "three";
-import type { TextureSink } from "@/iconTexture";
-import { IconTexture } from "@/iconTexture";
-import { IconGeometry, Icons } from "@/icons";
-import { IconSubscript } from "@/iconSubscript";
-import type { TextStyle } from "@/iconSubscript";
+import type { TextureSink } from "@/icon/iconTexture";
+import { IconTexture } from "@/icon/iconTexture";
+import { IconGeometry, Icons } from "@/icon/icons";
+import { IconSubscript } from "@/icon/iconSubscript";
+import type { TextStyle } from "@/icon/iconSubscript";
 import { Cargos } from "@/cargos";
 import { buildingMeta, noIconBuildings } from "@/data/building";
 import { isBelt, isInserter } from "@/data/items";
@@ -29,7 +29,7 @@ import { reapplyLoadedModelMaterials } from "@/models/glbLoader";
 import type {
     TextureSettings,
     ViewerRenderSettings,
-} from "@/renderSettingsTypes";
+} from "@/render/renderSettingsTypes";
 import { AllBuildings } from "./AllBuildings";
 import type { BuildStats, BuildingModelRef } from "./types";
 import {

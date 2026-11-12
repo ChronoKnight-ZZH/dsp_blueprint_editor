@@ -1,6 +1,6 @@
 import { fromStr, BlueprintData } from '@/blueprint/parser';
 import { RemoveBuildingCommand, RemoveBuildingsCommand, RemoveBuildingsByItemCommand } from '@/blueprint/removeBuilding';
-import { CommandQueue } from '@/command';
+import { CommandQueue } from '@/render/command';
 import * as fs from 'fs';
 import * as path from 'path';
 

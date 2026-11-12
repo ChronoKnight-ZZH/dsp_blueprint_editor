@@ -1,6 +1,6 @@
 import { Euler, Matrix4 } from "three";
-import { BlueprintArea, BlueprintBuilding } from "./parser";
-import { GRID_PER_SEGMENT, HEIGHT_GRID_SIZE } from "@/planetConstants";
+import type { BlueprintArea, BlueprintBuilding } from "@/blueprint/parser";
+import { GRID_PER_SEGMENT, HEIGHT_GRID_SIZE } from "./planetConstants";
 
 const segmentArr: [number, number][] = [
     [0, 1],

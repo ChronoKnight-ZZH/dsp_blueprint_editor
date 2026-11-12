@@ -1,4 +1,10 @@
-export const colorPalette256: readonly string[] = [
+/**
+ * 颜色调色板
+ * 256 颜色，用于渲染和调试
+ */
+export type ColorPalette256 = readonly string[];
+
+export const colorPalette256: ColorPalette256 = [
     "#FFFFFF00",
     "#000000",
     "#FFFFFF",

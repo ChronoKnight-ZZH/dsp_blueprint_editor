@@ -3,7 +3,7 @@ import type { BlueprintData } from "@/blueprint/parser";
 import { fromStr } from "@/blueprint/parser";
 import { RemoveBuildingsCommand } from "@/blueprint/removeBuilding";
 import { isInserter } from "@/data/items";
-import type { ViewerRenderSettings } from "@/renderSettingsTypes";
+import type { ViewerRenderSettings } from "@/render/renderSettingsTypes";
 import { RenderCore, RenderPhaseError } from "./core/RenderCore";
 import type { RebuildReason } from "./core/RenderCore";
 import type {

@@ -1,5 +1,9 @@
 import { Signal } from "./types";
 
+/**
+ * 信号图标数据表
+ * 包含所有信号图标的详细信息，包括 ID、网格位置
+ */
 export const signal: Signal[] = [
     { id: 401, gridPos: [1, 0] },
     { id: 402, gridPos: [1, 1] },

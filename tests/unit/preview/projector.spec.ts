@@ -1,8 +1,8 @@
 import { Matrix4, Vector3 } from 'three';
 import { PreviewProjector, toBlueprintAreas } from '@/lib/preview/projector';
-import { calcBuildingTrans, findPosForAreas } from '@/blueprint/planet';
+import { calcBuildingTrans, findPosForAreas } from '@/planet/planet';
 import type { BlueprintBuilding } from '@/blueprint/parser';
-import { PLANET_RADIUS, PLANET_SEGMENT, HEIGHT_GRID_SIZE } from '@/planetConstants';
+import { PLANET_RADIUS, PLANET_SEGMENT, HEIGHT_GRID_SIZE } from '@/planet/planetConstants';
 
 /**
  * 预览投影器。

@@ -46,6 +46,8 @@ const missingAlbedoColorOverrides: Readonly<Record<string, number>> = {
     "belt-1::": 0x3c4043,
     "belt-2::": 0x3c4043,
     "belt-3::": 0x3c4043,
+    // 喷涂机：中性灰
+    "spray-coater::spray-coater": 0x101216,
     // 石墙：石灰色
     "stone-wall::stone-wall": 0x7b776d,
     // 人造恒星发光环：无底色无自发光，用亮青近似原作辉光

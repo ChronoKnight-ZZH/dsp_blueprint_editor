@@ -1,5 +1,9 @@
 import { Tech } from "./types";
 
+/**
+ * 技术图标数据表
+ * 包含所有技术图标的详细信息，包括 ID
+ */
 export const tech: Tech[] = [
     { id: 1 },
     { id: 1001 },
