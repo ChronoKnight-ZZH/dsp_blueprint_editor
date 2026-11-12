@@ -249,7 +249,9 @@ export type ViewerErrorCode =
     // 查询
     | 'not-loaded'
     | 'building-not-found'
-    | 'not-renderable';
+    | 'not-renderable'
+    // 写操作（deleteBuilding）
+    | 'invalid-argument';
 
 export interface ViewerError {
     code: ViewerErrorCode;
@@ -377,6 +379,32 @@ export type ViewerQueryResult<T> =
     | { ok: true; value: T }
     | { ok: false; error: ViewerError };
 
+// ---------------------------------------------------------------- 批量删除
+
+/**
+ * 删除模式。
+ *
+ * - `0`：按 `itemId` 删除**全部同类建筑**；
+ * - `1`：按**建筑 ID**（`BlueprintBuilding.index`，不是数组下标）删除指定建筑组。
+ *
+ * 注意：`mode=1` 的 ID 口径与 `selectBuilding(index)` 不同——后者是"数组下标优先、
+ * 越界才按建筑 ID 兜底"。
+ */
+export type DeleteMode = 0 | 1;
+
+/** `deleteBuilding` 成功时的载荷 */
+export interface DeleteResult {
+    /** 本次调用的模式 */
+    mode: DeleteMode;
+    /** 实际删除栋数（整批失败语义下恒 ≥ 1） */
+    removed: number;
+    /** 被删建筑的**原数组下标**（升序），供宿主对账 / 刷新 UI */
+    indexes: number[];
+}
+
+/** `deleteBuilding` 的返回：复用通用查询结构，不新造同构联合 */
+export type DeleteOutcome = ViewerQueryResult<DeleteResult>;
+
 /** 按建筑下标返回的几何信息 */
 export interface BuildingInfoPayload {
     /** 数组下标 */
@@ -398,10 +426,12 @@ export interface FocusOptions {
 // ---------------------------------------------------------------- 主类
 
 /**
- * 只读蓝图渲染器（无头：不含任何 UI，全部通过类实例方法控制）。
+ * 无头蓝图渲染器（不含任何 UI，全部通过类实例方法控制）。
  *
+ * 唯一的"写"能力是 `deleteBuilding` 纯 API（不涉及 3D 交互、UI 与撤销栈）。
  * 契约：**公开方法不抛异常**，失败通过 `{ ok: false, error }` 返回并经 `onError` 上报；
- * 失败时场景、相机与 `getBlueprintData()` 均保持上一次成功状态。
+ * 失败时场景、相机与 `getBlueprintData()` 均保持上一次成功状态
+ * （唯一例外：`deleteBuilding` 的"已删除但重建失败"分支）。
  */
 export class BlueprintViewer {
     constructor(options: ViewerOptions, callbacks?: ViewerCallbacks);
@@ -435,6 +465,20 @@ export class BlueprintViewer {
     getSelectedIndexes(): number[];
     /** 建筑信息（世界矩阵） */
     getBuildingInfo(index: number): ViewerQueryResult<BuildingInfoPayload>;
+
+    /**
+     * 批量删除建筑（**纯 API**，不经过 UI 与撤销栈）。
+     *
+     * - `mode=0`：`targets` 是 `itemId` 列表，删除这些 itemId 的**全部**建筑；
+     * - `mode=1`：`targets` 是**建筑 ID**（`BlueprintBuilding.index`）列表，重复 ID 自动去重；
+     * - **整批失败**：任一目标不存在时不执行删除、数据零变更（不做部分删除）；
+     * - 成功后走既有重建通道，并清空选中态（数组下标已重排）；
+     * - **共享引用**：`getBlueprintData()` 返回内部引用，删除是原地修改，宿主旧引用会一起变。
+     *
+     * 失败码：`already-disposed` / `not-loaded` / `invalid-argument` /
+     * `building-not-found` / `build-failed`（后者 message 会注明"数据已变更"，建议重新加载）。
+     */
+    deleteBuilding(mode: DeleteMode, targets: number[]): DeleteOutcome;
 
     /** 相机对象（只读用途） */
     getCamera(): PerspectiveCamera | null;

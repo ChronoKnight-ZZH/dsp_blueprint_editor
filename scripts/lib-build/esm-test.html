@@ -89,6 +89,25 @@
         logEl.scrollTop = logEl.scrollHeight;
     }
 
+        function listMethods(target) {
+        const names = new Set();
+        (function visit(proto) {
+            if (!proto || proto === Object.prototype)
+                return;
+            for (const name of Object.getOwnPropertyNames(proto)) {
+                if (name === 'constructor')
+                    continue;
+                try {
+                    if (typeof target[name] === 'function')
+                        names.add(name);
+                }
+                catch (e) { /* getter 抛错则忽略 */ }
+            }
+            visit(Object.getPrototypeOf(proto));
+        })(Object.getPrototypeOf(target));
+        return Array.from(names).sort();
+    }
+
     function check(name, ok, detail) {
         checks.push({ name: name, ok: ok, detail: detail || '' });
         const row = document.createElement('tr');
@@ -143,6 +162,7 @@
 
     try {
         const api = await import(libUrl);
+        window.api = api; 
         check('ESM 模块可 import（不是 UMD 包装器）', typeof api === 'object' && api !== null);
         for (const name of ['BlueprintViewer', 'parseBlueprint', 'serializeBlueprint', 'configureAssetBaseUrl'])
             check('导出 ' + name, typeof api[name] === 'function');
@@ -151,6 +171,19 @@
             { container: '#viewer', theme: 'dark' },
             { onError: function (error) { failed.push('onError ' + error.code + ': ' + error.message); } },
         );
+        window.viewer = viewer;                             // ← 暴露实例，控制台可直接 viewer.xxx()
+        window.__esmTest = { api: api, viewer: viewer };    // ← 备用入口
+
+        // 列出实例方法，帮助确认 deleteBuilding 是否存在 / 真实名称
+        const methods = listMethods(viewer);
+        log('viewer 方法（' + methods.length + '）：' + methods.join(', '));
+        console.log('[viewer methods]', methods);
+
+        const relatedExports = Object.keys(api).filter(function (name) {
+            return /delete|remove|destroy|dispose/i.test(name);
+        });
+        log('含 delete/remove/destroy/dispose 的导出：' + (relatedExports.join(', ') || '无'));
+        console.log('[api exports]', Object.keys(api));
 
         const fixtureUrl = new URL('fixtures/sample_blueprint.txt', pageUrl).href;
         const fixtureResponse = await originalFetch(fixtureUrl);
@@ -210,6 +243,8 @@
         check('运行未抛异常', false, String(error && error.stack || error));
     }
     finally {
+        if (viewer && !window.viewer)
+            window.viewer = viewer;
         finish();
     }
 })();

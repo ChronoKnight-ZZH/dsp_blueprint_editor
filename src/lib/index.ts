@@ -64,6 +64,10 @@ export type {
     BuildingsLocateResult,
     ViewerQueryResult,
     FocusOptions,
+    // 批量删除（deleteBuilding 的返回值与入参类型）
+    DeleteMode,
+    DeleteResult,
+    DeleteOutcome,
     // 主题
     ThemeName,
     ThemeColors,

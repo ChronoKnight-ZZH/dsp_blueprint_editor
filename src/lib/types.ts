@@ -200,7 +200,10 @@ export type ViewerErrorCode =
     | "not-loaded"
     | "building-not-found"
     /** 建筑存在，但没有可渲染矩阵（未知 modelIndex 的占位盒在球心），无法定位 */
-    | "not-renderable";
+    | "not-renderable"
+    // 写操作（deleteBuilding）
+    /** 入参不合法：mode 不在白名单、targets 非数组/为空/含非整数或负数 */
+    | "invalid-argument";
 
 /**
  * 按建筑标识定位的结果（`selectBuilding` / `focusBuilding`）。
@@ -225,6 +228,36 @@ export type BuildingsLocateResult =
 export type ViewerQueryResult<T> =
     | { ok: true; value: T }
     | { ok: false; error: ViewerError };
+
+// ------------------------------------------------------------ 批量删除（deleteBuilding）
+// 语义（用户确认口径）：
+// - mode=0 按 itemId 删除"全部同类建筑"；mode=1 按建筑 ID（`BlueprintBuilding.index`）删除；
+// - 任一目标不存在 → 整批失败，数据零变更（不做部分删除）；
+// - 失败不抛异常，统一返回 `DeleteOutcome`。
+
+/**
+ * 删除模式。
+ *
+ * - `0`：按 `itemId` 删除**全部同类建筑**；
+ * - `1`：按**建筑 ID**（`BlueprintBuilding.index`，不是数组下标）删除指定建筑组。
+ *
+ * 注意：`mode=1` 的 ID 口径与 `selectBuilding(index)` 不同——后者是"数组下标优先、
+ * 越界才按建筑 ID 兜底"。
+ */
+export type DeleteMode = 0 | 1;
+
+/** `deleteBuilding` 成功时的载荷 */
+export interface DeleteResult {
+    /** 本次调用的模式 */
+    mode: DeleteMode;
+    /** 实际删除栋数（整批失败语义下恒 ≥ 1） */
+    removed: number;
+    /** 被删建筑的**原数组下标**（升序），供宿主对账 / 刷新 UI */
+    indexes: number[];
+}
+
+/** `deleteBuilding` 的返回：复用通用查询结构，不新造同构联合 */
+export type DeleteOutcome = ViewerQueryResult<DeleteResult>;
 
 /**
  * `focusBuilding` 的选项。

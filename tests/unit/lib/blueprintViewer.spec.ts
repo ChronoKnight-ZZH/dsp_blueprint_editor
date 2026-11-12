@@ -1,5 +1,8 @@
 import type { BlueprintData } from '@/blueprint/parser';
 import type { BuildingPickPayload } from '@/lib';
+import { parseBlueprint, serializeBlueprint } from '@/lib';
+import fs from 'fs';
+import path from 'path';
 
 /**
  * `BlueprintViewer` 的契约测试。
@@ -29,6 +32,8 @@ interface CoreHandle {
         setCallbacks: number;
         setTheme: string[];
         setCustomTheme: unknown[];
+        /** `deleteBuilding` 走的「原地改数据后重建」通道 */
+        notifyDataChanged: number;
     };
     /** 最近一次交给内核的回调桥（用于验证 setCallbacks 的替换语义） */
     coreCallbacks: {
@@ -42,6 +47,8 @@ interface CoreHandle {
     /** 标记某下标建筑「没有可渲染矩阵」，模拟未知 modelIndex */
     markNotRenderable(index: number): void;
     failNext(e: unknown): void;
+    /** 让下一次 `notifyDataChanged()` 抛错（模拟重建失败） */
+    failNotifyNext(e: unknown): void;
     setStats(s: { buildingCount: number; unknownModelIndexes: number[] } | null): void;
 }
 
@@ -73,6 +80,7 @@ jest.mock('@/lib/core/RenderCore', () => {
             setCallbacks: 0,
             setTheme: [],
             setCustomTheme: [],
+            notifyDataChanged: 0,
         };
         private theme = {
             sceneBackground: 0x000000, planet: 0xB0B0B0, grid: 0xF0F0F0,
@@ -89,6 +97,10 @@ jest.mock('@/lib/core/RenderCore', () => {
         /** 预设 stats 后不再被 setBlueprintData 的默认值覆盖 */
         private statsPreset = false;
         private throwNext: unknown = null;
+        /** 让下一次 notifyDataChanged 抛错（模拟重建失败路径） */
+        private notifyThrow: unknown = null;
+        /** 最近一次注入的数据（notifyDataChanged 后据此刷新 buildingCount） */
+        private lastData: { buildings: unknown[] } | null = null;
         /** 建筑总数（由最后一次 setBlueprintData 推出），用于「下标是否越界」的判定 */
         private buildingCount = 0;
         private readonly notRenderable = new Set<number>();
@@ -110,12 +122,25 @@ jest.mock('@/lib/core/RenderCore', () => {
                 this.stats = { buildingCount: d.buildings.length, unknownModelIndexes: [] };
             }
             this.buildingCount = (data as { buildings: unknown[] }).buildings.length;
+            this.lastData = data as { buildings: unknown[] };
         }
 
         resetCamera() { this.calls.resetCamera++; }
         setRenderSettings(v: unknown) { this.calls.setRenderSettings.push(v); }
         lastBuildStats() { return this.stats; }
         dispose() { this.calls.dispose++; }
+
+        /** 原地改数据后的重建通道（`deleteBuilding` 依赖它） */
+        notifyDataChanged() {
+            this.calls.notifyDataChanged++;
+            if (this.notifyThrow !== null) {
+                const e = this.notifyThrow;
+                this.notifyThrow = null;
+                throw e;
+            }
+            if (this.lastData !== null)
+                this.buildingCount = this.lastData.buildings.length;
+        }
 
         // --- 选中 / 定位 / 查询（对齐 v1 后新增的门面转发目标） ---
         selectByBuildingId(id: number): number | null {
@@ -179,6 +204,7 @@ jest.mock('@/lib/core/RenderCore', () => {
         markNotRenderable(i: number) { this.notRenderable.add(i); }
         markUnknown(i: number) { this.unknownModels.add(i); }
         failNext(e: unknown) { this.throwNext = e; }
+        failNotifyNext(e: unknown) { this.notifyThrow = e; }
         setStats(s: { buildingCount: number; unknownModelIndexes: number[] } | null) {
             this.stats = s;
             this.statsPreset = s !== null;
@@ -200,7 +226,10 @@ function lastCore(): CoreHandle {
 }
 
 /** 造一份最小 BlueprintData：只填 Viewer 真正读到的字段 */
-function makeData(buildingCount = 3): BlueprintData {
+function makeData(
+    buildingCount = 3,
+    itemIdOf: (i: number) => number = () => 0,
+): BlueprintData {
     return {
         header: {
             layout: 0, icons: [], time: new Date(0), gameVersion: '0.10.34', shortDesc: 'test',
@@ -215,7 +244,7 @@ function makeData(buildingCount = 3): BlueprintData {
         buildings: Array.from({ length: buildingCount }, (_, i) => ({
             index: i, areaIndex: 0,
             localOffset: [{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }],
-            yaw: [0, 0], tilt: 0, itemId: 0, modelIndex: 0,
+            yaw: [0, 0], tilt: 0, itemId: itemIdOf(i), modelIndex: 0,
             outputObjIdx: 0, inputObjIdx: 0, outputToSlot: 0, inputFromSlot: 0,
             outputFromSlot: 0, inputToSlot: 0, outputOffset: 0, inputOffset: 0,
             recipeId: 0, filterId: 0, parameters: null,
@@ -687,6 +716,265 @@ describe('setCallbacks', () => {
 
         core.coreCallbacks?.onBuildingSelect?.({ index: 0, id: 0 });
         expect(first).toHaveBeenCalledTimes(1);
+        viewer.dispose();
+    });
+});
+
+describe('deleteBuilding（批量删除）', () => {
+    /** 深比较用的稳定快照（Date 会序列化成 ISO 字符串，足以发现任何字段变化） */
+    const snap = (viewer: BlueprintViewer) => JSON.stringify(viewer.getBlueprintData());
+
+    it('A1 未加载时返回 not-loaded', () => {
+        const { viewer } = createViewer();
+        const out = viewer.deleteBuilding(1, [0]);
+
+        expect(out.ok).toBe(false);
+        if (out.ok) throw new Error('unreachable');
+        expect(out.error.code).toBe('not-loaded');
+        viewer.dispose();
+    });
+
+    it('A2 销毁后返回 already-disposed', () => {
+        const { viewer } = createViewer();
+        viewer.loadBlueprintData(makeData(2));
+        viewer.dispose();
+
+        const out = viewer.deleteBuilding(1, [0]);
+        expect(out.ok).toBe(false);
+        if (out.ok) throw new Error('unreachable');
+        expect(out.error.code).toBe('already-disposed');
+    });
+
+    it('A3 mode=0 删除某 itemId 的全部同类建筑（重复入参只算一次）', () => {
+        const { viewer, core } = createViewer();
+        viewer.loadBlueprintData(makeData(5, (i) => (i < 3 ? 7 : 8)));
+
+        const out = viewer.deleteBuilding(0, [7, 7]);
+        expect(out.ok).toBe(true);
+        if (!out.ok) throw new Error('unreachable');
+        expect(out.value).toEqual({ mode: 0, removed: 3, indexes: [0, 1, 2] });
+
+        const after = viewer.getBlueprintData();
+        expect(after?.buildings.length).toBe(2);
+        expect(after?.buildings.every((b) => b.itemId === 8)).toBe(true);
+        expect(core.calls.notifyDataChanged).toBe(1);
+        viewer.dispose();
+    });
+
+    it('A4 mode=0 传多个 itemId，各自同类建筑全删', () => {
+        const { viewer } = createViewer();
+        viewer.loadBlueprintData(makeData(6, (i) => [1, 1, 2, 3, 3, 3][i]));
+
+        const out = viewer.deleteBuilding(0, [1, 2]);
+        expect(out.ok).toBe(true);
+        if (!out.ok) throw new Error('unreachable');
+        expect(out.value.removed).toBe(3);
+
+        const after = viewer.getBlueprintData();
+        expect(after?.buildings.length).toBe(3);
+        expect(after?.buildings.every((b) => b.itemId === 3)).toBe(true);
+        viewer.dispose();
+    });
+
+    it('A5 mode=1 按建筑 ID 删除，删后 index 与数组下标保持一致', () => {
+        const { viewer } = createViewer();
+        viewer.loadBlueprintData(makeData(5));
+
+        const out = viewer.deleteBuilding(1, [1, 3]);
+        expect(out.ok).toBe(true);
+        if (!out.ok) throw new Error('unreachable');
+        expect(out.value).toEqual({ mode: 1, removed: 2, indexes: [1, 3] });
+
+        const after = viewer.getBlueprintData();
+        expect(after?.buildings.length).toBe(3);
+        after?.buildings.forEach((b, i) => expect(b.index).toBe(i));
+        viewer.dispose();
+    });
+
+    it('A6 mode=1 重复 ID 去重，只删 2 栋', () => {
+        const { viewer } = createViewer();
+        viewer.loadBlueprintData(makeData(5));
+
+        const out = viewer.deleteBuilding(1, [1, 1, 3]);
+        expect(out.ok).toBe(true);
+        if (!out.ok) throw new Error('unreachable');
+        expect(out.value.removed).toBe(2);
+        expect(viewer.getBlueprintData()?.buildings.length).toBe(3);
+        viewer.dispose();
+    });
+
+    it('A7 targets 为空 / null / undefined / 非数组 / 非非负整数 → invalid-argument，数据不变', () => {
+        const { viewer } = createViewer();
+        viewer.loadBlueprintData(makeData(3));
+        const before = snap(viewer);
+
+        const bad: unknown[] = [
+            [],
+            null,
+            undefined,
+            'x',
+            [1.5],
+            [-1],
+            [1, '2'],
+        ];
+        for (const targets of bad) {
+            const out = viewer.deleteBuilding(1, targets as number[]);
+            expect(out.ok).toBe(false);
+            if (out.ok) throw new Error('unreachable');
+            expect(out.error.code).toBe('invalid-argument');
+            expect(out.error.phase).toBe('lifecycle');
+            expect(snap(viewer)).toBe(before);
+        }
+        viewer.dispose();
+    });
+
+    it('A8 mode 不是 0/1 → invalid-argument', () => {
+        const { viewer } = createViewer();
+        viewer.loadBlueprintData(makeData(3));
+
+        for (const mode of [2, -1, '0', null]) {
+            const out = viewer.deleteBuilding(mode as unknown as 0, [0]);
+            expect(out.ok).toBe(false);
+            if (out.ok) throw new Error('unreachable');
+            expect(out.error.code).toBe('invalid-argument');
+        }
+        expect(viewer.getBlueprintData()?.buildings.length).toBe(3);
+        viewer.dispose();
+    });
+
+    it('A9 mode=1 含不存在的 ID → building-not-found，数据逐字段不变', () => {
+        const { viewer, core } = createViewer();
+        viewer.loadBlueprintData(makeData(4));
+        const before = snap(viewer);
+
+        const out = viewer.deleteBuilding(1, [1, 999]);
+        expect(out.ok).toBe(false);
+        if (out.ok) throw new Error('unreachable');
+        expect(out.error.code).toBe('building-not-found');
+        expect(snap(viewer)).toBe(before);
+        // 关键：命令一次都没执行、重建也没发生
+        expect(core.calls.notifyDataChanged).toBe(0);
+        viewer.dispose();
+    });
+
+    it('A9b mode=0 部分命中（一个 itemId 没建筑）→ 整批失败，一栋都不删', () => {
+        const { viewer, core } = createViewer();
+        viewer.loadBlueprintData(makeData(4, (i) => (i === 3 ? 9 : 5)));
+        const before = snap(viewer);
+
+        const out = viewer.deleteBuilding(0, [5, 12345]);
+        expect(out.ok).toBe(false);
+        if (out.ok) throw new Error('unreachable');
+        expect(out.error.code).toBe('building-not-found');
+        expect(snap(viewer)).toBe(before);
+        expect(core.calls.notifyDataChanged).toBe(0);
+        viewer.dispose();
+    });
+
+    it('A17 成功后走「原地改数据 + notifyDataChanged」通道，而不是重新灌数据', () => {
+        const { viewer, core } = createViewer();
+        viewer.loadBlueprintData(makeData(5));
+
+        viewer.deleteBuilding(1, [0]);
+        expect(core.calls.notifyDataChanged).toBe(1);
+        expect(core.calls.setBlueprintData.length).toBe(1); // 只有最初那次加载
+        viewer.dispose();
+    });
+
+    it('A18 删除会清空选中（下标已重排，旧选中会指向别的建筑）', () => {
+        const { viewer, core } = createViewer();
+        viewer.loadBlueprintData(makeData(5));
+        viewer.selectBuilding(4);
+
+        const out = viewer.deleteBuilding(1, [0]);
+        expect(out.ok).toBe(true);
+        expect(core.calls.clearSelection).toBeGreaterThanOrEqual(1);
+        expect(viewer.getSelectedIndexes()).toEqual([]);
+        expect(viewer.getSelectedIndex()).toBeNull();
+        viewer.dispose();
+    });
+
+    it('A19 重建抛错 → build-failed（message 注明数据已变更），且不抛异常', () => {
+        const { viewer, core } = createViewer();
+        viewer.loadBlueprintData(makeData(5));
+        core.failNotifyNext(new Error('重建炸了'));
+
+        let out: ReturnType<typeof viewer.deleteBuilding> | null = null;
+        expect(() => {
+            out = viewer.deleteBuilding(1, [0]);
+        }).not.toThrow();
+
+        const res = out as unknown as { ok: boolean; error?: { code: string; message: string } };
+        expect(res.ok).toBe(false);
+        expect(res.error?.code).toBe('build-failed');
+        expect(res.error?.message).toContain('数据已变更');
+        // 语义确实是「已删但场景没跟上」
+        expect(viewer.getBlueprintData()?.buildings.length).toBe(4);
+        viewer.dispose();
+    });
+
+    it('A11 连续两次调用都正常（重建可重入）', () => {
+        const { viewer, core } = createViewer();
+        viewer.loadBlueprintData(makeData(6, (i) => i));
+
+        const a = viewer.deleteBuilding(1, [0, 1]);
+        const b = viewer.deleteBuilding(0, [2]);
+
+        expect(a.ok && b.ok).toBe(true);
+        expect(core.calls.notifyDataChanged).toBe(2);
+        // 6 - 2（按 ID）- 1（按 itemId）
+        expect(viewer.getBlueprintData()?.buildings.length).toBe(3);
+        viewer.dispose();
+    });
+
+    // ---- 真实蓝图往返（不 mock 解析器，验证序列化不受删除影响）----
+
+    const fixture = path.join(
+        __dirname, '..', 'blueprint', 'fixtures', 'starting_base_01029.txt',
+    );
+    const readFixture = () => fs.readFileSync(fixture, 'utf8').trim();
+
+    it('A13b 删除后 serializeBlueprint 可被 parseBlueprint 再解析（往返一致）', () => {
+        const data = parseBlueprint(readFixture());
+        const before = data.buildings.length;
+        const { viewer } = createViewer();
+        viewer.loadBlueprintData(data);
+
+        // 注意：getBlueprintData / loadBlueprintData 与 data 是同一引用，删除会原地修改它
+        const removed = [data.buildings[0].index, data.buildings[5].index];
+        const out = viewer.deleteBuilding(1, removed);
+        expect(out.ok).toBe(true);
+
+        const after = viewer.getBlueprintData();
+        expect(after).toBe(data); // 共享引用（文档已告警）
+        expect(after?.buildings.length).toBe(before - 2);
+
+        const again = parseBlueprint(serializeBlueprint(after!));
+        expect(again.buildings.length).toBe(after!.buildings.length);
+        expect(again.buildings.map((b) => b.index)).toEqual(
+            after!.buildings.map((b) => b.index),
+        );
+        expect(again.buildings.map((b) => b.itemId)).toEqual(
+            after!.buildings.map((b) => b.itemId),
+        );
+        viewer.dispose();
+    });
+
+    it('A16 删光全部建筑后场景为空，且仍可序列化 / 再解析', () => {
+        const data = parseBlueprint(readFixture());
+        const { viewer } = createViewer();
+        viewer.loadBlueprintData(data);
+
+        const all = data.buildings.map((b) => b.index);
+        const out = viewer.deleteBuilding(1, all);
+        expect(out.ok).toBe(true);
+        if (!out.ok) throw new Error('unreachable');
+        expect(out.value.removed).toBe(all.length);
+        expect(viewer.getBlueprintData()?.buildings.length).toBe(0);
+
+        const again = parseBlueprint(serializeBlueprint(viewer.getBlueprintData()!));
+        expect(again.buildings.length).toBe(0);
+        expect(again.areas.length).toBe(data.areas.length);
         viewer.dispose();
     });
 });

@@ -135,6 +135,7 @@
     把整个 <code>dist-lib/</code> 目录搬到任意路径（任意子目录、任意文件名）后用静态服务器打开本页，
     都应当全绿——页面里没有任何绝对路径，资产靠 UMD 自动探测脚本同级目录。
     注意：必须用 <code>http(s)://</code> 打开，<code>file://</code> 会被浏览器 CORS 拦住。
+    控制台可直接使用 <code>window.api</code>（UMD 导出面）与 <code>window.viewer</code>（当前实例）。
 </p>
 
 <div id="banner" class="banner running">正在运行验证…</div>
@@ -344,6 +345,12 @@
     /** 当前实例：重跑前先 dispose，避免 WebGL 上下文累积 */
     var currentViewer = null;
 
+    // 调试入口：模块导出面与当前实例都挂到 window，控制台可直接调用
+    //   window.api    —— UMD 导出的全部函数（BlueprintViewer / parseBlueprint / calculateStatsList …）
+    //   window.viewer —— 当前页面上的 BlueprintViewer 实例（重建后自动指向新实例）
+    window.api = window.DSPBlueprintEditor;
+    window.viewer = null;
+
     /**
      * @param {string} name 检查项
      * @param {boolean} ok 是否通过
@@ -458,6 +465,7 @@
                 log('上一次实例 dispose 失败（已忽略）：' + e);
             }
             currentViewer = null;
+            window.viewer = null;
         }
         document.getElementById('viewer').innerHTML = '';
 
@@ -510,6 +518,7 @@
         }
         check('new BlueprintViewer() 不抛异常', true, '');
         currentViewer = viewer;
+        window.viewer = viewer;
         check('canvas 已创建', viewer.getCanvas() !== null, '');
         check('相机可用', viewer.getCamera() !== null, '');
 
@@ -1055,6 +1064,8 @@
         var v = viewer();
         if (v === null) return;
         v.dispose();
+        if (window.viewer === v)
+            window.viewer = null;
         var leftover = document.getElementById('viewer').querySelectorAll('canvas').length;
         log('✓ dispose()｜容器内 canvas 残留=' + leftover);
         // 随后任一调用都应返回 already-disposed，而不是抛异常

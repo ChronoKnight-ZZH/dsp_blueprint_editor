@@ -89,7 +89,8 @@
 | `calculateStatsList`    | function | 蓝图统计列表：总耗电 / 需求 / 输出；复用编辑器网页端 `calculateProductionStats` | 本次新增                       |
 
 此外，`src/lib/index.ts` 还导出了**纯类型**（`ViewerOptions`、`ViewerCallbacks`、
-`PreviewDeltaEvent`、`PreviewStats` 等），供 TypeScript 宿主直接引用；它们没有运行时开销。
+`PreviewDeltaEvent`、`PreviewStats`、`DeleteMode` / `DeleteResult` / `DeleteOutcome` 等），
+供 TypeScript 宿主直接引用；它们没有运行时开销。
 
 以下能力存在但**不在发布面**，只能从源码路径引用：
 
@@ -109,6 +110,7 @@
 | 加载已解析数据 | `viewer.loadBlueprintData(data)`                                    | 宿主已自行解析或需要注入构造的数据                   |
 | 加载 JSON | `viewer.loadBlueprintJSON(text)`                                    | 网页端只能拿到 JSON 文本、跨进程传输               |
 | 导出 JSON | `viewer.exportBlueprintJSON()`                                      | 保存工程、调试、传给后端                        |
+| 删除建筑    | `viewer.deleteBuilding(mode, targets)`                              | 按 itemId / 建筑 ID 批量剔除（MES、UMD 端纯 API） |
 | 选中单栋    | `viewer.selectBuilding(i)`                                          | 点击列表 / 搜索定位                         |
 | 选中多栋    | `viewer.selectedBuildings(list)`                                    | 批量高亮、框选结果回显                         |
 | 镜头对准    | `viewer.focusBuilding(i, opts)`                                     | 列表点击后居中查看，不锁镜头                      |
@@ -319,13 +321,15 @@ yarn build     # 产物在 dist/
 - 真实 GLB 模型、KTX2 贴图、程序化传送带与分拣器、元数据回退盒；
 - 点击拾取、单选 / 多选高亮、镜头居中对齐；
 - 主题、显式尺寸、截图、销毁；
+- **批量删除**：`deleteBuilding(mode, targets)` 按 `itemId` 或建筑 ID 剔除建筑并重建（见 4.10）；
 - 增量预览的宿主门面（见 4.2）。
 
 **适用场景**
 
-- 在已有页面嵌入只读 3D 预览；
+- 在已有页面嵌入 3D 预览；
 - 列表 / 搜索联动：点击列表项调用 `focusBuilding`；
 - 生成过程可视化：把后端 `preview-delta` 原样转发；
+- 生成结果的再加工：MES / UMD 端按需剔除同类或指定建筑（`deleteBuilding`）；
 - 截图分享 / 报告导出。
 
 **设计意图**
@@ -1062,6 +1066,54 @@ markdown
 | `calculateStatsList` | 不抛异常 | 错误经 `{ ok: false, error }` 返回；算法复用 `calculateProductionStats` |
 ```
 
+### 4.10 批量删除（deleteBuilding）
+
+**核心能力**
+
+在渲染器上直接改数据并重建场景，供 MES / UMD 端做"剔除同类 / 剔除指定建筑组"，
+**不经过 UI、不经过撤销栈**（撤销栈在编辑器层，lib 不引入 Vue）。
+
+```typescript
+import { BlueprintViewer } from './dist-lib/dsp-blueprint-editor.esm.js';
+
+const viewer = new BlueprintViewer({ container: '#viewer' });
+viewer.loadBlueprint(blueprintText);
+
+// ① 按 itemId：删除这些 itemId 的全部建筑
+const a = viewer.deleteBuilding(0, [2303]);          // 2303 = 某个建筑/物品的 itemId
+
+// ② 按建筑 ID（BlueprintBuilding.index，不是数组下标）
+const b = viewer.deleteBuilding(1, [12, 15, 15]);    // 重复 ID 自动去重
+
+if (a.ok) {
+    console.log(a.value.removed, a.value.indexes);   // 删了几栋 + 它们原来的数组下标
+} else {
+    console.log(a.error.code, a.error.message);
+}
+```
+
+| `mode` | `targets` 含义                | 删除范围                     |
+| :----- | :------------------------- | :----------------------- |
+| `0`    | `itemId` 列表                | 这些 itemId 的**全部**建筑      |
+| `1`    | **建筑 ID**（`BlueprintBuilding.index`）列表 | 指定的每一栋（重复 ID 去重）        |
+
+**语义要点**
+
+- **整批失败**：任一目标不存在（某个 itemId 一栋都没命中 / 某个建筑 ID 找不到），
+  整次调用失败、命令不执行、数据零变更——**不做部分删除**；
+- 成功返回 `{ ok: true, value: { mode, removed, indexes } }`，
+  `indexes` 是被删建筑的**原数组下标**（升序），可直接用来对账或刷新列表；
+- 成功后会**清空选中态**：数组下标已重排，旧下标会指向别的建筑；
+- **共享引用**：`getBlueprintData()` 返回内部引用，删除是**原地修改**，
+  宿主此前持有的那份数据会一起变；需要快照请先 `exportBlueprintJSON()` 或自行深拷贝；
+- **性能**：一次调用只触发一次重建。要删很多目标时请**合并成一次调用**，
+  不要写 `for` 循环逐栋删除（3 万级蓝图每次重建是秒级开销）。
+
+**错误码**：`not-loaded` / `already-disposed` / `invalid-argument` /
+`building-not-found` / `build-failed`。其中 `build-failed` 的 message 会区分两种情况：
+删除命令本身失败（数据可能部分变更）与"已删除但重建失败"（数据已变更）——
+两者都建议宿主重新 `loadBlueprint` 恢复一致状态。
+
 ***
 
 ## 5. API 参考
@@ -1125,6 +1177,12 @@ const settingsPort = {
 | `loadBlueprintJSON(text)` | `BlueprintLoadOutcome`  | 从 JSON 文本导入（`Date` / `Uint8Array` 无损还原） |
 | `getBlueprintData()`      | `BlueprintData \| null` | 最近一次**成功**加载的数据                         |
 | `exportBlueprintJSON()`   | `string \| null`        | 导出可读 JSON（2 空格缩进）                       |
+
+**数据修改（写操作）**
+
+| 方法                        | 返回            | 说明                                                                  |
+| ------------------------- | ------------- | ------------------------------------------------------------------- |
+| `deleteBuilding(mode, t)` | `DeleteOutcome` | 按 itemId（`mode=0`）/ 建筑 ID（`mode=1`）批量删除并重建；整批失败；语义见 4.10 |
 
 **增量预览**
 
@@ -1193,6 +1251,17 @@ type BlueprintLoadOutcome = { ok: true; value: BlueprintLoadResult } | { ok: fal
 type ViewerQueryResult<T>  = { ok: true; value: T }                | { ok: false; error: ViewerError };
 type BuildingLocateResult  = { ok: true; index: number }           | { ok: false; error: ViewerError };
 type BuildingsLocateResult = { ok: true; indexes: number[] }       | { ok: false; error: ViewerError };
+// ---- 批量删除（deleteBuilding）
+
+type DeleteMode = 0 | 1;   // 0 = 按 itemId 全删同类；1 = 按建筑 ID（BlueprintBuilding.index）列表删
+
+interface DeleteResult {
+    mode: DeleteMode;
+    removed: number;       // 实际删除栋数（整批失败语义下恒 ≥ 1）
+    indexes: number[];     // 被删建筑的原数组下标（升序）
+}
+
+type DeleteOutcome = ViewerQueryResult<DeleteResult>;
 // ---- 统计列表（calculateStatsList）
 
 type StatsListErrorCode =
@@ -1231,11 +1300,15 @@ type StatsListResult =
 | `build`       | `build-failed`                                                                                                       | 渲染构建内部失败（保留旧场景）                |
 | `lifecycle`   | `no-container` / `no-webgl` / `already-disposed`                                                                     | 初始化 / 生命周期                     |
 | `lifecycle`   | `not-loaded` / `building-not-found` / `not-renderable`                                                               | 查询类失败（未加载 / 找不到 / 无可用矩阵）       |
+| `lifecycle`   | `invalid-argument`                                                                                                   | `deleteBuilding` 入参不合法（mode / targets）  |
 
 **失败语义**
 
 - 加载失败：不抛异常，场景、相机、`getBlueprintData()` 保持上一次成功状态；
 - 查询失败：不改动选中 / 镜头（`focusBuilding` 在选中前先校验）；
+- 删除失败：**任一目标不存在即整批失败**，命令不执行、数据零变更（不做部分删除）；
+  唯一的例外是"已删除但重建失败"——返回 `build-failed` 且 message 注明"数据已变更"，
+  此时建议宿主重新 `loadBlueprint`；
 - `onError` 会按 `code + message` 去重；无回调时仍会在控制台留下 `[viewer] phase/code: message`。
 
 ### 5.5 导出函数
@@ -1660,6 +1733,15 @@ JSON 文本 ──loadBlueprintJSON──▶ BlueprintData ──（同一条应
    绝大多数情况下相等，但蓝图按区域分组存储，不保证顺序。
 5. `getBuildingInfo(index)` 只接受**数组下标**，不做 ID 兜底；`selectBuilding` / `focusBuilding`
    在越界时才会按 ID 兜底。
+6. `getBlueprintData()` 返回**内部引用**（不是克隆）：`deleteBuilding` 是**原地修改**，
+   宿主此前持有的那份数据会一起变。需要快照请先 `exportBlueprintJSON()` 或自行深拷贝。
+7. `deleteBuilding(mode=1)` 吃的是**建筑 ID**（`BlueprintBuilding.index`），
+   与 `selectBuilding(index)` 的「数组下标优先」口径**不同**，不要混用。
+8. 删除成功后选中态会被清空——数组下标已重排，旧下标会指向别的建筑。
+9. 一次 `deleteBuilding` 只触发一次重建；要删很多目标请**合并成一次调用**，
+   不要 `for` 循环逐栋删除（3 万级蓝图每次重建是秒级开销）。
+10. 序列化边界：删除后新的「末条建筑」若带未知扩展间隙（`extraBytes`）时，
+    导出会把它写回而再解析不读，可能错位。这是既有格式解析行为，普通蓝图不受影响。
 
 ### 8.3 增量预览
 
@@ -1709,7 +1791,8 @@ yarn test:preview          # 同上，只跑 preview
 
 覆盖内容：
 
-- `blueprintViewer.spec.ts`：加载 / 失败保留 / `keepCamera` / 单选 / 多选 / 聚焦 / 查询 / 主题 / 回调；
+- `blueprintViewer.spec.ts`：加载 / 失败保留 / `keepCamera` / 单选 / 多选 / 聚焦 / 查询 / 主题 / 回调 /
+  **批量删除（`deleteBuilding`，含真实蓝图往返）**；
 - `previewLayer.spec.ts`：序号去重、未知 remove/replace、抖动抑制、收敛、容量、坐标切换；
 - `projector.spec.ts`：layout 自适应缩放、扁平/嵌套 areas、与 `calcBuildingTrans` 逐位一致；
 - `fixture.spec.ts` / `replay.spec.ts`：真实样本回放（`replay` 默认跳过；PowerShell 用
@@ -1718,7 +1801,9 @@ yarn test:preview          # 同上，只跑 preview
 - `buildBVH.spec.ts` / `iconTexture.spec.ts` / `planetMapControls.spec.ts`：BVH、图标纹理与相机控件；
 - `describeBuild.spec.ts`：构建快照字段与稳定性。
 
-本次文档更新时实际执行结果：**9 个测试套件通过、94 个用例通过、1 个跳过**。
+本次文档更新时实际执行结果：**25 个测试套件通过、237 个用例通过、1 个跳过**；
+另有 `tests/unit/preview/fixture.spec.ts` 因缺少生成物 `scripts/lib-build/preview-fixture.json`
+（`node scripts/preview/build-fixture.mjs` 产出，非代码缺陷）无法运行。
 
 ### 9.2 构建产物冒烟
 

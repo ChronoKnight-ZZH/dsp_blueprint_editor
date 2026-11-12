@@ -1,7 +1,8 @@
 import type { PerspectiveCamera } from "three";
 import type { BlueprintData } from "@/blueprint/parser";
 import { fromStr } from "@/blueprint/parser";
-import { isBelt, isInserter } from "@/data/items";
+import { RemoveBuildingsCommand } from "@/blueprint/removeBuilding";
+import { isInserter } from "@/data/items";
 import type { ViewerRenderSettings } from "@/renderSettingsTypes";
 import { RenderCore, RenderPhaseError } from "./core/RenderCore";
 import type { RebuildReason } from "./core/RenderCore";
@@ -23,6 +24,8 @@ import type {
     BuildingInfoPayload,
     BuildingLocateResult,
     BuildingsLocateResult,
+    DeleteMode,
+    DeleteOutcome,
     FocusOptions,
     SettingsPort,
     ThemeColors,
@@ -120,11 +123,13 @@ function resolveContainer(container: HTMLElement | string): HTMLElement | null {
 }
 
 /**
- * 只读蓝图渲染器（方案 D3：本轮仅源码引用）。
+ * 无头蓝图渲染器（方案 D3：本轮仅源码引用）。
  *
- * 与编辑器共用 `src/lib/core/` 的渲染内核，但不含地基、放置/删除/预览等编辑态。
+ * 与编辑器共用 `src/lib/core/` 的渲染内核，但不含地基与放置/预览等编辑态；
+ * 唯一的"写"能力是 `deleteBuilding` 纯 API（不涉及 3D 交互、UI 与撤销栈）。
  * 契约：**公开方法不抛异常**，失败通过 `{ ok: false, error }` 返回并经 `onError` 上报；
- * 失败时场景、相机与 `getBlueprintData()` 均保持上一次成功状态。
+ * 失败时场景、相机与 `getBlueprintData()` 均保持上一次成功状态
+ * （唯一例外：`deleteBuilding` 的"已删除但重建失败"分支，见其文档）。
  */
 export class BlueprintViewer {
     private readonly port: SettingsPort;
@@ -618,6 +623,127 @@ export class BlueprintViewer {
         return {
             ok: true,
             value: { index, id: building?.index ?? index, matrix: info.matrix },
+        };
+    }
+
+    // ------------------------------------------------------------ 批量删除（写操作）
+
+    /**
+     * 批量删除建筑（**纯 API**：MES / UMD 端直接调用，不经过 UI 与撤销栈）。
+     *
+     * - `mode=0`：`targets` 是 **itemId** 列表，删除这些 itemId 的**全部**建筑；
+     * - `mode=1`：`targets` 是**建筑 ID**（`BlueprintBuilding.index`）列表，
+     *   内部做 ID → 数组下标映射；重复 ID 自动去重；
+     * - **整批失败语义**：任一目标不存在（mode=0 的某个 itemId 一栋都没命中 /
+     *   mode=1 的某个 ID 找不到），整次调用失败，命令不执行、数据零变更；
+     * - 成功时走既有重建通道（`notifyDataChanged` → `rebuildScene("data")`），
+     *   重建前会清空选中态——删除后数组下标重排，旧选中会指向别的建筑。
+     *
+     * **共享引用告警**：`getBlueprintData()` 返回的是内部数据引用，删除是**原地修改**，
+     * 宿主此前拿到的旧引用会一起变；需要快照请自行深拷贝或先 `exportBlueprintJSON()`。
+     *
+     * 失败：`already-disposed` / 初始化错误 / `not-loaded` / `invalid-argument` /
+     * `building-not-found` / `build-failed`。
+     * 唯一"数据已变"的失败是重建阶段抛错（`build-failed`，message 会注明），
+     * 此时建议宿主重新 `loadBlueprint`。
+     */
+    deleteBuilding(mode: DeleteMode, targets: number[]): DeleteOutcome {
+        // ---- S0 前置守卫 ----
+        const guard = this.guard();
+        if (guard !== null) return guard;
+        const data = this.data;
+        const core = this.core;
+        if (data === null || core === null)
+            return this.failLocate("not-loaded", "尚未加载蓝图");
+
+        // ---- S1 参数校验（任一不合法都直接返回，数据不变）----
+        if (mode !== 0 && mode !== 1)
+            return this.failLocate("invalid-argument", "mode 必须为 0 或 1");
+        if (!Array.isArray(targets) || targets.length === 0)
+            return this.failLocate("invalid-argument", "targets 不能为空数组");
+        for (const t of targets) {
+            if (typeof t !== "number" || !Number.isInteger(t) || t < 0)
+                return this.failLocate(
+                    "invalid-argument",
+                    "targets 元素必须为非负整数"
+                );
+        }
+
+        // ---- S2 目标解析（只读阶段：整批失败语义在此落地）----
+        let indices: number[];
+        if (mode === 0) {
+            // itemId → 是否命中；命中集合与请求集合不一致即整批失败
+            const wanted = new Set(targets);
+            const matched = new Set<number>();
+            indices = [];
+            for (let i = 0; i < data.buildings.length; i++) {
+                const itemId = data.buildings[i].itemId;
+                if (!wanted.has(itemId)) continue;
+                matched.add(itemId);
+                indices.push(i);
+            }
+            if (matched.size !== wanted.size) {
+                const missing = [...wanted].filter((id) => !matched.has(id));
+                return this.failLocate(
+                    "building-not-found",
+                    `以下 itemId 没有任何建筑：${missing.join(",")}`
+                );
+            }
+        } else {
+            // 建筑 ID → 数组下标，单遍 O(n)；禁止逐 ID findIndex（3 万级会退化）
+            const posById = new Map<number, number>();
+            for (let i = 0; i < data.buildings.length; i++)
+                posById.set(data.buildings[i].index, i);
+            const seen = new Set<number>();
+            indices = [];
+            for (const id of targets) {
+                if (seen.has(id)) continue; // 重复 ID 去重
+                const pos = posById.get(id);
+                if (pos === undefined)
+                    return this.failLocate(
+                        "building-not-found",
+                        `建筑 ID ${id} 不存在`
+                    );
+                seen.add(id);
+                indices.push(pos);
+            }
+            indices.sort((a, b) => a - b);
+        }
+
+        // ---- S3 先清选中：重建会把旧下标原样重新套用，删除后下标已重排 ----
+        core.clearSelection();
+
+        // ---- S4 执行命令（index 重排 + 交叉引用维护由命令承担）----
+        try {
+            const cmd = new RemoveBuildingsCommand(indices, data);
+            cmd.do(data);
+        } catch (e) {
+            // 理论不达；若达说明数据本身已不自洽（如建筑 index 与数组位置不符）。
+            // 不做 undo：命令未完整执行时，其内部记录不足以支撑可靠回滚。
+            return this.failLocate(
+                "build-failed",
+                `删除命令执行失败（数据可能已部分变更，建议重新 loadBlueprint）：${String(
+                    e
+                )}`
+            );
+        }
+
+        // ---- S5 通知重建（原子：失败保留旧场景，但数据已变）----
+        try {
+            core.notifyDataChanged();
+        } catch (e) {
+            return this.failLocate(
+                "build-failed",
+                `已删除 ${indices.length} 栋但场景重建失败（数据已变更，请重新 loadBlueprint）：${String(
+                    e
+                )}`
+            );
+        }
+
+        // ---- S6 返回 ----
+        return {
+            ok: true,
+            value: { mode, removed: indices.length, indexes: indices },
         };
     }
 
