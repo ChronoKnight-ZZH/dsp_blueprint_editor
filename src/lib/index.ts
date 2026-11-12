@@ -25,6 +25,13 @@ export {
 // 资产根地址：库构建下决定 assets/ 的位置（编辑器构建下由 webpack publicPath 决定，此调用无副作用）
 export { configureAssetBaseUrl } from "./assets/assetBaseUrl";
 
+// 资产地址映射钩子：模型/图标已由宿主打包器带哈希管理时，用它把库内的相对路径
+// 换成宿主地址（库产物里不必再放一份 models/、img/）
+export {
+    configureAssetUrlMapper,
+    type AssetUrlMapper,
+} from "./assets/assetBaseUrl";
+
 // 模型本地持久化缓存（Cache Storage）的运行时开关。
 // 库构建默认**关闭**（构建配置 config/persistence.config.js 的 `lib` 字段），
 // 宿主需要「看过的模型断网也能显示」时显式打开；传 null 恢复构建配置的值。

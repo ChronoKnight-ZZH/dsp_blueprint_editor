@@ -140,12 +140,56 @@ export function currentAssetBaseUrl(): string {
 }
 
 /**
+ * 资产地址映射钩子：把一个产物内相对路径（`models/smelter.glb`）换成宿主已知的最终地址。
+ *
+ * 返回值语义：
+ * - 非空字符串 → 直接当作最终 URL 使用，**跳过** `currentAssetBaseUrl()` 拼接；
+ * - `null` / `undefined` / 空串 / 抛错 → 回退默认拼接，等于没配这个钩子。
+ */
+export type AssetUrlMapper = (
+    relativePath: string
+) => string | null | undefined;
+
+/** 宿主注册的映射钩子（null = 未配置，全部走默认拼接） */
+let configuredUrlMapper: AssetUrlMapper | null = null;
+
+/**
+ * 配置资产地址映射钩子。
+ *
+ * 适用场景：模型/图标已经由宿主的打包器（Vite、webpack）带内容哈希地管理，
+ * 库产物侧的 `models/`、`img/` 不再是唯一来源。宿主把「相对路径 → 实际地址」
+ * 交给库，库内部所有资产请求（模型 GLB、通道贴图、图标、basis 目录）一次对齐。
+ *
+ * ```ts
+ * configureAssetUrlMapper((path) => path.startsWith("models/") ? bundled[path] : null);
+ * ```
+ *
+ * 只有 `resolveAssetUrl()` 的请求会经过它；宿主自己 `fetch` 的地址不受影响。
+ * 传 `null` / `undefined` 清除配置，回到默认拼接。
+ */
+export function configureAssetUrlMapper(
+    mapper: AssetUrlMapper | null | undefined
+): void {
+    configuredUrlMapper = typeof mapper === "function" ? mapper : null;
+}
+
+/**
  * 产物内的相对路径 → 可加载 URL。
+ *
+ * 先问 `configureAssetUrlMapper()` 注册的钩子，未命中再按资产根拼接。
  *
  * @param relativePath 形如 `models/smelter.glb`、`img/tech/1001.png`
  */
 export function resolveAssetUrl(relativePath: string): string {
     const path = relativePath.replace(/^\/+/, "");
+    if (configuredUrlMapper !== null) {
+        try {
+            const mapped = configuredUrlMapper(path);
+            if (typeof mapped === "string" && mapped.length > 0) return mapped;
+        } catch {
+            // 映射钩子抛错不是错误：回退默认拼接，保证模型仍按原有方式加载
+        }
+    }
     const root = currentAssetBaseUrl();
     return root === "" ? path : `${root}${path}`;
 }

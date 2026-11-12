@@ -566,6 +566,37 @@ export function serializeBlueprint(data: BlueprintData): string;
 export function configureAssetBaseUrl(baseUrl: string | null | undefined): void;
 
 /**
+ * 资产地址映射钩子：产物内相对路径（`models/smelter.glb`）→ 宿主已知的最终地址。
+ *
+ * 非空字符串即作为最终 URL 使用（跳过资产根拼接）；
+ * 返回 `null` / `undefined` / 空串或抛错 → 回退默认拼接。
+ */
+export type AssetUrlMapper = (
+    relativePath: string
+) => string | null | undefined;
+
+/**
+ * 配置资产地址映射钩子（**仅库构建生效**）。
+ *
+ * 模型已经由宿主的打包器带内容哈希管理时用它：把「相对路径 → 实际地址」的映射
+ * 交给库，模型 GLB、通道贴图、图标与 basis 目录的请求一次对齐，不必再往库产物里
+ * 放一份 `models/`、`img/`。库内部只有 `resolveAssetUrl()` 会经过钩子；
+ * 宿主自己的 `fetch` 不受影响。
+ *
+ * ```ts
+ * const bundled: Record<string, string> = {
+ *     'models/smelter.glb': new URL('./smelter-3f2a1b.glb', import.meta.url).href,
+ * };
+ * configureAssetUrlMapper((path) => bundled[path] ?? null);
+ * ```
+ *
+ * @param mapper 映射函数；传 `null` / `undefined` 清除，回到默认拼接
+ */
+export function configureAssetUrlMapper(
+    mapper: AssetUrlMapper | null | undefined
+): void;
+
+/**
  * 模型本地持久化缓存（Cache Storage）的运行时开关。
  *
  * 库构建默认**关闭**：库嵌在宿主页面里，存储属于宿主，不替宿主预写最多 ~128 MB
