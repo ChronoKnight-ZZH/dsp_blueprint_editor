@@ -22,7 +22,7 @@ import type { WebGLProgramParametersWithUniforms } from "three";
  */
 
 /** 横梁宽度（世界单位）：原 0.15 翻倍，顶面才容得下可辨识箭头（G12 / Q16） */
-export const INSERTER_BEAM_WIDTH = 0.45;
+export const INSERTER_BEAM_WIDTH = 0.5;
 
 /** 横梁厚度（世界单位）：侧面过矮，不画箭头 */
 export const INSERTER_BEAM_THICKNESS = 0.06;

@@ -823,10 +823,11 @@ export function buildBuildings(
      * 姿态仍由 `inserterTrans` 决定（**不改它**，拾取盒 `buildBVH` 与它共用几何，方案 §3.3）：
      *   - 货物：基础姿态**先 `copy` 再下移** `CARGO_DROP`（必须在 `trans` 被 multiply 之前，
      *     否则货物会被缩放/偏移污染，方案 §6.6-S3）；
-     *   - 横梁：同一基础姿态再抬高 `BEAM_EXTRA_LIFT`、按 `len` 缩放并前推半个梁长。
+     *   - 横梁：同一基础姿态再抬高 `BEAM_EXTRA_LIFT`，缩放到 `len + 2·ARM_OVER` 并居中
+ *     （两端各伸 `ARM_OVER`，梁中心落在尾↔头中点）。
      *
      * 横梁几何本身由 `Inserters` 提供（v3.1：宽度翻倍 + 半透明 + 顶面箭头），
-     * 这里只负责写实例矩阵与元数据色；臂长仍由实例 `scale(1,1,len)` 表达，
+     * 这里只负责写实例矩阵与元数据色；臂长仍由实例 `scale(1,1,len+2·ARM_OVER)` 表达，
      * 着色器从 `instanceMatrix[2]` 反推，因此逐实例臂长不同也能保持箭头密度一致。
      *
      * 垂直预算（局部法线方向，`INSERTER_HEIGHT = 0.3`）：
@@ -843,7 +844,6 @@ export function buildBuildings(
         const CARGO_DROP = 0.1;
 
         const mesh = new Inserters(inserters.length);
-        const offset = new Matrix4().makeTranslation(0, 0, -0.5);
         const temp = new Matrix4();
         const trans = new Matrix4();
         const cargoTrans = new Matrix4();
@@ -857,10 +857,16 @@ export function buildBuildings(
             cargoTrans.multiply(temp.makeTranslation(0, -CARGO_DROP, 0));
             addCargo(cargoTrans, CARGO_COLOR, len);
 
-            // ② 横梁：基础姿态抬高 + 缩放 + 前推半梁长
+            // ② 横梁：基础姿态抬高 + 两端各伸 ARM_OVER
+            // 乘序（three.js multiply 是后乘 a=a*b，作用在点上从右往左）：
+            //   trans = base * L * T_offset * S  → 作用顺序 S → T_offset → L → base
+            //   z_final = z * s + offsetZ（S 先拉伸，T_offset 后平移，offsetZ 不被 s 放大）
+            //   s = len + 2·ARM_OVER, offsetZ = -len/2
+            const ARM_OVER = 0.3;
+            const s = len + 2 * ARM_OVER;
             trans.multiply(temp.makeTranslation(0, BEAM_EXTRA_LIFT, 0));
-            trans.multiply(temp.makeScale(1, 1, len));
-            trans.multiply(offset);
+            trans.multiply(temp.makeTranslation(0, 0, -0.5 * len));
+            trans.multiply(temp.makeScale(1, 1, s));
 
             mesh.setMatrixAt(i, trans);
             mesh.setColorAt(i, colorOf(b.modelIndex));
