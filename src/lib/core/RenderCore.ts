@@ -559,14 +559,15 @@ export class RenderCore {
     /**
      * 切换主题（对齐 v1 `setTheme`）。
      *
-     * 立即改三处：场景背景、星球球体色、经纬网格色。角标文字颜色只在**下次重建**时生效
-     * （文字是烘进一张 canvas 纹理的，宽度与 v1 同一实现——v1 也是如此）。
+     * 立即改四处：场景背景、星球球体色、经纬网格色、角标文字配色。
+     * 角标文字烘在 canvas 纹理里，这里重烘一张图集就地替换贴图，不重建场景。
      */
     setTheme(theme: ThemeName): void {
         if (this.disposed) return;
         this.theme = resolveTheme(theme);
         this.skyEnabled = theme === "editor";
         this.applyTheme();
+        this.refreshSubscriptStyle();
     }
 
     /** 在**当前**主题上覆盖若干颜色（对齐 v1 `setCustomTheme`） */
@@ -574,6 +575,17 @@ export class RenderCore {
         if (this.disposed) return;
         this.theme = { ...this.theme, ...patch };
         this.applyTheme();
+        // 只有文字配色变了才重烘角标图集
+        if (patch.textFill !== undefined || patch.textStroke !== undefined)
+            this.refreshSubscriptStyle();
+    }
+
+    /** 角标（传送带数字）就地换色；场景尚未构建时是空操作，下次构建会直接用新主题 */
+    private refreshSubscriptStyle(): void {
+        this.bundle?.buildings.subscriptMesh?.setTextStyle({
+            fill: this.theme.textFill,
+            stroke: this.theme.textStroke,
+        });
     }
 
     /** 当前生效的主题色（副本） */

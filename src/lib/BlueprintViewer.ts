@@ -781,8 +781,8 @@ export class BlueprintViewer {
     /**
      * 切换 3D 主题（对齐 v1 `setTheme`）。
      *
-     * 立即生效：场景背景、星球色、网格色。角标文字颜色要等下次重建（换蓝图）才刷新。
-     * 构造时可通过 `theme` 选项指定初始主题，默认 `'dark'`。
+     * 立即生效：场景背景、星球色、网格色，以及角标文字配色（就地重烘字形图集）。
+     * 构造时可通过 `theme` 选项指定初始主题，默认 `'editor'`。
      */
     setTheme(theme: ThemeName): void {
         this.core?.setTheme(theme);

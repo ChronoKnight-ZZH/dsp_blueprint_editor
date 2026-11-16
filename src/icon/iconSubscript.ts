@@ -60,7 +60,7 @@ class FontTexture {
 }
 
 export class IconSubscript extends Mesh {
-    fontTexture;
+    fontTexture: FontTexture;
     cWidth = 0.22;
 
     constructor(numChars: number, style?: TextStyle) {
@@ -121,5 +121,20 @@ export class IconSubscript extends Mesh {
         this.geometry.getAttribute("iconId").needsUpdate = true;
         this.geometry.getAttribute("iconPos").needsUpdate = true;
         this.geometry.getAttribute("offset").needsUpdate = true;
+    }
+
+    /**
+     * 就地换色：按新配色重新烘一张字形图集，替换材质贴图并释放旧贴图。
+     *
+     * 字体参数不变，图集尺寸、几何缩放和实例属性都不需要重写，
+     * 因此切主题时可直接调用，不必重建整个场景。
+     */
+    setTextStyle(style?: TextStyle) {
+        const material = this.material as IconsMaterial;
+        const previous = this.fontTexture;
+        const next = new FontTexture(style);
+        material.map = next.texture;
+        previous.texture.dispose();
+        this.fontTexture = next;
     }
 }

@@ -20,8 +20,8 @@ export const THEME_PALETTE: Record<"dark" | "light" | "editor", ThemeColors> = {
         sceneBackground: 0x0d1117,
         planet: 0x1c2128,
         grid: 0x6e7681,
-        textFill: "#ffffff",
-        textStroke: "#44444488",
+        textFill: "#000000ff",
+        textStroke: "#ffffff88",
     },
     light: {
         sceneBackground: 0xd8dee4,
