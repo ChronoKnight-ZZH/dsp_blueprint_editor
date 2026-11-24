@@ -260,12 +260,9 @@ export function calcBuildingTrans(
         trans.makeTranslation(0, 0, height);
         trans.premultiply(temp.makeRotationFromEuler(rotation));
 
-        // DSP 蓝图 tilt 是绕传送带局部 +Y（前进 / roll）轴的角度：在最终地理朝向与 yaw
-        // 之后**右乘**局部 Y 旋转，因此只改变带面绕流向的滚转，不改变世界位置。
-        // 单位按与 `yaw` 一致的方式（度）解释；若以后实测数据是弧度，只需改这一处换算。
-        // 边界：v1 记录没有 tilt 字段（导入恒 0），外部调用方也可能省略该字段（undefined）；
-        // 只有有限且非 0 时才乘，否则会得到 NaN 矩阵（预览层投影对不上的根因）。
-        if (Number.isFinite(building.tilt) && building.tilt !== 0) {
+        // DSP 蓝图 tilt 是绕传送带局部 +Y（前进/roll）轴的角度。
+        // 在最终地理朝向与 yaw 之后右乘局部 Y 旋转，不改变世界位置。
+        if (building.tilt !== 0) {
             trans.multiply(
                 temp.makeRotationY((building.tilt / 180.0) * Math.PI)
             );
