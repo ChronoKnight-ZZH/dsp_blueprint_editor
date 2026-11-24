@@ -259,6 +259,14 @@ export function calcBuildingTrans(
         const trans = new Matrix4();
         trans.makeTranslation(0, 0, height);
         trans.premultiply(temp.makeRotationFromEuler(rotation));
+
+        // DSP 蓝图 tilt 是绕传送带局部 +Y（前进/roll）轴的角度。
+        // 在最终地理朝向与 yaw 之后右乘局部 Y 旋转，不改变世界位置。
+        if (building.tilt !== 0) {
+            trans.multiply(
+                temp.makeRotationY((building.tilt / 180.0) * Math.PI)
+            );
+        }
         return trans;
     };
 

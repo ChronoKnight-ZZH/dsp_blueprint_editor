@@ -1,5 +1,9 @@
 import {
     InstancedMesh,
+    BufferGeometry,
+    Float32BufferAttribute,
+    Mesh,
+    DoubleSide,
     Matrix4,
     Vector3,
     Vector2,
@@ -97,6 +101,7 @@ export function buildBuildings(
         reapplyLoadedModelMaterials(options.textureSettings);
 
     const buildBelts = (belts: BlueprintBuilding[]) => {
+        // 端点圆柱属于传送带节点装饰，保留原有尺寸；linkThickness 才是带状网格的挤出厚度。
         const thickness = 0.1;
         const material = new MeshLambertMaterial();
         const objects: Object3D[] = [];
@@ -120,46 +125,328 @@ export function buildBuildings(
             mesh.instanceColor!.needsUpdate = true;
             objects.push(mesh);
         }
-        const linkThickness = 0.6 * thickness;
+
+        const linkThickness = 0.05;
         {
-            // links
-            const geometry = new BoxGeometry(0.15, linkThickness, 1.0);
-            const mesh = new InstancedMesh(geometry, material, belts.length);
-            let numLinks = 0;
-            const offset = new Matrix4().makeTranslation(
-                0,
-                linkThickness / 2,
-                -0.5
-            );
+            // 带宽 0.15（halfWidth 为半宽）。每个连接节点共用同一截面，
+            // 并从节点 Matrix4 读取实际带面朝向，包含 planet.ts 中应用的 roll。
+            const halfWidth = 0.35;
+            const miterLimit = 4;
             const p1 = new Vector3();
             const p2 = new Vector3();
-            const d = new Vector3();
-            const temp = new Matrix4();
+            const direction = new Vector3();
             const trans = new Matrix4();
-            for (let i = 0; i < belts.length; i++) {
-                const b1 = belts[i];
-                if (b1.outputObjIdx < 0) continue;
-                p1.setFromMatrixPosition(transforms[b1.index][0]);
-                p2.setFromMatrixPosition(transforms[b1.outputObjIdx][0]);
-                const len = d.subVectors(p1, p2).length();
+            const temp = new Matrix4();
+            const axisX = new Vector3();
+            const axisY = new Vector3();
+            const axisZ = new Vector3();
+
+            type EndpointFrame = {
+                side: Vector3;
+                normal: Vector3;
+            };
+            type BeltLink = {
+                source: number;
+                target: number;
+                start: Vector3;
+                end: Vector3;
+                tangent: Vector3;
+                startFrame: EndpointFrame;
+                endFrame: EndpointFrame;
+                color: Color;
+            };
+            type BeltNodeFrame = { sideOffset: Vector3; normal: Vector3 };
+
+            const getEndpointFrame = (
+                matrix: Matrix4,
+                tangent: Vector3
+            ): EndpointFrame => {
+                matrix.extractBasis(axisX, axisY, axisZ);
+
+                // 局部 +Z 是 Matrix4 中的实际带面法线（已包含 roll）。
+                // 投影到垂直于连接切线的平面，保证截面与带段相接。
+                const normal = axisZ.clone().addScaledVector(
+                    tangent,
+                    -axisZ.dot(tangent)
+                );
+                if (normal.lengthSq() < 1e-8) {
+                    // 极端姿态下法线与切线近乎平行，改用矩阵局部 +X 恢复框架。
+                    const side = axisX.clone().addScaledVector(
+                        tangent,
+                        -axisX.dot(tangent)
+                    );
+                    if (side.lengthSq() < 1e-8) {
+                        side.set(1, 0, 0).addScaledVector(
+                            tangent,
+                            -tangent.x
+                        );
+                    }
+                    side.normalize();
+                    normal.crossVectors(side, tangent).normalize();
+                    return { side, normal };
+                }
+                normal.normalize();
+                const side = new Vector3()
+                    .crossVectors(tangent, normal)
+                    .normalize();
+                // 保持与矩阵局部 +X 的符号一致，避免截面左右翻转。
+                if (side.dot(axisX) < 0) {
+                    side.negate();
+                    normal.negate();
+                }
+                return { side, normal };
+            };
+
+            const links: BeltLink[] = [];
+            const incoming = new Map<number, BeltLink[]>();
+            const outgoing = new Map<number, BeltLink[]>();
+
+            // 先收集连接图。带段起点和终点分别读取两端节点的最终矩阵姿态。
+            for (const belt of belts) {
+                if (belt.outputObjIdx < 0) continue;
+                const target = transforms[belt.outputObjIdx];
+                if (target === undefined || target[0] === undefined) continue;
+
+                p1.setFromMatrixPosition(transforms[belt.index][0]);
+                p2.setFromMatrixPosition(target[0]);
+                direction.subVectors(p2, p1);
+                const len = direction.length();
+                if (len < 1e-6) continue;
+
+                const tangent = direction.multiplyScalar(1 / len).clone();
+                const edge: BeltLink = {
+                    source: belt.index,
+                    target: belt.outputObjIdx,
+                    start: p1.clone(),
+                    end: p2.clone(),
+                    tangent,
+                    startFrame: getEndpointFrame(
+                        transforms[belt.index][0],
+                        tangent
+                    ),
+                    endFrame: getEndpointFrame(target[0], tangent),
+                    color: colorOf(belt.modelIndex),
+                };
+                links.push(edge);
+
+                const out = outgoing.get(edge.source) ?? [];
+                out.push(edge);
+                outgoing.set(edge.source, out);
+                const inc = incoming.get(edge.target) ?? [];
+                inc.push(edge);
+                incoming.set(edge.target, inc);
+
+                // 货物仍沿原连接方向生成；up 使用该段起点矩阵的实际带面法线。
                 trans.identity();
-                trans.lookAt(p1, p2, p1);
-                trans.premultiply(temp.makeTranslation(p1.x, p1.y, p1.z));
-
-                const color = colorOf(b1.modelIndex);
-                addCargo(trans, color, len);
-
-                trans.multiply(temp.makeScale(1, 1, len));
-                trans.multiply(offset);
-                mesh.setMatrixAt(numLinks, trans);
-                mesh.setColorAt(numLinks, color);
-                numLinks++;
+                trans.lookAt(
+                    edge.start,
+                    edge.end,
+                    edge.startFrame.normal
+                );
+                trans.premultiply(
+                    temp.makeTranslation(
+                        edge.start.x,
+                        edge.start.y,
+                        edge.start.z
+                    )
+                );
+                addCargo(trans, edge.color, len);
             }
-            if (numLinks) {
-                mesh.count = numLinks;
-                mesh.instanceMatrix.needsUpdate = true;
-                mesh.instanceColor!.needsUpdate = true;
-                objects.push(mesh);
+
+            if (links.length) {
+                const nodeFrames = new Map<number, BeltNodeFrame>();
+                const nodeIds = new Set<number>();
+                for (const edge of links) {
+                    nodeIds.add(edge.source);
+                    nodeIds.add(edge.target);
+                }
+
+                for (const nodeId of nodeIds) {
+                    const ins = incoming.get(nodeId) ?? [];
+                    const outs = outgoing.get(nodeId) ?? [];
+                    const incidentFrames: EndpointFrame[] = [
+                        ...ins.map((edge) => edge.endFrame),
+                        ...outs.map((edge) => edge.startFrame),
+                    ];
+                    if (!incidentFrames.length) continue;
+
+                    // 以该节点自身矩阵的 +Z 轴作为实际带面法线基准，
+                    // 再结合相邻段姿态做符号一致的平均，兼容节点处的 roll 变化。
+                    transforms[nodeId][0].extractBasis(axisX, axisY, axisZ);
+                    const normal = axisZ.clone();
+                    for (const frame of incidentFrames) {
+                        const n = frame.normal.clone();
+                        if (normal.dot(n) < 0) n.negate();
+                        normal.add(n);
+                    }
+                    if (normal.lengthSq() < 1e-8) {
+                        normal.copy(axisZ);
+                    }
+                    normal.normalize();
+
+                    // 转弯节点对入/出边侧向量做 miter 平均，形成共享的截面边界。
+                    const referenceSide = incidentFrames[0].side.clone();
+                    const sideSum = new Vector3();
+                    for (const frame of incidentFrames) {
+                        const side = frame.side.clone();
+                        if (side.dot(referenceSide) < 0) side.negate();
+                        sideSum.add(side);
+                    }
+                    if (sideSum.lengthSq() < 1e-8) {
+                        sideSum.copy(referenceSide);
+                    }
+                    sideSum.normalize();
+
+                    // 保持截面宽度方向与实际带面法线正交。
+                    sideSum.addScaledVector(
+                        normal,
+                        -sideSum.dot(normal)
+                    );
+                    if (sideSum.lengthSq() < 1e-8) {
+                        sideSum.copy(referenceSide);
+                        sideSum.addScaledVector(
+                            normal,
+                            -sideSum.dot(normal)
+                        );
+                    }
+                    sideSum.normalize();
+
+                    const sideProjections = incidentFrames.map((frame) =>
+                        Math.abs(sideSum.dot(frame.side))
+                    );
+                    const denom = Math.max(
+                        0.25,
+                        Math.min(...sideProjections)
+                    );
+                    const miterLength = Math.min(
+                        halfWidth / denom,
+                        halfWidth * miterLimit
+                    );
+                    const sideOffset = sideSum.multiplyScalar(miterLength);
+                    // 再正交化一次，确保 0.05 厚度沿节点局部带面法线挤出。
+                    normal.addScaledVector(
+                        sideSum,
+                        -normal.dot(sideSum) / sideSum.lengthSq()
+                    ).normalize();
+
+                    nodeFrames.set(nodeId, { sideOffset, normal });
+                }
+
+                const positions: number[] = [];
+                const colors: number[] = [];
+                const addVertex = (v: Vector3, color: Color) => {
+                    positions.push(v.x, v.y, v.z);
+                    colors.push(color.r, color.g, color.b);
+                };
+                const addTriangle = (
+                    a: Vector3,
+                    b: Vector3,
+                    c: Vector3,
+                    color: Color
+                ) => {
+                    addVertex(a, color);
+                    addVertex(b, color);
+                    addVertex(c, color);
+                };
+                const addQuad = (
+                    a: Vector3,
+                    b: Vector3,
+                    c: Vector3,
+                    d: Vector3,
+                    color: Color,
+                    reverse = false
+                ) => {
+                    if (reverse) {
+                        addTriangle(a, c, b, color);
+                        addTriangle(a, d, c, color);
+                    } else {
+                        addTriangle(a, b, c, color);
+                        addTriangle(a, c, d, color);
+                    }
+                };
+
+                for (const edge of links) {
+                    const startFrame = nodeFrames.get(edge.source);
+                    const endFrame = nodeFrames.get(edge.target);
+                    if (startFrame === undefined || endFrame === undefined)
+                        continue;
+
+                    const startLeft = edge.start.clone().add(
+                        startFrame.sideOffset
+                    );
+                    const startRight = edge.start.clone().sub(
+                        startFrame.sideOffset
+                    );
+                    const endLeft = edge.end.clone().add(
+                        endFrame.sideOffset
+                    );
+                    const endRight = edge.end.clone().sub(
+                        endFrame.sideOffset
+                    );
+                    const startTopLeft = startLeft.clone().addScaledVector(
+                        startFrame.normal,
+                        linkThickness
+                    );
+                    const startTopRight = startRight.clone().addScaledVector(
+                        startFrame.normal,
+                        linkThickness
+                    );
+                    const endTopLeft = endLeft.clone().addScaledVector(
+                        endFrame.normal,
+                        linkThickness
+                    );
+                    const endTopRight = endRight.clone().addScaledVector(
+                        endFrame.normal,
+                        linkThickness
+                    );
+
+                    // 顶面、底面和两侧面组成有厚度的带；端面留给相邻带段拼接。
+                    addQuad(
+                        startTopLeft,
+                        endTopLeft,
+                        startTopRight,
+                        endTopRight,
+                        edge.color
+                    );
+                    addQuad(
+                        startLeft,
+                        startRight,
+                        endLeft,
+                        endRight,
+                        edge.color
+                    );
+                    addQuad(
+                        startLeft,
+                        endLeft,
+                        startTopLeft,
+                        endTopLeft,
+                        edge.color
+                    );
+                    addQuad(
+                        startRight,
+                        startTopRight,
+                        endRight,
+                        endTopRight,
+                        edge.color
+                    );
+                }
+
+                const geometry = new BufferGeometry();
+                geometry.setAttribute(
+                    "position",
+                    new Float32BufferAttribute(positions, 3)
+                );
+                geometry.setAttribute(
+                    "color",
+                    new Float32BufferAttribute(colors, 3)
+                );
+                geometry.computeVertexNormals();
+                const ribbonMaterial = new MeshLambertMaterial({
+                    vertexColors: true,
+                    side: DoubleSide,
+                });
+                const ribbonMesh = new Mesh(geometry, ribbonMaterial);
+                objects.push(ribbonMesh);
             }
         }
         return objects;
