@@ -166,21 +166,16 @@ export function buildBuildings(
 
                 // 局部 +Z 是 Matrix4 中的实际带面法线（已包含 roll）。
                 // 投影到垂直于连接切线的平面，保证截面与带段相接。
-                const normal = axisZ.clone().addScaledVector(
-                    tangent,
-                    -axisZ.dot(tangent)
-                );
+                const normal = axisZ
+                    .clone()
+                    .addScaledVector(tangent, -axisZ.dot(tangent));
                 if (normal.lengthSq() < 1e-8) {
                     // 极端姿态下法线与切线近乎平行，改用矩阵局部 +X 恢复框架。
-                    const side = axisX.clone().addScaledVector(
-                        tangent,
-                        -axisX.dot(tangent)
-                    );
+                    const side = axisX
+                        .clone()
+                        .addScaledVector(tangent, -axisX.dot(tangent));
                     if (side.lengthSq() < 1e-8) {
-                        side.set(1, 0, 0).addScaledVector(
-                            tangent,
-                            -tangent.x
-                        );
+                        side.set(1, 0, 0).addScaledVector(tangent, -tangent.x);
                     }
                     side.normalize();
                     normal.crossVectors(side, tangent).normalize();
@@ -190,12 +185,8 @@ export function buildBuildings(
                 const side = new Vector3()
                     .crossVectors(tangent, normal)
                     .normalize();
-                // 保持与矩阵局部 +X 的符号一致，避免截面左右翻转。
-                if (side.dot(axisX) < 0) {
-                    side.negate();
-                    normal.negate();
-                }
-                return { side, normal };
+
+                return { normal, side };
             };
 
             const links: BeltLink[] = [];
@@ -239,11 +230,7 @@ export function buildBuildings(
 
                 // 货物仍沿原连接方向生成；up 使用该段起点矩阵的实际带面法线。
                 trans.identity();
-                trans.lookAt(
-                    edge.start,
-                    edge.end,
-                    edge.startFrame.normal
-                );
+                trans.lookAt(edge.start, edge.end, edge.startFrame.normal);
                 trans.premultiply(
                     temp.makeTranslation(
                         edge.start.x,
@@ -289,9 +276,9 @@ export function buildBuildings(
                     const referenceSide = incidentFrames[0].side.clone();
                     const sideSum = new Vector3();
                     for (const frame of incidentFrames) {
-                        const side = frame.side.clone();
-                        if (side.dot(referenceSide) < 0) side.negate();
-                        sideSum.add(side);
+                        // side 已经由运输方向 × 带面法线确定方向。
+                        // 不再根据 side 点积决定是否翻转。
+                        sideSum.add(frame.side);
                     }
                     if (sideSum.lengthSq() < 1e-8) {
                         sideSum.copy(referenceSide);
@@ -299,36 +286,29 @@ export function buildBuildings(
                     sideSum.normalize();
 
                     // 保持截面宽度方向与实际带面法线正交。
-                    sideSum.addScaledVector(
-                        normal,
-                        -sideSum.dot(normal)
-                    );
+                    sideSum.addScaledVector(normal, -sideSum.dot(normal));
                     if (sideSum.lengthSq() < 1e-8) {
                         sideSum.copy(referenceSide);
-                        sideSum.addScaledVector(
-                            normal,
-                            -sideSum.dot(normal)
-                        );
+                        sideSum.addScaledVector(normal, -sideSum.dot(normal));
                     }
                     sideSum.normalize();
 
                     const sideProjections = incidentFrames.map((frame) =>
                         Math.abs(sideSum.dot(frame.side))
                     );
-                    const denom = Math.max(
-                        0.25,
-                        Math.min(...sideProjections)
-                    );
+                    const denom = Math.max(0.25, Math.min(...sideProjections));
                     const miterLength = Math.min(
                         halfWidth / denom,
                         halfWidth * miterLimit
                     );
                     const sideOffset = sideSum.multiplyScalar(miterLength);
                     // 再正交化一次，确保 0.05 厚度沿节点局部带面法线挤出。
-                    normal.addScaledVector(
-                        sideSum,
-                        -normal.dot(sideSum) / sideSum.lengthSq()
-                    ).normalize();
+                    normal
+                        .addScaledVector(
+                            sideSum,
+                            -normal.dot(sideSum) / sideSum.lengthSq()
+                        )
+                        .normalize();
 
                     nodeFrames.set(nodeId, { sideOffset, normal });
                 }
@@ -398,7 +378,6 @@ export function buildBuildings(
                     return side.normalize().multiplyScalar(halfWidth);
                 };
 
-
                 for (const edge of links) {
                     const startFrame = nodeFrames.get(edge.source);
                     const endFrame = nodeFrames.get(edge.target);
@@ -417,35 +396,22 @@ export function buildBuildings(
                         endFrame
                     );
 
-                    const startLeft = edge.start.clone().add(
-                        startSideOffset
-                    );
-                    const startRight = edge.start.clone().sub(
-                        startSideOffset
-                    );
-                    const endLeft = edge.end.clone().add(
-                        endSideOffset
-                    );
-                    const endRight = edge.end.clone().sub(
-                        endSideOffset
-                    );
-                    const startTopLeft = startLeft.clone().addScaledVector(
-                        startFrame.normal,
-                        linkThickness
-                    );
-                    const startTopRight = startRight.clone().addScaledVector(
-                        startFrame.normal,
-                        linkThickness
-                    );
-                    const endTopLeft = endLeft.clone().addScaledVector(
-                        endFrame.normal,
-                        linkThickness
-                    );
-                    const endTopRight = endRight.clone().addScaledVector(
-                        endFrame.normal,
-                        linkThickness
-                    );
-
+                    const startLeft = edge.start.clone().add(startSideOffset);
+                    const startRight = edge.start.clone().sub(startSideOffset);
+                    const endLeft = edge.end.clone().add(endSideOffset);
+                    const endRight = edge.end.clone().sub(endSideOffset);
+                    const startTopLeft = startLeft
+                        .clone()
+                        .addScaledVector(startFrame.normal, linkThickness);
+                    const startTopRight = startRight
+                        .clone()
+                        .addScaledVector(startFrame.normal, linkThickness);
+                    const endTopLeft = endLeft
+                        .clone()
+                        .addScaledVector(endFrame.normal, linkThickness);
+                    const endTopRight = endRight
+                        .clone()
+                        .addScaledVector(endFrame.normal, linkThickness);
 
                     // 顶面
                     addQuad(
@@ -484,160 +450,157 @@ export function buildBuildings(
                         edge.color,
                         true
                     );
-
                 }
 
                 // ============================================================
-// 多分支交会节点补面
-//
-// 关键修复：
-// 1. 交会面边界直接复用带段实际端点。
-// 2. 顶面边界使用各带段自己的端点法线。
-// 3. 不再生成交会面外围侧壁，避免与带段端面重叠。
-// ============================================================
+                // 多分支交会节点补面
+                //
+                // 关键修复：
+                // 1. 交会面边界直接复用带段实际端点。
+                // 2. 顶面边界使用各带段自己的端点法线。
+                // 3. 不再生成交会面外围侧壁，避免与带段端面重叠。
+                // ============================================================
 
-type JunctionBoundaryPoint = {
-    bottom: Vector3;
-    top: Vector3;
-    angle: number;
-};
+                type JunctionBoundaryPoint = {
+                    bottom: Vector3;
+                    top: Vector3;
+                    angle: number;
+                };
 
-for (const [nodeId, nodeFrame] of nodeFrames) {
-    const ins = incoming.get(nodeId) ?? [];
-    const outs = outgoing.get(nodeId) ?? [];
+                for (const [nodeId, nodeFrame] of nodeFrames) {
+                    const ins = incoming.get(nodeId) ?? [];
+                    const outs = outgoing.get(nodeId) ?? [];
 
-    const degree = ins.length + outs.length;
+                    const degree = ins.length + outs.length;
 
-    if (degree < 3) continue;
+                    if (degree < 3) continue;
 
-    const center = new Vector3().setFromMatrixPosition(
-        transforms[nodeId][0]
-    );
+                    const center = new Vector3().setFromMatrixPosition(
+                        transforms[nodeId][0]
+                    );
 
-    const normal = nodeFrame.normal.clone().normalize();
+                    const normal = nodeFrame.normal.clone().normalize();
 
-    // 交会面内的二维坐标系。
-    const axisX = nodeFrame.sideOffset.clone().normalize();
+                    // 交会面内的二维坐标系。
+                    const axisX = nodeFrame.sideOffset.clone().normalize();
 
-    const axisY = new Vector3()
-        .crossVectors(normal, axisX)
-        .normalize();
+                    const axisY = new Vector3()
+                        .crossVectors(normal, axisX)
+                        .normalize();
 
-    const boundary: JunctionBoundaryPoint[] = [];
+                    const boundary: JunctionBoundaryPoint[] = [];
 
-    const addBoundary = (
-        edge: BeltLink,
-        frame: EndpointFrame,
-        isStart: boolean
-    ) => {
-        const endpoint = isStart ? edge.start : edge.end;
+                    const addBoundary = (
+                        edge: BeltLink,
+                        frame: EndpointFrame,
+                        isStart: boolean
+                    ) => {
+                        const endpoint = isStart ? edge.start : edge.end;
 
-        // 与普通带段完全共用同一套截面计算。
-        const sideOffset = getEdgeSideOffset(
-            nodeId,
-            frame,
-            nodeFrame
-        );
+                        // 与普通带段完全共用同一套截面计算。
+                        const sideOffset = getEdgeSideOffset(
+                            nodeId,
+                            frame,
+                            nodeFrame
+                        );
 
-        const left = endpoint.clone().add(sideOffset);
-        const right = endpoint.clone().sub(sideOffset);
+                        const left = endpoint.clone().add(sideOffset);
+                        const right = endpoint.clone().sub(sideOffset);
 
-        // 这里使用带段自身的端点法线。
-        // 必须与普通带段生成顶面的计算方式一致。
-        const leftTop = left.clone().addScaledVector(
-            frame.normal,
-            linkThickness
-        );
+                        // 这里使用带段自身的端点法线。
+                        // 必须与普通带段生成顶面的计算方式一致。
+                        const leftTop = left
+                            .clone()
+                            .addScaledVector(frame.normal, linkThickness);
 
-        const rightTop = right.clone().addScaledVector(
-            frame.normal,
-            linkThickness
-        );
+                        const rightTop = right
+                            .clone()
+                            .addScaledVector(frame.normal, linkThickness);
 
-        const leftDir = left.clone().sub(center);
-        const rightDir = right.clone().sub(center);
+                        const leftDir = left.clone().sub(center);
+                        const rightDir = right.clone().sub(center);
 
-        boundary.push({
-            bottom: left,
-            top: leftTop,
-            angle: Math.atan2(
-                leftDir.dot(axisY),
-                leftDir.dot(axisX)
-            ),
-        });
+                        boundary.push({
+                            bottom: left,
+                            top: leftTop,
+                            angle: Math.atan2(
+                                leftDir.dot(axisY),
+                                leftDir.dot(axisX)
+                            ),
+                        });
 
-        boundary.push({
-            bottom: right,
-            top: rightTop,
-            angle: Math.atan2(
-                rightDir.dot(axisY),
-                rightDir.dot(axisX)
-            ),
-        });
-    };
+                        boundary.push({
+                            bottom: right,
+                            top: rightTop,
+                            angle: Math.atan2(
+                                rightDir.dot(axisY),
+                                rightDir.dot(axisX)
+                            ),
+                        });
+                    };
 
-    for (const edge of ins) {
-        addBoundary(edge, edge.endFrame, false);
-    }
+                    for (const edge of ins) {
+                        addBoundary(edge, edge.endFrame, false);
+                    }
 
-    for (const edge of outs) {
-        addBoundary(edge, edge.startFrame, true);
-    }
+                    for (const edge of outs) {
+                        addBoundary(edge, edge.startFrame, true);
+                    }
 
-    // 统一按照节点中心的极角排序。
-    boundary.sort((a, b) => a.angle - b.angle);
+                    // 统一按照节点中心的极角排序。
+                    boundary.sort((a, b) => a.angle - b.angle);
 
-    // 去除重合点时，必须同时保留对应的顶面和底面顶点。
-    const uniqueBoundary: JunctionBoundaryPoint[] = [];
+                    // 去除重合点时，必须同时保留对应的顶面和底面顶点。
+                    const uniqueBoundary: JunctionBoundaryPoint[] = [];
 
-    for (const point of boundary) {
-        const duplicated = uniqueBoundary.some(
-            (other) =>
-                other.bottom.distanceToSquared(point.bottom) < 1e-8
-        );
+                    for (const point of boundary) {
+                        const duplicated = uniqueBoundary.some(
+                            (other) =>
+                                other.bottom.distanceToSquared(point.bottom) <
+                                1e-8
+                        );
 
-        if (!duplicated) {
-            uniqueBoundary.push(point);
-        }
-    }
+                        if (!duplicated) {
+                            uniqueBoundary.push(point);
+                        }
+                    }
 
-    if (uniqueBoundary.length < 3) continue;
+                    if (uniqueBoundary.length < 3) continue;
 
-    // 交会区域中心。
-    // 底面和顶面中心分别使用节点实际带面法线。
-    const bottomCenter = center.clone();
+                    // 交会区域中心。
+                    // 底面和顶面中心分别使用节点实际带面法线。
+                    const bottomCenter = center.clone();
 
-    const topCenter = center.clone().addScaledVector(
-        normal,
-        linkThickness
-    );
+                    const topCenter = center
+                        .clone()
+                        .addScaledVector(normal, linkThickness);
 
-    const color = (ins[0] ?? outs[0]).color;
+                    const color = (ins[0] ?? outs[0]).color;
 
-    // 顶面：边界顶点与普通带段端点完全一致。
-    for (let i = 0; i < uniqueBoundary.length; i++) {
-        const next = (i + 1) % uniqueBoundary.length;
+                    // 顶面：边界顶点与普通带段端点完全一致。
+                    for (let i = 0; i < uniqueBoundary.length; i++) {
+                        const next = (i + 1) % uniqueBoundary.length;
 
-        addTriangle(
-            topCenter,
-            uniqueBoundary[i].top,
-            uniqueBoundary[next].top,
-            color
-        );
-    }
+                        addTriangle(
+                            topCenter,
+                            uniqueBoundary[i].top,
+                            uniqueBoundary[next].top,
+                            color
+                        );
+                    }
 
-    // 底面。
-    for (let i = 0; i < uniqueBoundary.length; i++) {
-        const next = (i + 1) % uniqueBoundary.length;
+                    // 底面。
+                    for (let i = 0; i < uniqueBoundary.length; i++) {
+                        const next = (i + 1) % uniqueBoundary.length;
 
-        addTriangle(
-            bottomCenter,
-            uniqueBoundary[next].bottom,
-            uniqueBoundary[i].bottom,
-            color
-        );
-    }
-}
+                        addTriangle(
+                            bottomCenter,
+                            uniqueBoundary[next].bottom,
+                            uniqueBoundary[i].bottom,
+                            color
+                        );
+                    }
+                }
 
                 const geometry = new BufferGeometry();
                 geometry.setAttribute(
@@ -661,90 +624,64 @@ for (const [nodeId, nodeFrame] of nodeFrames) {
     };
 
     // 分拣器
-// 分拣器
-const buildInserters = (inserters: BlueprintBuilding[]) => {
-    /** 横梁在 INSERTER_HEIGHT 之上再抬高 */
-    const BEAM_EXTRA_LIFT = 0.1;
+    // 分拣器
+    const buildInserters = (inserters: BlueprintBuilding[]) => {
+        /** 横梁在 INSERTER_HEIGHT 之上再抬高 */
+        const BEAM_EXTRA_LIFT = 0.1;
 
-    /** 货物相对基础姿态下移 */
-    const CARGO_DROP = 0.1;
+        /** 货物相对基础姿态下移 */
+        const CARGO_DROP = 0.1;
 
-    /** 货物末端淡出宽度，占整个运输行程的比例 */
-    const CARGO_FADE = 0.15;
+        /** 货物末端淡出宽度，占整个运输行程的比例 */
+        const CARGO_FADE = 0.15;
 
-    const mesh = new Inserters(inserters.length);
+        const mesh = new Inserters(inserters.length);
 
-    const offset = new Matrix4().makeTranslation(0, 0, -0.5);
-    const temp = new Matrix4();
-    const trans = new Matrix4();
-    const cargoTrans = new Matrix4();
+        const offset = new Matrix4().makeTranslation(0, 0, -0.5);
+        const temp = new Matrix4();
+        const trans = new Matrix4();
+        const cargoTrans = new Matrix4();
 
-    for (let i = 0; i < inserters.length; i++) {
-        const b = inserters[i];
+        for (let i = 0; i < inserters.length; i++) {
+            const b = inserters[i];
 
-        // 获取分拣器基础姿态与横梁长度
-        const len = inserterTrans(
-            transforms[b.index],
-            trans
-        );
+            // 获取分拣器基础姿态与横梁长度
+            const len = inserterTrans(transforms[b.index], trans);
 
-        // ① 货物：使用基础姿态，避免横梁缩放污染货物矩阵
-        cargoTrans.copy(trans);
+            // ① 货物：使用基础姿态，避免横梁缩放污染货物矩阵
+            cargoTrans.copy(trans);
 
-        // 货物沿横梁方向移动，保持原有下移量
-        cargoTrans.multiply(
-            temp.makeTranslation(
-                0,
-                -CARGO_DROP,
-                0
-            )
-        );
+            // 货物沿横梁方向移动，保持原有下移量
+            cargoTrans.multiply(temp.makeTranslation(0, -CARGO_DROP, 0));
 
-        // 货物使用独立颜色，并设置末端淡出宽度
-        // addCargo 需要增加第四个 fade 参数
-        addCargo(
-            cargoTrans,
-            CARGO_COLOR,
-            len,
-            CARGO_FADE
-        );
+            // 货物使用独立颜色，并设置末端淡出宽度
+            // addCargo 需要增加第四个 fade 参数
+            addCargo(cargoTrans, CARGO_COLOR, len, CARGO_FADE);
 
-        // ② 横梁：基础姿态抬高 + 缩放 + 前推半梁长
-        trans.multiply(
-            temp.makeTranslation(
-                0,
-                BEAM_EXTRA_LIFT,
-                0
-            )
-        );
+            // ② 横梁：基础姿态抬高 + 缩放 + 前推半梁长
+            trans.multiply(temp.makeTranslation(0, BEAM_EXTRA_LIFT, 0));
 
-        trans.multiply(
-            temp.makeScale(
-                1,
-                1,
-                len
-            )
-        );
+            trans.multiply(temp.makeScale(1, 1, len));
 
-        trans.multiply(offset);
+            trans.multiply(offset);
 
-        mesh.setMatrixAt(i, trans);
-        mesh.setColorAt(i, colorOf(b.modelIndex));
+            mesh.setMatrixAt(i, trans);
+            mesh.setColorAt(i, colorOf(b.modelIndex));
 
-        modelRef[b.index] = {
-            mesh,
-            instance: i,
-        };
-    }
+            modelRef[b.index] = {
+                mesh,
+                instance: i,
+            };
+        }
 
-    mesh.instanceMatrix.needsUpdate = true;
+        mesh.instanceMatrix.needsUpdate = true;
 
-    if (mesh.instanceColor !== null) {
-        mesh.instanceColor.needsUpdate = true;
-    }
+        if (mesh.instanceColor !== null) {
+            mesh.instanceColor.needsUpdate = true;
+        }
 
-    return mesh;
-};
+        return mesh;
+    };
 
     // 建筑分类：带子 / 分拣器 / 其余（元数据盒或 GLB）
     const belts = buildings.filter((b) => isBelt(b.itemId));
@@ -758,21 +695,20 @@ const buildInserters = (inserters: BlueprintBuilding[]) => {
     const cargosMesh = new Cargos(belts.length + inserters.length);
     let numCargos = 0;
     const addCargo = (
-    trans: Matrix4,
-    color: Color,
-    distance: number,
-    fade = 0
-) => {
-    cargosMesh.setMatrixAt(numCargos, trans);
-    cargosMesh.setColorAt(numCargos, color);
-    cargosMesh.setCargoDistanceAt(numCargos, distance);
+        trans: Matrix4,
+        color: Color,
+        distance: number,
+        fade = 0
+    ) => {
+        cargosMesh.setMatrixAt(numCargos, trans);
+        cargosMesh.setColorAt(numCargos, color);
+        cargosMesh.setCargoDistanceAt(numCargos, distance);
 
-    // 设置货物淡出宽度
-    (cargosMesh.geometry.cargoFade.array as Float32Array)[numCargos] =
-        fade;
+        // 设置货物淡出宽度
+        (cargosMesh.geometry.cargoFade.array as Float32Array)[numCargos] = fade;
 
-    numCargos++;
-};
+        numCargos++;
+    };
 
     // 其他建筑（元数据盒或 GLB）
     const buildBoxes = (boxes: BlueprintBuilding[]) => {
@@ -826,7 +762,7 @@ const buildInserters = (inserters: BlueprintBuilding[]) => {
             const withinLimit =
                 r !== null &&
                 (glbInstanceCounts.get(r.modelIndex) ?? 0) <=
-                settings.maxInstancesPerModel;
+                    settings.maxInstancesPerModel;
             if (
                 settings.showRealModels &&
                 withinLimit &&
@@ -1038,10 +974,8 @@ const buildInserters = (inserters: BlueprintBuilding[]) => {
     // 图标排序器
     const iconInserters = inserters.filter((b) => b.filterId > 0);
 
-
     const meshes: Object3D[] = [];
     const built = buildBoxes(boxes);
-
 
     if (belts.length) meshes.push(...buildBelts(belts));
 
