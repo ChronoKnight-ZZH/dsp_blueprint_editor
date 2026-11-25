@@ -120,6 +120,7 @@ export function buildBuildings(
     // 传入完整贴图设置，避免依赖 glbLoader 的全局 provider（Viewer 场景下没有注入）。
     if (options.reapplyMaterials !== false)
         reapplyLoadedModelMaterials(options.textureSettings);
+    
     // 传送带
     const buildBelts = (belts: BlueprintBuilding[]) => {
         // 端点圆柱属于传送带节点装饰，保留原有尺寸；linkThickness 才是带状网格的挤出厚度。
@@ -127,7 +128,7 @@ export function buildBuildings(
         const material = new MeshLambertMaterial();
         const objects: Object3D[] = [];
         {
-            const geometry = new CylinderGeometry(0.32, 0.32, thickness, 8);
+            const geometry = new CylinderGeometry(0.24, 0.24, thickness, 6);
             const mesh = new InstancedMesh(geometry, material, belts.length);
             const offset = new Matrix4().makeRotationX(Math.PI / 2);
             offset.premultiply(
@@ -152,6 +153,7 @@ export function buildBuildings(
             // 带宽 0.7（halfWidth 为半宽）。每个连接节点共用同一截面，
             // 并从节点 Matrix4 读取实际带面朝向，包含 planet.ts 中应用的 roll。
             const halfWidth = 0.35;
+            const beltSurfaceColor = new Color(0x4a4744);
             const miterLimit = 4;
             const p1 = new Vector3();
             const p2 = new Vector3();
@@ -370,6 +372,129 @@ export function buildBuildings(
                     }
                 };
 
+                // ============================================================
+                // 双侧类型色边框：低矮、窄幅，明确传送带边缘但不再形成高护栏。
+                // 边框颜色继承当前传送带类型色，T 字节点附近仍会收短避让。
+                // ============================================================
+                const railPositions: number[] = [];
+                const railColors: number[] = [];
+                const railWidth = 0.035;
+                const railHeight = 0.026;
+                const railSurfaceLift = 0.0015;
+                const junctionRailInset = 0.16;
+
+                type RailSection = {
+                    innerBottom: Vector3;
+                    outerBottom: Vector3;
+                    innerTop: Vector3;
+                    outerTop: Vector3;
+                };
+
+                const addRailTriangle = (
+                    a: Vector3,
+                    b: Vector3,
+                    c: Vector3,
+                    color: Color
+                ) => {
+                    railPositions.push(
+                        a.x, a.y, a.z,
+                        b.x, b.y, b.z,
+                        c.x, c.y, c.z
+                    );
+                    for (let i = 0; i < 3; i++) {
+                        railColors.push(color.r, color.g, color.b);
+                    }
+                };
+
+                const addRailQuad = (
+                    a: Vector3,
+                    b: Vector3,
+                    c: Vector3,
+                    d: Vector3,
+                    color: Color
+                ) => {
+                    addRailTriangle(a, b, c, color);
+                    addRailTriangle(a, c, d, color);
+                };
+
+                const makeRailSection = (
+                    base: Vector3,
+                    normal: Vector3,
+                    outward: Vector3
+                ): RailSection => {
+                    const innerBottom = base
+                        .clone()
+                        .addScaledVector(normal, railSurfaceLift);
+                    const outerBottom = innerBottom
+                        .clone()
+                        .addScaledVector(outward, railWidth);
+                    const innerTop = innerBottom
+                        .clone()
+                        .addScaledVector(normal, railHeight);
+                    const outerTop = outerBottom
+                        .clone()
+                        .addScaledVector(normal, railHeight);
+
+                    return { innerBottom, outerBottom, innerTop, outerTop };
+                };
+
+                const lerpRailSection = (
+                    a: RailSection,
+                    b: RailSection,
+                    t: number
+                ): RailSection => ({
+                    innerBottom: a.innerBottom.clone().lerp(b.innerBottom, t),
+                    outerBottom: a.outerBottom.clone().lerp(b.outerBottom, t),
+                    innerTop: a.innerTop.clone().lerp(b.innerTop, t),
+                    outerTop: a.outerTop.clone().lerp(b.outerTop, t),
+                });
+
+                const addGuardRail = (
+                    startBase: Vector3,
+                    endBase: Vector3,
+                    startNormal: Vector3,
+                    endNormal: Vector3,
+                    startOutward: Vector3,
+                    endOutward: Vector3,
+                    startTrim: number,
+                    endTrim: number,
+                    edgeLength: number,
+                    color: Color
+                ) => {
+                    if (edgeLength < 1e-6) return;
+
+                    const startSection = makeRailSection(
+                        startBase,
+                        startNormal,
+                        startOutward
+                    );
+                    const endSection = makeRailSection(
+                        endBase,
+                        endNormal,
+                        endOutward
+                    );
+
+                    // 在 T 字/多分支节点附近收短护栏，并封闭收口端面。
+                    const tStart = Math.min(0.2, startTrim / edgeLength);
+                    const tEnd = Math.max(0.8, 1 - endTrim / edgeLength);
+                    if (tStart >= tEnd) return;
+
+                    const a = lerpRailSection(startSection, endSection, tStart);
+                    const b = lerpRailSection(startSection, endSection, tEnd);
+
+                    // 顶面、内外侧壁、首尾端盖和底面，构成闭合的金属护栏截面。
+                    addRailQuad(a.innerTop, b.innerTop, b.outerTop, a.outerTop, color);
+                    addRailQuad(a.innerBottom, b.innerBottom, b.innerTop, a.innerTop, color);
+                    addRailQuad(a.outerBottom, a.outerTop, b.outerTop, b.outerBottom, color);
+                    addRailQuad(a.innerBottom, a.outerBottom, a.outerTop, a.innerTop, color);
+                    addRailQuad(b.innerBottom, b.innerTop, b.outerTop, b.outerBottom, color);
+                    addRailQuad(a.innerBottom, b.innerBottom, b.outerBottom, a.outerBottom, color);
+                };
+
+                const getNodeDegree = (nodeId: number) =>
+                    (incoming.get(nodeId)?.length ?? 0) +
+                    (outgoing.get(nodeId)?.length ?? 0);
+
                 const getEdgeSideOffset = (
                     nodeId: number,
                     frame: EndpointFrame,
@@ -402,6 +527,37 @@ export function buildBuildings(
                     return side.normalize().multiplyScalar(halfWidth);
                 };
 
+                // ============================================================
+                // 深灰色带面上的类型色边缘线 + 运输方向箭头
+                // 横向凸棱已移除，避免带面产生地毯/踏板感；改为清晰的双侧窄边框。
+                // ============================================================
+                const surfacePositions: number[] = [];
+                const surfaceColors: number[] = [];
+                const arrowLighten = new Color(0xc8d0c8);
+
+                const addSurfaceTriangle = (
+                    a: Vector3,
+                    b: Vector3,
+                    c: Vector3,
+                    color: Color
+                ) => {
+                    for (const vertex of [a, b, c]) {
+                        surfacePositions.push(vertex.x, vertex.y, vertex.z);
+                        surfaceColors.push(color.r, color.g, color.b);
+                    }
+                };
+
+                const addSurfaceQuad = (
+                    a: Vector3,
+                    b: Vector3,
+                    c: Vector3,
+                    d: Vector3,
+                    color: Color
+                ) => {
+                    addSurfaceTriangle(a, b, c, color);
+                    addSurfaceTriangle(a, c, d, color);
+                };
+
                 for (const edge of links) {
                     const startFrame = nodeFrames.get(edge.source);
                     const endFrame = nodeFrames.get(edge.target);
@@ -420,6 +576,119 @@ export function buildBuildings(
                         endFrame
                     );
 
+                    const surfaceEdgeLength = edge.start.distanceTo(edge.end);
+
+                    // 在带段任意位置采样带面中心、宽度方向和实际法线。
+                    // 使用节点已计算好的截面偏移，确保纹理贴合 Miter 转角与 roll。
+                    const sampleSurface = (distance: number, halfSpan: number) => {
+                        const t = Math.max(0, Math.min(1, distance / surfaceEdgeLength));
+                        const center = edge.start.clone().lerp(edge.end, t);
+                        const normal = edge.startFrame.normal
+                            .clone()
+                            .lerp(edge.endFrame.normal, t);
+                        if (normal.lengthSq() < 1e-8) {
+                            normal.copy(edge.startFrame.normal);
+                        }
+                        normal.normalize();
+
+                        const side = startSideOffset
+                            .clone()
+                            .lerp(endSideOffset, t);
+                        side.addScaledVector(normal, -side.dot(normal));
+                        if (side.lengthSq() < 1e-8) {
+                            side.copy(edge.startFrame.side);
+                            side.addScaledVector(normal, -side.dot(normal));
+                        }
+                        side.normalize().multiplyScalar(halfSpan);
+                        return { center, normal, side };
+                    };
+
+                    // 顶面两侧各铺一条窄类型色饰边，形成图示中的彩色轮廓线。
+                    const borderStartInset = getNodeDegree(edge.source) >= 3 ? 0.22 : 0.015;
+                    const borderEndInset = getNodeDegree(edge.target) >= 3 ? 0.22 : 0.015;
+                    const borderLength = surfaceEdgeLength - borderStartInset - borderEndInset;
+                    const borderOuterSpan = halfWidth - 0.006;
+                    const borderInnerSpan = halfWidth - 0.034;
+                    const borderLift = 0.003;
+
+                    if (borderLength > 0.04) {
+                        const aOuter = sampleSurface(borderStartInset, borderOuterSpan);
+                        const aInner = sampleSurface(borderStartInset, borderInnerSpan);
+                        const bOuter = sampleSurface(surfaceEdgeLength - borderEndInset, borderOuterSpan);
+                        const bInner = sampleSurface(surfaceEdgeLength - borderEndInset, borderInnerSpan);
+
+                        const liftPoint = (frame: typeof aOuter, sign: number) =>
+                            frame.center
+                                .clone()
+                                .addScaledVector(frame.side.clone().normalize(), sign * frame.side.length())
+                                .addScaledVector(frame.normal, linkThickness + borderLift);
+
+                        // +side 一侧
+                        addSurfaceQuad(
+                            liftPoint(aInner, 1),
+                            liftPoint(bInner, 1),
+                            liftPoint(bOuter, 1),
+                            liftPoint(aOuter, 1),
+                            edge.color
+                        );
+                        // -side 一侧
+                        addSurfaceQuad(
+                            liftPoint(aOuter, -1),
+                            liftPoint(bOuter, -1),
+                            liftPoint(bInner, -1),
+                            liftPoint(aInner, -1),
+                            edge.color
+                        );
+                    }
+
+                    // 方向箭头沿 edge.start -> edge.end 排列。
+                    // 短模块尽量放一个居中箭头，长模块则按约 1.6 单位的节奏重复。
+                    const arrowStartInset = getNodeDegree(edge.source) >= 3 ? 0.28 : 0.18;
+                    const arrowEndInset = getNodeDegree(edge.target) >= 3 ? 0.28 : 0.18;
+                    const arrowAvailable = surfaceEdgeLength - arrowStartInset - arrowEndInset;
+                    if (arrowAvailable >= 0.42) {
+                        const arrowSpacing = 1.6;
+                        const arrowCount = Math.max(1, Math.round(arrowAvailable / arrowSpacing));
+                        const arrowHalfWidth = 0.072;
+                        const arrowLift = 0.006;
+                        const arrowTint = edge.color.clone().lerp(arrowLighten, 0.48);
+                        const arrowShape: Array<[number, number]> = [
+                            [0.112, 0],
+                            [0.018, 0.072],
+                            [0.018, 0.026],
+                            [-0.102, 0.026],
+                            [-0.102, -0.026],
+                            [0.018, -0.026],
+                            [0.018, -0.072],
+                        ];
+
+                        for (let i = 0; i < arrowCount; i++) {
+                            const distance = arrowStartInset +
+                                ((i + 0.5) / arrowCount) * arrowAvailable;
+                            const frame = sampleSurface(distance, arrowHalfWidth);
+                            const arrowCenter = frame.center
+                                .clone()
+                                .addScaledVector(frame.normal, linkThickness + arrowLift);
+                            const arrowVertices = arrowShape.map(([forward, lateral]) =>
+                                arrowCenter
+                                    .clone()
+                                    .addScaledVector(edge.tangent, forward)
+                                    .addScaledVector(frame.side.clone().normalize(), lateral)
+                            );
+
+                            // 三角扇填充箭头轮廓，尖端始终朝向输出节点。
+                            for (let j = 0; j < arrowVertices.length; j++) {
+                                const next = (j + 1) % arrowVertices.length;
+                                addSurfaceTriangle(
+                                    arrowCenter,
+                                    arrowVertices[j],
+                                    arrowVertices[next],
+                                    arrowTint
+                                );
+                            }
+                        }
+                    }
+
                     const startLeft = edge.start.clone().add(startSideOffset);
                     const startRight = edge.start.clone().sub(startSideOffset);
                     const endLeft = edge.end.clone().add(endSideOffset);
@@ -437,13 +706,50 @@ export function buildBuildings(
                         .clone()
                         .addScaledVector(endFrame.normal, linkThickness);
 
+                    // 护栏内侧贴合带面边缘，向带面外侧延伸，不侵占有效运输宽度。
+                    // 多分支节点收短 0.16，避免 T 字中心出现护栏交叉和重叠。
+                    const edgeLength = edge.start.distanceTo(edge.end);
+                    const startTrim = getNodeDegree(edge.source) >= 3
+                        ? Math.min(junctionRailInset, edgeLength * 0.2)
+                        : 0;
+                    const endTrim = getNodeDegree(edge.target) >= 3
+                        ? Math.min(junctionRailInset, edgeLength * 0.2)
+                        : 0;
+                    const startOutward = startSideOffset.clone().normalize();
+                    const endOutward = endSideOffset.clone().normalize();
+
+                    addGuardRail(
+                        startTopLeft,
+                        endTopLeft,
+                        startFrame.normal,
+                        endFrame.normal,
+                        startOutward,
+                        endOutward,
+                        startTrim,
+                        endTrim,
+                        edgeLength,
+                        edge.color
+                    );
+                    addGuardRail(
+                        startTopRight,
+                        endTopRight,
+                        startFrame.normal,
+                        endFrame.normal,
+                        startOutward.clone().negate(),
+                        endOutward.clone().negate(),
+                        startTrim,
+                        endTrim,
+                        edgeLength,
+                        edge.color
+                    );
+
                     // 顶面
                     addQuad(
                         startTopLeft,
                         endTopLeft,
                         endTopRight,
                         startTopRight,
-                        edge.color
+                        beltSurfaceColor
                     );
 
                     // 底面
@@ -452,7 +758,7 @@ export function buildBuildings(
                         endLeft,
                         endRight,
                         startRight,
-                        edge.color,
+                        beltSurfaceColor,
                         true
                     );
 
@@ -462,7 +768,7 @@ export function buildBuildings(
                         endLeft,
                         endTopLeft,
                         startTopLeft,
-                        edge.color
+                        beltSurfaceColor
                     );
 
                     // 右侧面
@@ -471,7 +777,7 @@ export function buildBuildings(
                         endRight,
                         endTopRight,
                         startTopRight,
-                        edge.color,
+                        beltSurfaceColor,
                         true
                     );
                 }
@@ -599,7 +905,7 @@ export function buildBuildings(
                         .clone()
                         .addScaledVector(normal, linkThickness);
 
-                    const color = (ins[0] ?? outs[0]).color;
+                    const color = beltSurfaceColor;
 
                     // 顶面：边界顶点与普通带段端点完全一致。
                     for (let i = 0; i < uniqueBoundary.length; i++) {
@@ -642,6 +948,45 @@ export function buildBuildings(
                 });
                 const ribbonMesh = new Mesh(geometry, ribbonMaterial);
                 objects.push(ribbonMesh);
+
+                // 类型色边框单独成批，避免影响深灰带面和连接补面。
+                if (railPositions.length > 0) {
+                    const railGeometry = new BufferGeometry();
+                    railGeometry.setAttribute(
+                        "position",
+                        new Float32BufferAttribute(railPositions, 3)
+                    );
+                    railGeometry.setAttribute(
+                        "color",
+                        new Float32BufferAttribute(railColors, 3)
+                    );
+                    railGeometry.computeVertexNormals();
+                    const railMaterial = new MeshLambertMaterial({
+                        vertexColors: true,
+                        side: DoubleSide,
+                    });
+                    const railMesh = new Mesh(railGeometry, railMaterial);
+                    objects.push(railMesh);
+                }
+
+                // 类型色边缘线与方向箭头共用一份独立顶面装饰网格。
+                if (surfacePositions.length > 0) {
+                    const surfaceGeometry = new BufferGeometry();
+                    surfaceGeometry.setAttribute(
+                        "position",
+                        new Float32BufferAttribute(surfacePositions, 3)
+                    );
+                    surfaceGeometry.setAttribute(
+                        "color",
+                        new Float32BufferAttribute(surfaceColors, 3)
+                    );
+                    surfaceGeometry.computeVertexNormals();
+                    const surfaceMaterial = new MeshLambertMaterial({
+                        vertexColors: true,
+                        side: DoubleSide,
+                    });
+                    objects.push(new Mesh(surfaceGeometry, surfaceMaterial));
+                }
             }
         }
         return objects;
