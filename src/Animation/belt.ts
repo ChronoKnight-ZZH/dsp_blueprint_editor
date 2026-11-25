@@ -7,7 +7,7 @@ import {
 } from "three";
 import type { WebGLProgramParametersWithUniforms } from "three";
 import { GRID_HORIZONTAL } from "@/planet/planetConstants";
-import { CARGO_SIZE } from "./cargos";
+import { CARGO_LIFT_ABOVE_SURFACE } from "./cargos";
 
 /**
  * 传送带条带（Belt）。
@@ -143,18 +143,15 @@ export interface BeltArcParams {
 /** 箭头颜色（方案 §10.2-Q4）；只经 `uArrowColor` uniform 生效，不参与元数据色相乘 */
 export const BELT_ARROW_COLOR = new Color(0x9aa0a6);
 
-/** 货物底面与条带顶面之间的视觉间隙（世界单位），与分拣器横梁/货物的 0.02 同语义 */
-const CARGO_GAP = 0.02;
-
 /**
  * 传送带货物的中心抬升（世界单位，沿法线）。
  *
  * 由方案 §9.1-D-3 反推：货物底面 = 条带顶面 + `CARGO_GAP`，即
- * `BELT_LIFT + BELT_HEIGHT/2 + CARGO_SIZE/2 + CARGO_GAP` = 0.25。
- * 货物几何本身不缩放，因此这个常量必须等于「立方体半高 + 条带顶面 + 间隙」。
+ * `BELT_LIFT + BELT_HEIGHT/2 + CARGO_LIFT_ABOVE_SURFACE` = 0.25。
+ * 「货半高 + 间隙」由 `cargos.ts` 单点定义，这里不再各写一份。
  */
 export const CARGO_LIFT =
-    BELT_LIFT + BELT_HEIGHT / 2 + CARGO_SIZE / 2 + CARGO_GAP;
+    BELT_LIFT + BELT_HEIGHT / 2 + CARGO_LIFT_ABOVE_SURFACE;
 
 /**
  * 垂直段（riser）板心的基础抬升 = `BELT_LIFT`（世界单位）。
@@ -174,7 +171,8 @@ export const BELT_RISER_BASE = BELT_LIFT;
  * 垂直段的板面法线是**水平**的（板是竖起来的一根），所以货物不能像水平条带那样沿
  * 局部 +y 抬 `CARGO_LIFT`（那会横着飘出板外 0.25），只能用这个侧向偏移贴在板外侧。
  */
-export const RISER_CARGO_SIDE = BELT_HEIGHT / 2 + CARGO_SIZE / 2 + CARGO_GAP;
+export const RISER_CARGO_SIDE =
+    BELT_HEIGHT / 2 + CARGO_LIFT_ABOVE_SURFACE;
 
 /**
  * 注入版本号；改了注入逻辑必须同步改它，否则 three 会复用旧 program（方案 §6.5-GL6）。

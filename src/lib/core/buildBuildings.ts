@@ -18,7 +18,11 @@ import { IconTexture } from "@/icon/iconTexture";
 import { IconGeometry, Icons } from "@/icon/icons";
 import { IconSubscript } from "@/icon/iconSubscript";
 import type { TextStyle } from "@/icon/iconSubscript";
-import { CARGO_COLOR, Cargos } from "@/Animation/cargos";
+import {
+    CARGO_FADE,
+    CARGO_LIFT_ABOVE_SURFACE,
+    Cargos,
+} from "@/Animation/cargos";
 import { buildingMeta, noIconBuildings } from "@/data/building";
 import { isBelt, isInserter } from "@/data/items";
 import { itemIconId } from "@/data/icons";
@@ -54,6 +58,22 @@ const UNKNOWN_BUILDING_COLOR = new Color(0xdddddd);
 function colorOf(modelIndex: number): Color {
     return buildingMeta.get(modelIndex)?.color ?? UNKNOWN_BUILDING_COLOR;
 }
+
+/**
+ * 条带 ribbon 的挤出厚度（世界单位）：带状网格的顶面 = 节点平面 + 该值。
+ *
+ * 端点圆柱的 `0.1` 是独立的装饰厚度，两者不要混用。
+ */
+const BELT_RIBBON_THICKNESS = 0.05;
+
+/**
+ * 条带货物中心相对节点平面的抬升（沿带面法线）。
+ *
+ * ribbon 顶面（`BELT_RIBBON_THICKNESS`）之上再留「货半高 + 间隙」，那半份由
+ * `cargos.ts` 的 `CARGO_LIFT_ABOVE_SURFACE` 单点定义；旧 `Belts` 的 `CARGO_LIFT`
+ * 是按盒式条带厚度 0.08 反推的，不能直接套用到 ribbon。
+ */
+const BELT_CARGO_LIFT = BELT_RIBBON_THICKNESS + CARGO_LIFT_ABOVE_SURFACE;
 
 export interface BuildBuildingsOptions {
     /** 渲染设置：`showRealModels` / `maxInstancesPerModel` 决定 GLB 与白模的划分 */
@@ -127,17 +147,15 @@ export function buildBuildings(
             objects.push(mesh);
         }
 
-        const linkThickness = 0.05;
+        const linkThickness = BELT_RIBBON_THICKNESS;
         {
-            // 带宽 0.15（halfWidth 为半宽）。每个连接节点共用同一截面，
+            // 带宽 0.7（halfWidth 为半宽）。每个连接节点共用同一截面，
             // 并从节点 Matrix4 读取实际带面朝向，包含 planet.ts 中应用的 roll。
             const halfWidth = 0.35;
             const miterLimit = 4;
             const p1 = new Vector3();
             const p2 = new Vector3();
             const direction = new Vector3();
-            const trans = new Matrix4();
-            const temp = new Matrix4();
             const axisX = new Vector3();
             const axisY = new Vector3();
             const axisZ = new Vector3();
@@ -227,18 +245,24 @@ export function buildBuildings(
                 const inc = incoming.get(edge.target) ?? [];
                 inc.push(edge);
                 incoming.set(edge.target, inc);
+            }
 
-                // 货物仍沿原连接方向生成；up 使用该段起点矩阵的实际带面法线。
-                trans.identity();
-                trans.lookAt(edge.start, edge.end, edge.startFrame.normal);
-                trans.premultiply(
-                    temp.makeTranslation(
-                        edge.start.x,
-                        edge.start.y,
-                        edge.start.z
-                    )
-                );
-                addCargo(trans, edge.color, len);
+            // 连接图收齐后再建货物：淡出必须按端点拓扑决定，不能只看单条边。
+            //
+            // 所有货物共用一个 `cargoMove`，相邻段的货物在节点处是「一件停住、下一件接力」的
+            // 交接关系，所以中段两端都不该缩放；只有链条真的断掉的地方才淡：
+            //   - 起点淡入：该节点没有入边 → 没有前一段货物接班，否则会看到段尾瞬移回段首；
+            //   - 终点淡出：该节点没有出边 → 没有后一段货物接班。
+            for (const edge of links) {
+                cargosMesh.addTrack({
+                    start: edge.start,
+                    end: edge.end,
+                    up: edge.startFrame.normal,
+                    distance: edge.start.distanceTo(edge.end),
+                    fadeIn: incoming.has(edge.source) ? 0 : CARGO_FADE,
+                    fadeOut: outgoing.has(edge.target) ? 0 : CARGO_FADE,
+                    lift: BELT_CARGO_LIFT,
+                });
             }
 
             if (links.length) {
@@ -624,7 +648,6 @@ export function buildBuildings(
     };
 
     // 分拣器
-    // 分拣器
     const buildInserters = (inserters: BlueprintBuilding[]) => {
         /** 横梁在 INSERTER_HEIGHT 之上再抬高 */
         const BEAM_EXTRA_LIFT = 0.1;
@@ -632,8 +655,8 @@ export function buildBuildings(
         /** 货物相对基础姿态下移 */
         const CARGO_DROP = 0.1;
 
-        /** 货物末端淡出宽度，占整个运输行程的比例 */
-        const CARGO_FADE = 0.15;
+        /** 货物末端淡出宽度，占整个运输行程的比例（条带的 0.06 见 `CARGO_FADE`） */
+        const INSERTER_CARGO_FADE = 0.15;
 
         const mesh = new Inserters(inserters.length);
 
@@ -654,9 +677,15 @@ export function buildBuildings(
             // 货物沿横梁方向移动，保持原有下移量
             cargoTrans.multiply(temp.makeTranslation(0, -CARGO_DROP, 0));
 
-            // 货物使用独立颜色，并设置末端淡出宽度
-            // addCargo 需要增加第四个 fade 参数
-            addCargo(cargoTrans, CARGO_COLOR, len, CARGO_FADE);
+            // 货物使用统一米白色（`addTrack` 的默认色），只指定分拣器自己的淡出宽度；
+            // 抬升保持 0 —— 高度预算已经在这个矩阵里。
+            cargosMesh.addTrack({
+                matrix: cargoTrans,
+                distance: len,
+                // 分拣器是单件抓放：抓取点淡入、投放点淡出，两端都给同一个宽度
+                fadeIn: INSERTER_CARGO_FADE,
+                fadeOut: INSERTER_CARGO_FADE,
+            });
 
             // ② 横梁：基础姿态抬高 + 缩放 + 前推半梁长
             trans.multiply(temp.makeTranslation(0, BEAM_EXTRA_LIFT, 0));
@@ -693,22 +722,6 @@ export function buildBuildings(
     const modelRef = new Array<BuildingModelRef>(buildings.length);
     // 容量沿用旧实现：只有带子与分拣器会产生货物
     const cargosMesh = new Cargos(belts.length + inserters.length);
-    let numCargos = 0;
-    const addCargo = (
-        trans: Matrix4,
-        color: Color,
-        distance: number,
-        fade = 0
-    ) => {
-        cargosMesh.setMatrixAt(numCargos, trans);
-        cargosMesh.setColorAt(numCargos, color);
-        cargosMesh.setCargoDistanceAt(numCargos, distance);
-
-        // 设置货物淡出宽度
-        (cargosMesh.geometry.cargoFade.array as Float32Array)[numCargos] = fade;
-
-        numCargos++;
-    };
 
     // 其他建筑（元数据盒或 GLB）
     const buildBoxes = (boxes: BlueprintBuilding[]) => {
@@ -981,13 +994,8 @@ export function buildBuildings(
 
     if (inserters.length) meshes.push(buildInserters(inserters));
 
-    if (numCargos) {
-        cargosMesh.count = numCargos;
-        cargosMesh.instanceMatrix.needsUpdate = true;
-        cargosMesh.instanceColor!.needsUpdate = true;
-        cargosMesh.geometry.cargoDistance.needsUpdate = true;
-        cargosMesh.geometry.cargoFade.needsUpdate = true;
-    }
+    // 货物提交（裁 count + 属性上传）由 `Cargos` 自己收口，装配代码不再逐属性置位
+    cargosMesh.finish();
 
     if (built.objects.length) meshes.push(...built.objects);
 
@@ -1033,7 +1041,7 @@ export function buildBuildings(
         ),
         iconCount: iconBuilt.iconCount,
         subscriptCount: iconBuilt.subscriptCount,
-        cargoCount: numCargos,
+        cargoCount: cargosMesh.cargoCount,
         perModelGlbCounts: built.perModelGlbCounts,
     };
 
