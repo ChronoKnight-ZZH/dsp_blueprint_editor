@@ -1,5 +1,9 @@
 import { Color, Matrix4, Quaternion, ShaderLib, Vector3 } from "three";
-import type { BoxGeometry, WebGLProgramParametersWithUniforms } from "three";
+import type {
+    BoxGeometry,
+    InstancedMesh,
+    WebGLProgramParametersWithUniforms,
+} from "three";
 import { readFileSync } from "fs";
 import { findPosForAreas, calcBuildingTrans } from "@/planet/planet";
 import { fromStr } from "@/blueprint/parser";
@@ -28,6 +32,7 @@ import {
     CARGO_SIZE,
     Cargos,
 } from "@/Animation/cargos";
+import { INSERTER_BEAM_THICKNESS } from "@/Animation/inserter";
 import { isBelt, isInserter } from "@/data/items";
 
 /**
@@ -440,11 +445,16 @@ describe("buildBuildings · 货物几何与垂直预算", () => {
             const cargoM = new Matrix4();
             result.buildings.cargos.getMatrixAt(0, cargoM);
 
-            const beamBottom = new Vector3(0, -0.03, 0).applyMatrix4(beamM);
+            const beamBottom = new Vector3(
+                0,
+                -INSERTER_BEAM_THICKNESS / 2,
+                0
+            ).applyMatrix4(beamM);
             const cargoTop = new Vector3(0, CARGO_SIZE / 2, 0).applyMatrix4(
                 cargoM
             );
-            // 方案 §6.4 垂直预算：横梁 [0.37, 0.43]、货物 [0.05, 0.35]
+            // 方案 §6.4 垂直预算：横梁 [0.37, 0.49]（厚度翻倍后抬高 0.03）、
+            // 货物 [0.05, 0.35]
             expect(beamBottom.length() - PLANET_RADIUS).toBeCloseTo(0.37, 2);
             expect(cargoTop.length() - PLANET_RADIUS).toBeCloseTo(0.35, 2);
             expect(beamBottom.length()).toBeGreaterThan(cargoTop.length());
@@ -452,6 +462,41 @@ describe("buildBuildings · 货物几何与垂直预算", () => {
                 0.02,
                 1
             );
+        } finally {
+            result.buildings.dispose();
+            result.iconTexture.dispose();
+        }
+    });
+
+    it("分拣器支柱落在球面上，底座不穿地（Y 轴约定）", () => {
+        nextIndex = 0;
+        const result = build([
+            inserterBuilding({ x: 10, y: 10 }, { x: 10, y: 11 }),
+        ]);
+        try {
+            const find = (name: string) => {
+                const mesh = result.buildings.children.find(
+                    (o) => o.name === name
+                );
+                expect(mesh).toBeDefined();
+                return mesh as unknown as InstancedMesh;
+            };
+            const supportM = new Matrix4();
+            const footM = new Matrix4();
+            find("inserterSupports").getMatrixAt(0, supportM);
+            find("inserterFeet").getMatrixAt(0, footM);
+
+            // 单位盒的 ±0.5 面：支柱顶端 = 梁底（0.37），支柱底端 = 底座顶面（0.10），
+            // 底座底面 = 球面（0）。`inserterTrans` 的原点已经抬到 INSERTER_HEIGHT。
+            const supportTop = new Vector3(0, 0.5, 0).applyMatrix4(supportM);
+            const supportBottom = new Vector3(0, -0.5, 0).applyMatrix4(
+                supportM
+            );
+            const footBottom = new Vector3(0, -0.5, 0).applyMatrix4(footM);
+
+            expect(supportTop.length() - PLANET_RADIUS).toBeCloseTo(0.37, 2);
+            expect(supportBottom.length() - PLANET_RADIUS).toBeCloseTo(0.1, 2);
+            expect(footBottom.length() - PLANET_RADIUS).toBeCloseTo(0, 2);
         } finally {
             result.buildings.dispose();
             result.iconTexture.dispose();

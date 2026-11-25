@@ -48,8 +48,18 @@ import {
     sorterIconPos,
     sorterIconScale,
 } from "./iconHelpers";
-import { inserterTrans } from "./geometryHelpers";
-import { Inserters } from "@/Animation/inserter";
+import { INSERTER_HEIGHT, inserterTrans } from "./geometryHelpers";
+import {
+    Inserters,
+    INSERTER_BEAM_THICKNESS,
+    INSERTER_BEAM_WIDTH,
+    INSERTER_FOOT_HEIGHT,
+    INSERTER_FOOT_WIDTH,
+    INSERTER_FRAME_COLOR,
+    INSERTER_FRAME_WIDTH,
+    INSERTER_SUPPORT_HEIGHT,
+    INSERTER_SUPPORT_WIDTH,
+} from "@/Animation/inserter";
 
 /** 未知建筑（没有 buildingMeta）时使用的占位颜色，与旧 `buildBoxes` 兜底一致 */
 const UNKNOWN_BUILDING_COLOR = new Color(0xdddddd);
@@ -128,7 +138,7 @@ export function buildBuildings(
         const material = new MeshLambertMaterial();
         const objects: Object3D[] = [];
         {
-            const geometry = new CylinderGeometry(0.24, 0.24, thickness, 6);
+            const geometry = new CylinderGeometry(0.12, 0.12, thickness, 32);
             const mesh = new InstancedMesh(geometry, material, belts.length);
             const offset = new Matrix4().makeRotationX(Math.PI / 2);
             offset.premultiply(
@@ -378,8 +388,8 @@ export function buildBuildings(
                 // ============================================================
                 const railPositions: number[] = [];
                 const railColors: number[] = [];
-                const railWidth = 0.035;
-                const railHeight = 0.026;
+                const railWidth = 0.045;
+                const railHeight = 0.032;
                 const railSurfaceLift = 0.0015;
                 const junctionRailInset = 0.16;
 
@@ -993,9 +1003,17 @@ export function buildBuildings(
     };
 
     // 分拣器
-    const buildInserters = (inserters: BlueprintBuilding[]) => {
-        /** 横梁在 INSERTER_HEIGHT 之上再抬高 */
-        const BEAM_EXTRA_LIFT = 0.1;
+    const buildInserters = (
+        inserters: BlueprintBuilding[]
+    ): [Inserters, InstancedMesh, InstancedMesh, InstancedMesh] => {
+        /**
+         * 横梁在 `inserterTrans` 的姿态原点（`INSERTER_HEIGHT`）之上再抬高。
+         *
+         * 旧值 0.1 是按 0.06 厚的旧梁算的；梁厚翻倍到 0.12 后，若中心不动，
+         * 底面会压到货物顶面（0.34 < 0.35）。抬到 0.13 让底面仍停在 0.37，
+         * 与货物保持约 0.02 的间隙（`tests/unit/lib/buildBuildings.spec.ts` D-1）。
+         */
+        const BEAM_EXTRA_LIFT = 0.13;
 
         /** 货物相对基础姿态下移 */
         const CARGO_DROP = 0.1;
@@ -1003,27 +1021,90 @@ export function buildBuildings(
         /** 货物末端淡出宽度，占整个运输行程的比例（条带的 0.06 见 `CARGO_FADE`） */
         const INSERTER_CARGO_FADE = 0.15;
 
-        const mesh = new Inserters(inserters.length);
+        /** 横梁两侧轮廓的截面高度（世界单位） */
+        const FRAME_HEIGHT = 0.08;
 
-        const offset = new Matrix4().makeTranslation(0, 0, -0.5);
-        const temp = new Matrix4();
+        const beamMesh = new Inserters(inserters.length);
+
+        // 外框 / 支柱 / 底座都用单位盒 + 逐实例局部缩放，避免为每种尺寸新建几何。
+        const frameMesh = new InstancedMesh(
+            new BoxGeometry(1, 1, 1),
+            new MeshLambertMaterial({ color: INSERTER_FRAME_COLOR }),
+            inserters.length * 2
+        );
+
+        const supportMesh = new InstancedMesh(
+            new BoxGeometry(1, 1, 1),
+            new MeshLambertMaterial({ color: INSERTER_FRAME_COLOR }),
+            inserters.length * 2
+        );
+
+        const footMesh = new InstancedMesh(
+            new BoxGeometry(1, 1, 1),
+            new MeshLambertMaterial({ color: 0x687680 }),
+            inserters.length * 2
+        );
+
+        // 命名便于场景调试与单测定位（不影响渲染）
+        frameMesh.name = "inserterFrames";
+        supportMesh.name = "inserterSupports";
+        footMesh.name = "inserterFeet";
+
         const trans = new Matrix4();
+        const temp = new Matrix4();
         const cargoTrans = new Matrix4();
+        const beamTrans = new Matrix4();
+        const local = new Matrix4();
+        const localScale = new Vector3();
+
+        /**
+         * 在分拣器局部空间里放一个盒子：`base * T(x,y,z) * S(sx,sy,sz)`。
+         *
+         * 所有结构都从 `inserterTrans` 的原始矩阵派生，四个朝向共用同一套局部
+         * 坐标，不写死世界 X/Z。
+         */
+        const setLocalBox = (
+            mesh: InstancedMesh,
+            index: number,
+            base: Matrix4,
+            x: number,
+            y: number,
+            z: number,
+            sx: number,
+            sy: number,
+            sz: number
+        ) => {
+            local.makeTranslation(x, y, z);
+            local.scale(localScale.set(sx, sy, sz));
+            local.premultiply(base);
+            mesh.setMatrixAt(index, local);
+        };
+
+        // 横梁底面 / 地面 / 底座顶面在局部空间里的 Y。`trans` 原点已抬到
+        // `INSERTER_HEIGHT`，所以地面在 -INSERTER_HEIGHT，不能当成 y = 0。
+        const beamBottomY = BEAM_EXTRA_LIFT - INSERTER_BEAM_THICKNESS * 0.5;
+        const groundY = -INSERTER_HEIGHT;
+        const footTopY = groundY + INSERTER_FOOT_HEIGHT;
+
+        // 0.65 是设计上限；实际按「梁底到地面」的净空截断，否则支柱与底座会
+        // 穿进球面（INSERTER_HEIGHT 只有 0.3）。当前净空 = 0.27。
+        const supportHeight = Math.min(
+            INSERTER_SUPPORT_HEIGHT,
+            Math.max(0, beamBottomY - footTopY)
+        );
+        const supportY = footTopY + supportHeight * 0.5;
+        const footY = groundY + INSERTER_FOOT_HEIGHT * 0.5;
 
         for (let i = 0; i < inserters.length; i++) {
             const b = inserters[i];
 
-            // 获取分拣器基础姿态与横梁长度
+            // 原始姿态与臂长；后续所有结构都只在这个局部空间里偏移
             const len = inserterTrans(transforms[b.index], trans);
+            const color = colorOf(b.modelIndex);
 
-            // ① 货物：使用基础姿态，避免横梁缩放污染货物矩阵
+            // ① 货物：保持原有矩阵与运动（基础姿态下移，横梁缩放不污染货物）
             cargoTrans.copy(trans);
-
-            // 货物沿横梁方向移动，保持原有下移量
             cargoTrans.multiply(temp.makeTranslation(0, -CARGO_DROP, 0));
-
-            // 货物使用统一米白色（`addTrack` 的默认色），只指定分拣器自己的淡出宽度；
-            // 抬升保持 0 —— 高度预算已经在这个矩阵里。
             cargosMesh.addTrack({
                 matrix: cargoTrans,
                 distance: len,
@@ -1032,29 +1113,85 @@ export function buildBuildings(
                 fadeOut: INSERTER_CARGO_FADE,
             });
 
-            // ② 横梁：基础姿态抬高 + 缩放 + 前推半梁长
-            trans.multiply(temp.makeTranslation(0, BEAM_EXTRA_LIFT, 0));
+            // ② 横梁：抬高 + 沿局部 Z 缩放 + 前推半梁长（几何 z ∈ [-0.5, 0.5]）
+            beamTrans.copy(trans);
+            beamTrans.multiply(temp.makeTranslation(0, BEAM_EXTRA_LIFT, 0));
+            beamTrans.multiply(temp.makeScale(1, 1, len));
+            beamTrans.multiply(temp.makeTranslation(0, 0, -0.5));
 
-            trans.multiply(temp.makeScale(1, 1, len));
+            beamMesh.setMatrixAt(i, beamTrans);
+            beamMesh.setColorAt(i, color);
 
-            trans.multiply(offset);
+            // ③ A、B 两端支柱与底座：横梁在局部 z ∈ [-len, 0]，端点各内缩 0.04
+            const supportZ = [-0.04, -Math.max(0.04, len - 0.04)];
 
-            mesh.setMatrixAt(i, trans);
-            mesh.setColorAt(i, colorOf(b.modelIndex));
+            for (let j = 0; j < 2; j++) {
+                const index = i * 2 + j;
+                const z = supportZ[j];
 
+                setLocalBox(
+                    supportMesh,
+                    index,
+                    trans,
+                    0,
+                    supportY,
+                    z,
+                    INSERTER_SUPPORT_WIDTH,
+                    supportHeight,
+                    INSERTER_SUPPORT_WIDTH
+                );
+
+                setLocalBox(
+                    footMesh,
+                    index,
+                    trans,
+                    0,
+                    footY,
+                    z,
+                    INSERTER_FOOT_WIDTH,
+                    INSERTER_FOOT_HEIGHT,
+                    INSERTER_FOOT_WIDTH
+                );
+            }
+
+            // ④ 横梁两侧深色轮廓：贴着梁的 ±X 外沿，坐在梁顶面上
+            const frameX =
+                INSERTER_BEAM_WIDTH * 0.5 - INSERTER_FRAME_WIDTH * 0.5;
+            const frameY =
+                BEAM_EXTRA_LIFT + INSERTER_BEAM_THICKNESS * 0.5 + 0.025;
+
+            for (let side = 0; side < 2; side++) {
+                setLocalBox(
+                    frameMesh,
+                    i * 2 + side,
+                    trans,
+                    side === 0 ? -frameX : frameX,
+                    frameY,
+                    -len * 0.5,
+                    INSERTER_FRAME_WIDTH,
+                    FRAME_HEIGHT,
+                    len
+                );
+            }
+
+            // 原有拾取引用仍指向横梁
             modelRef[b.index] = {
-                mesh,
+                mesh: beamMesh,
                 instance: i,
             };
         }
 
-        mesh.instanceMatrix.needsUpdate = true;
-
-        if (mesh.instanceColor !== null) {
-            mesh.instanceColor.needsUpdate = true;
+        beamMesh.instanceMatrix.needsUpdate = true;
+        if (beamMesh.instanceColor !== null) {
+            beamMesh.instanceColor.needsUpdate = true;
         }
 
-        return mesh;
+        frameMesh.instanceMatrix.needsUpdate = true;
+        supportMesh.instanceMatrix.needsUpdate = true;
+        footMesh.instanceMatrix.needsUpdate = true;
+
+        // 首元素是横梁：调用方用它驱动 `cargoMove`，其余是纯视觉结构
+        return [beamMesh, supportMesh, footMesh, frameMesh];
     };
 
     // 建筑分类：带子 / 分拣器 / 其余（元数据盒或 GLB）
@@ -1337,7 +1474,13 @@ export function buildBuildings(
 
     if (belts.length) meshes.push(...buildBelts(belts));
 
-    if (inserters.length) meshes.push(buildInserters(inserters));
+    // 横梁 mesh 还要交给 `AllBuildings`，帧循环才能每帧写 `cargoMove`
+    let insertersMesh: Inserters | null = null;
+    if (inserters.length) {
+        const [beam, ...parts] = buildInserters(inserters);
+        insertersMesh = beam;
+        meshes.push(beam, ...parts);
+    }
 
     // 货物提交（裁 count + 属性上传）由 `Cargos` 自己收口，装配代码不再逐属性置位
     cargosMesh.finish();
@@ -1368,7 +1511,10 @@ export function buildBuildings(
         cargosMesh,
         modelRef,
         iconBuilt.subscriptsMesh,
-        iconBuilt.subscriptMap
+        iconBuilt.subscriptMap,
+        // 条带 mesh 的接线是另一个改动的事；这里只把横梁接上，保证箭头相位可驱动
+        null,
+        insertersMesh
     );
 
     const glbInstanceCount = Object.values(built.perModelGlbCounts).reduce(
