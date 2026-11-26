@@ -69,7 +69,7 @@ function colorOf(modelIndex: number): Color {
 /**
  * 条带 ribbon 的挤出厚度（世界单位）：带状网格的顶面 = 节点平面 + 该值。
  *
- * 端点圆柱的 `0.1` 是独立的装饰厚度，两者不要混用。
+ * 带身、半圆端帽与弧形护栏共用这一个厚度，避免各部件之间出现台阶或缝隙。
  */
 const BELT_RIBBON_THICKNESS = 0.05;
 
@@ -77,8 +77,8 @@ const BELT_RIBBON_THICKNESS = 0.05;
  * 条带货物中心相对节点平面的抬升（沿带面法线）。
  *
  * ribbon 顶面（`BELT_RIBBON_THICKNESS`）之上再留「货半高 + 间隙」，那半份由
- * `cargos.ts` 的 `CARGO_LIFT_ABOVE_SURFACE` 单点定义；旧 `Belts` 的 `CARGO_LIFT`
- * 是按盒式条带厚度 0.08 反推的，不能直接套用到 ribbon。
+ * `cargos.ts` 的 `CARGO_LIFT_ABOVE_SURFACE` 单点定义；旧的盒式条带抬升常量
+ * 是按盒式厚度反推的，不能直接套用到 ribbon。
  */
 const BELT_CARGO_LIFT = BELT_RIBBON_THICKNESS + CARGO_LIFT_ABOVE_SURFACE;
 
@@ -2009,8 +2009,7 @@ export function buildBuildings(
         modelRef,
         iconBuilt.subscriptsMesh,
         iconBuilt.subscriptMap,
-        // 条带 mesh 的接线是另一个改动的事；这里只把横梁接上，保证箭头相位可驱动
-        null,
+        // 条带没有独立的箭头驱动者（相位由 `Cargos` 自持），这里只把横梁接上
         insertersMesh
     );
 

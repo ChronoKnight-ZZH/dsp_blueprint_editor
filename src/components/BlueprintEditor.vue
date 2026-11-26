@@ -471,13 +471,12 @@ onMounted(() => {
         if (lastTimeStamp) {
             c.updateTimeDelta((time - lastTimeStamp) / 1000);
         }
-        // 相位由货物系统自持（`Cargos.tick`），返回值再喂给条带箭头，
-        // 保证「箭头与货物同向同速」；没有条带时 belts 为 null，必须判空
+        // 相位由货物系统自持（`Cargos.tick`），返回值再喂给横梁箭头，
+        // 保证「箭头与货物同向同速」
         const built = b.value?.buildings;
         if (built !== undefined) {
             const progress = built.cargos.tick(time);
-            if (built.belts !== null) built.belts.cargoMove = progress;
-            // 没有分拣器时 inserters 为 null，同样必须判空
+            // 没有分拣器时 inserters 为 null，必须判空
             if (built.inserters !== null) built.inserters.cargoMove = progress;
         }
         lastTimeStamp = time;
