@@ -137,6 +137,7 @@ import {
     PerspectiveCamera,
     WebGLRenderer,
     Matrix4,
+    Quaternion,
     Ray,
     Sphere,
     Mesh,
@@ -559,6 +560,61 @@ beltLinkMesh.count = 0;
 beltLinkMesh.renderOrder = 9;
 beltLinkMesh.frustumCulled = false;
 
+// ---- 高层传送带的垂直提示（仅预览层，不写入蓝图）----
+// 每个节点向球面地面投一根白色细柱 + 地面小六边形落点；高度 z=0 时不显示。
+const BELT_GUIDE_WIDTH = 0.1;
+const BELT_GUIDE_THICK = 0.04;
+const BELT_GROUND_MARKER_R = 0.16;
+const BELT_GUIDE_GROUND_LIFT = 0.05; // 地面落点微抬，避开地面网格
+
+/** 地面落点：实心小六边形（XY 平面，+Z 为法线） */
+function makeBeltGuideFootGeometry(): BufferGeometry {
+    return new ShapeGeometry(hexagonPath(new Shape(), BELT_GROUND_MARKER_R));
+}
+
+const beltGuideMaterial = new MeshBasicMaterial({
+    color: 0xffffff,
+    opacity: 0.75,
+    transparent: true,
+    depthWrite: false,
+    side: DoubleSide,
+});
+
+// 垂直提示柱：几何高度沿 +Y（长度 1，按节点高度缩放）
+const beltGuideMesh = new InstancedMesh(
+    new BoxGeometry(BELT_GUIDE_WIDTH, 1, BELT_GUIDE_THICK),
+    beltGuideMaterial,
+    BELT_PREVIEW_CAP
+);
+beltGuideMesh.matrixAutoUpdate = false;
+beltGuideMesh.count = 0;
+beltGuideMesh.renderOrder = 9;
+beltGuideMesh.frustumCulled = false;
+
+// 地面落点标记
+const beltGuideFootMesh = new InstancedMesh(
+    makeBeltGuideFootGeometry(),
+    beltGuideMaterial,
+    BELT_PREVIEW_CAP
+);
+beltGuideFootMesh.matrixAutoUpdate = false;
+beltGuideFootMesh.count = 0;
+beltGuideFootMesh.renderOrder = 9;
+beltGuideFootMesh.frustumCulled = false;
+
+// 提示柱与节点预览分开可见：三者（latFirst / lonFirst / straight）都渲染六边形节点，
+// 这里独立控制是为了将来独立开关高度提示时不影响节点显示
+const beltGuideVisible = ref(false);
+watchEffect(() => {
+    if (isPlacingBelt() && beltGuideVisible.value) {
+        scene.add(beltGuideMesh);
+        scene.add(beltGuideFootMesh);
+    } else {
+        scene.remove(beltGuideMesh);
+        scene.remove(beltGuideFootMesh);
+    }
+});
+
 const beltPreviewVisible = ref(false);
 watchEffect(() => {
     if (isPlacingBelt() && beltPreviewVisible.value) {
@@ -576,6 +632,9 @@ function hideBeltPreview() {
     beltPreviewMesh.count = 0;
     beltEndMarkerMesh.count = 0;
     beltLinkMesh.count = 0;
+    beltGuideMesh.count = 0;
+    beltGuideFootMesh.count = 0;
+    beltGuideVisible.value = false;
     beltPreviewVisible.value = false;
 }
 
@@ -1400,6 +1459,58 @@ onMounted(() => {
     const beltLinkLift = new Vector3();
     const beltLinkM = new Matrix4();
     const beltLinkScale = new Matrix4();
+    // 垂直提示柱临时对象（复用避免每帧分配）
+    const beltGuideRadial = new Vector3();
+    const beltGuideGround = new Vector3();
+    const beltGuideMid = new Vector3();
+    const beltGuideQuat = new Quaternion();
+    const beltGuideM = new Matrix4();
+    const beltGuideScale = new Vector3();
+    const BELT_GUIDE_UP = new Vector3(0, 1, 0);
+    const BELT_GUIDE_Z = new Vector3(0, 0, 1);
+
+    /**
+     * 高层传送带的垂直占位提示：把一组"带面高度"的锚点投影到球面地面，
+     * 每个锚点画一根白色细柱 + 地面小六边形落点。
+     * z=0 时只清空 count（完全隐藏）。
+     */
+    const updateBeltGuides = (points: Vector3[], count: number) => {
+        let c = 0;
+        for (let i = 0; i < count && c < BELT_PREVIEW_CAP; i++) {
+            const top = points[i];
+            const h = top.length() - PLANET_RADIUS;
+            if (h <= 1e-3) continue; // 贴地（z=0）不显示
+            beltGuideRadial.copy(top).normalize();
+            beltGuideGround
+                .copy(beltGuideRadial)
+                .multiplyScalar(PLANET_RADIUS + BELT_GUIDE_GROUND_LIFT);
+            const len = top.distanceTo(beltGuideGround);
+            if (len <= 1e-3) continue;
+            beltGuideMid.copy(top).add(beltGuideGround).multiplyScalar(0.5);
+            // 细柱：几何高度沿 +Y，用四元数把 +Y 对到径向
+            beltGuideQuat.setFromUnitVectors(BELT_GUIDE_UP, beltGuideRadial);
+            beltGuideM.compose(
+                beltGuideMid,
+                beltGuideQuat,
+                beltGuideScale.set(1, len, 1)
+            );
+            beltGuideMesh.setMatrixAt(c, beltGuideM);
+            // 地面落点：XY 平面六边形，+Z 对到径向
+            beltGuideQuat.setFromUnitVectors(BELT_GUIDE_Z, beltGuideRadial);
+            beltGuideM.compose(
+                beltGuideGround,
+                beltGuideQuat,
+                beltGuideScale.set(1, 1, 1)
+            );
+            beltGuideFootMesh.setMatrixAt(c, beltGuideM);
+            c++;
+        }
+        beltGuideMesh.count = c;
+        beltGuideFootMesh.count = c;
+        beltGuideMesh.instanceMatrix.needsUpdate = true;
+        beltGuideFootMesh.instanceMatrix.needsUpdate = true;
+        beltGuideVisible.value = c > 0;
+    };
 
     // ---- 地基模式：逐格铺/涂 ----
     /** 网格偏移 → 地基光标世界矩阵（薄板贴于格子中心，朝向球面法线） */
@@ -1518,9 +1629,11 @@ onMounted(() => {
         beltPreviewMesh.setMatrixAt(0, beltPreviewM);
         beltPreviewMesh.count = 1;
         beltPreviewMesh.instanceMatrix.needsUpdate = true;
-        // 单格预览不画首尾端圈/连线
+        // 单格预览不画首尾端圈/连线，但高度提示照常
         beltEndMarkerMesh.count = 0;
         beltLinkMesh.count = 0;
+        beltCellPos[0].setFromMatrixPosition(t);
+        updateBeltGuides(beltCellPos, 1);
         beltPreviewVisible.value = true;
     };
 
@@ -1578,6 +1691,8 @@ onMounted(() => {
         }
         beltPreviewMesh.count = n;
         beltPreviewMesh.instanceMatrix.needsUpdate = true;
+        // 高层时每个节点向地面投一根垂直提示柱
+        updateBeltGuides(beltCellPos, n);
 
         // 首尾端的大号六边形外圈（单格时只画一个）
         const endCount = n === 0 ? 0 : n === 1 ? 1 : 2;
@@ -2084,6 +2199,9 @@ onUnmounted(() => {
     beltEndMarkerMesh.geometry.dispose();
     beltLinkMesh.geometry.dispose();
     beltPreviewMaterial.dispose();
+    beltGuideMesh.geometry.dispose();
+    beltGuideFootMesh.geometry.dispose();
+    beltGuideMaterial.dispose();
     slotMarkers.geometry.dispose();
     slotMarkers.material.dispose();
     portMarkers.geometry.dispose();
