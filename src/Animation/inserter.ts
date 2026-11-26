@@ -71,8 +71,7 @@ export const INSERTER_ARROW_COLOR = new Color(0x263746);
 /**
  * 注入版本号；改了注入逻辑必须同步改它，否则 three 会复用旧 program（S16）。
  *
- * 必须与 `BELT_PROGRAM_KEY`（`dsp-belt-arrow-v4`）和 `CargoMaterial` 的默认
- * key 都不同，否则两份注入会串味。
+ * 必须与 `CargoMaterial` 的默认 key 不同，否则两份注入会串味。
  */
 const INSERTER_PROGRAM_KEY = "dsp-inserter-arrow-v3";
 
@@ -85,7 +84,7 @@ const INSERTER_PROGRAM_KEY = "dsp-inserter-arrow-v3";
  * `INSERTER_BEAM_WIDTH` 由模板字符串插值写入，改宽度时箭头不会按旧宽度计算（GL8 / S21）。
  *
  * `smoothstep` 一律用升序参数：GLSL 规范规定 `edge0 ≥ edge1` 时结果未定义，
- * 这里改写为等价且良定义的形式（与 `belt.ts` 一致）。
+ * 这里改写为等价且良定义的形式。
  */
 const ARROW_FRAGMENT = `
     float topMask = step(0.5, vArmNY);

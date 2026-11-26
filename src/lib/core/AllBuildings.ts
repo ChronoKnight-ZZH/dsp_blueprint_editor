@@ -3,7 +3,6 @@ import { IconTexture } from "@/icon/iconTexture";
 import { Icons } from "@/icon/icons";
 import { IconSubscript } from "@/icon/iconSubscript";
 import { Cargos } from "@/Animation/cargos";
-import type { BeltMesh } from "@/Animation/belt";
 import { Inserters } from "@/Animation/inserter";
 import type { BlueprintBuilding } from "@/blueprint/parser";
 import type { BuildingModelRef } from "./types";
@@ -28,19 +27,11 @@ export class AllBuildings extends Object3D {
             { startIdx: number; length: number }
         > = new Map(),
         /**
-         * 条带 / 圆环 mesh，**只用于每帧写 `cargoMove`**（箭头滚动相位）。
+         * 分拣器横梁 mesh，**只用于每帧写 `cargoMove`**（箭头滚动相位）。
          *
-         * 可能是直段条带（`Belts`）也可能是圆环弯头（`BeltElbows`）—— 两者共用同一个
-         * `BeltMaterial` 实例，写哪个都行。省略或为 `null` 表示本次构建没有任何带子，
-         * 帧循环必须判空。mesh 已随 `objects` 挂到本对象下，`dispose()` 的 `traverse`
-         * 会覆盖它的几何，因此这里**不需要**为它单写释放逻辑。
-         */
-        public readonly belts: BeltMesh | null = null,
-        /**
-         * 分拣器横梁 mesh，同样**只用于每帧写 `cargoMove`**（箭头滚动相位）。
-         *
-         * 与 `belts` 对称：省略或为 `null` 表示本次构建没有分拣器，帧循环必须判空。
+         * 省略或为 `null` 表示本次构建没有分拣器，帧循环必须判空。
          * 横梁 mesh 已随 `objects` 挂到本对象下，`dispose()` 的 `traverse` 覆盖释放。
+         * 条带没有对应的字段：它的箭头相位已由 `Cargos` 自持，不再单独暴露引用。
          */
         public readonly inserters: Inserters | null = null
     ) {
@@ -63,8 +54,8 @@ export class AllBuildings extends Object3D {
      * - 图标图集是 RenderCore 级别的单例，由调用方在 `dispose()` 里统一释放，
      *   这里只释放网格与下标（`IconTexture` 另有 `dispose()`）
      *
-     * 条带 mesh 是 `objects` 的一员，几何已被下面的 `traverse` 覆盖；`belts` 只是
-     * 帧循环用的引用，**不重复释放**。材质按现状不释放（方案 §6.6-S7）。
+     * 条带 / 横梁 mesh 都是 `objects` 的一员，几何已被下面的 `traverse` 覆盖；
+     * `inserters` 只是帧循环用的引用，**不重复释放**。材质按现状不释放（方案 §6.6-S7）。
      */
     public dispose() {
         this.traverse((o) => {

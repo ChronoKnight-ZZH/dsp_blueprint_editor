@@ -1071,13 +1071,10 @@ export class RenderCore {
             this.lastTimestamp = time;
 
             if (this.bundle !== null) {
-                // 相位由货物系统自持（`Cargos.tick`），返回值再喂给条带/横梁箭头，
+                // 相位由货物系统自持（`Cargos.tick`），返回值再喂给横梁箭头，
                 // 保证「箭头与货物同向同速」且只有一处算时间。
                 const progress = this.bundle.buildings.cargos.tick(time);
-                // 没有条带（无带子 / 全部孤立段）时 belts 为 null，必须判空
-                const belts = this.bundle.buildings.belts;
-                if (belts !== null) belts.cargoMove = progress;
-                // 没有分拣器时 inserters 为 null，同样必须判空
+                // 没有分拣器时 inserters 为 null，必须判空
                 const inserters = this.bundle.buildings.inserters;
                 if (inserters !== null) inserters.cargoMove = progress;
             }

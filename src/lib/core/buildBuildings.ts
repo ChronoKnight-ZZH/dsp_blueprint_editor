@@ -1844,8 +1844,7 @@ export function buildBuildings(
         modelRef,
         iconBuilt.subscriptsMesh,
         iconBuilt.subscriptMap,
-        // 条带 mesh 的接线是另一个改动的事；这里只把横梁接上，保证箭头相位可驱动
-        null,
+        // 条带没有独立的箭头驱动者（相位由 `Cargos` 自持），这里只把横梁接上
         insertersMesh
     );
 

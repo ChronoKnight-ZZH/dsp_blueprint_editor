@@ -9,13 +9,12 @@ import {
     WebGLProgramParametersWithUniforms,
     WebGLRenderer,
 } from "three";
-import type { BeltArcParams } from "./belt";
 
 /**
  * 货物立方体的边长（世界单位）。
  *
- * 单点定义：`CargoGeometry` 用它构造几何，`belt.ts` 用它推导货物抬升高度
- * （`CARGO_LIFT` 需要立方体半高），两者必须一致，否则货物会压到条带上。
+ * 单点定义：`CargoGeometry` 用它构造几何，承托面一侧（条带 ribbon、分拣器横梁）
+ * 的抬升预算由各自的常量从这里推导，必须一致，否则货物会压到承托面上。
  */
 export const CARGO_SIZE = 0.3;
 
@@ -40,8 +39,9 @@ export const CARGO_FADE = 0.06;
 /**
  * 货物底面与承托面（条带顶面 / 分拣器横梁底面）之间的视觉间隙（世界单位）。
  *
- * 单点定义：`belt.ts` 的盒式条带抬升、`cargos.ts` 的 `CARGO_LIFT_ABOVE_SURFACE`
- * 都从这里推导，两种条带实现与分拣器的垂直预算因此不会各写一份。
+ * 单点定义：`buildBuildings` 的条带抬升与分拣器预算、`cargos.ts` 的
+ * `CARGO_LIFT_ABOVE_SURFACE` 都从这里推导，两种条带实现与分拣器的垂直预算
+ * 因此不会各写一份。
  */
 export const CARGO_GAP = 0.02;
 
@@ -61,11 +61,24 @@ export const CARGO_LIFT_ABOVE_SURFACE = CARGO_SIZE / 2 + CARGO_GAP;
  */
 export const CARGO_PERIOD_MS = 1000;
 
-/** 货物需要的圆弧子集（不含支线贴边的外延信息） */
-export type CargoArcShape = Pick<
-    BeltArcParams,
-    "theta0" | "theta1" | "centerX" | "centerZ" | "slope"
->;
+/**
+ * 货物需要的圆弧 / 坡度子集（不含支线贴边的外延信息）。
+ *
+ * 由 `buildBuildings` 写入，与条带 ribbon 的转角计算**同源同值**：货物必须走
+ * 与承托面完全一致的那条曲线，否则会横着滑出条带。字段全部已在几何空间算好。
+ */
+export interface CargoArcShape {
+    /** 弧的起始角（弧度）：`u = 0`（后缘 / 入射端）落在 `center + R·(cos, sin)` */
+    theta0: number;
+    /** 弧的结束角（弧度）：`u = 1`（前缘 / 出射端）；直段时等于 theta0 */
+    theta1: number;
+    /** 圆心（几何空间的 x，世界单位） */
+    centerX: number;
+    /** 圆心（几何空间的 z，世界单位） */
+    centerZ: number;
+    /** 后端 → 前端的坡度（世界单位，平地 0） */
+    slope: number;
+}
 
 class CargoGeometry extends BoxGeometry {
     /** 逐实例滑动距离（条带 = 段长，分拣器 = 臂长） */
@@ -266,7 +279,7 @@ export class Cargos extends InstancedMesh {
     }
 
     /**
-     * 写第 i 个货物的形状参数；必须与条带用**同一组** `BeltArcParams`，否则货物会走出条带。
+     * 写第 i 个货物的形状参数；必须与条带用**同一组**圆弧参数，否则货物会走出条带。
      *
      * 省略 / 传 `null` 表示直段平地（分拣器走这里）。
      */
