@@ -5,7 +5,7 @@ import {
     BlueprintData,
     LabParamerters,
 } from "./parser";
-import { Command, Updater } from "@/command";
+import { Command, Updater } from "@/render/command";
 
 /**
  * 一键设置“生产加速 / 额外产出”的过滤条件。

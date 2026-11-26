@@ -1,6 +1,10 @@
 import { Recipe } from "./types";
 import { itemsMap } from "./items";
 
+/**
+ * 配方数据表
+ * 包含所有配方的详细信息，包括 ID、名称、耗时、输入物品、输出物品和网格大小
+ */
 export const recipes: Recipe[] = [
     {
         id: 1,

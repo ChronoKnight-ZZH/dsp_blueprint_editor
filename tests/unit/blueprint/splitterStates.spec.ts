@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import { BlueprintData, fromStr, toStr } from '@/blueprint/parser';
 import { createBuilding, createEmptyBlueprint } from '@/blueprint/create';
 import { CreateBuildingCommand } from '@/blueprint/create';
-import { Updater } from '@/command';
+import { Updater } from '@/render/command';
 import {
     SetSplitterFilterCommand,
     SetSplitterPriorityCommand,

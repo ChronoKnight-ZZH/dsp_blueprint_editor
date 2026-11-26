@@ -1,6 +1,6 @@
 import { InjectionKey, Ref } from "vue";
 import { BuildingInfo } from "./blueprint/buildingInfo";
-import { CommandQueue } from "./command";
+import { CommandQueue } from "@/render/command";
 // https://github.com/vuejs/vue-cli/issues/7010
 // @ts-ignore
 import BlueprintEditor from "./components/BlueprintEditor.vue";

@@ -1,0 +1,140 @@
+import {
+    InstancedBufferAttribute,
+    Matrix4,
+    Mesh,
+    Texture,
+    Vector2,
+    Vector3,
+} from "three";
+import { IconGeometry, IconsMaterial } from "./icons";
+
+/** 角标文字配色（来自主题；省略时沿用旧版硬编码的白色/深灰描边） */
+export interface TextStyle {
+    fill?: string;
+    stroke?: string;
+}
+
+class FontTexture {
+    height;
+    cWidth;
+    cStride;
+    texture;
+    static readonly allText = "0123456789k";
+
+    constructor(style: TextStyle = {}) {
+        const stroke = 3;
+        const padding = 1;
+        const height = 100;
+
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw Error("Canvas 2D unsupported");
+
+        const font = `bold ${height}px monospace`;
+        ctx.font = font;
+        this.cWidth = ctx.measureText(FontTexture.allText[0]).width;
+        this.cStride = this.cWidth + 2 * stroke + 2 * padding;
+        const measure = ctx.measureText(FontTexture.allText);
+        const y = measure.actualBoundingBoxAscent + stroke + padding;
+        canvas.height = this.height =
+            measure.actualBoundingBoxAscent +
+            measure.actualBoundingBoxDescent +
+            2 * stroke +
+            2 * padding;
+        canvas.width = this.cStride * FontTexture.allText.length;
+
+        ctx.font = font;
+        ctx.strokeStyle = style.stroke ?? "#4448";
+        ctx.lineWidth = 2 * stroke;
+        ctx.fillStyle = style.fill ?? "white";
+        for (let i = 0; i < FontTexture.allText.length; i++) {
+            const c = FontTexture.allText[i];
+            const x = this.cStride * i + stroke + padding;
+            ctx.strokeText(c, x, y);
+            ctx.fillText(c, x, y);
+        }
+
+        this.texture = new Texture(canvas);
+        this.texture.needsUpdate = true;
+    }
+}
+
+export class IconSubscript extends Mesh {
+    fontTexture: FontTexture;
+    cWidth = 0.22;
+
+    constructor(numChars: number, style?: TextStyle) {
+        const fontTexture = new FontTexture(style);
+        const material = new IconsMaterial(fontTexture.texture);
+        material.iMapSize.set(FontTexture.allText.length, 1);
+        const geometry = new IconGeometry(numChars, false);
+        geometry.instanceCount = Infinity;
+        super(geometry, material);
+
+        const initTrans = new Matrix4().makeScale(
+            (fontTexture.cStride / fontTexture.cWidth) * this.cWidth,
+            (fontTexture.height / fontTexture.cWidth) * this.cWidth,
+            1.0
+        );
+        initTrans.multiply(
+            new Matrix4().makeTranslation(
+                (0.5 * fontTexture.cWidth) / fontTexture.cStride,
+                0.5,
+                0.0
+            )
+        );
+        geometry.applyMatrix4(initTrans);
+
+        this.fontTexture = fontTexture;
+        this.geometry.setAttribute(
+            "offset",
+            new InstancedBufferAttribute(new Float32Array(numChars * 2), 2)
+        );
+        // 与 Icons 同理：字符位置通过 iconPos 散布在球面上，几何包围球无效，
+        // 关闭视锥剔除避免低俯仰角时角标被整体剔除。
+        this.frustumCulled = false;
+    }
+
+    setText(index: number, pos: Vector3, scale: Vector2, text: string) {
+        const offset = new Vector2();
+        for (let i = 0; i < text.length; i++) {
+            const iconId = FontTexture.allText.indexOf(text[i]);
+            (this.geometry.getAttribute("iconId").array as Int32Array)[
+                index + i
+            ] = iconId;
+            pos.toArray(
+                this.geometry.getAttribute("iconPos").array,
+                (index + i) * 3
+            );
+
+            offset.copy(scale).multiplyScalar(0.5);
+            offset.x -= this.cWidth * (text.length - i);
+            offset.y = -offset.y;
+            offset.toArray(
+                this.geometry.getAttribute("offset").array,
+                (index + i) * 2
+            );
+        }
+    }
+
+    needsUpdate() {
+        this.geometry.getAttribute("iconId").needsUpdate = true;
+        this.geometry.getAttribute("iconPos").needsUpdate = true;
+        this.geometry.getAttribute("offset").needsUpdate = true;
+    }
+
+    /**
+     * 就地换色：按新配色重新烘一张字形图集，替换材质贴图并释放旧贴图。
+     *
+     * 字体参数不变，图集尺寸、几何缩放和实例属性都不需要重写，
+     * 因此切主题时可直接调用，不必重建整个场景。
+     */
+    setTextStyle(style?: TextStyle) {
+        const material = this.material as IconsMaterial;
+        const previous = this.fontTexture;
+        const next = new FontTexture(style);
+        material.map = next.texture;
+        previous.texture.dispose();
+        this.fontTexture = next;
+    }
+}

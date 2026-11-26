@@ -1,497 +1,40 @@
 <template>
-    <div class="editor-root" ref="root" tabindex="-1"></div>
+    <div class="editor-root" ref="root" tabindex="-1">
+        <!-- 放置/铺带失败提示：编辑交互层唯一的文字反馈，不改变 App.vue 的状态 -->
+        <div v-if="hint !== ''" class="editor-hint">{{ hint }}</div>
+    </div>
 </template>
 
 <script lang="ts">
+/**
+ * 蓝图编辑器。
+ *
+ * 渲染构建（场景装配、GLB/白模、图标、货物、下标、BVH）已下沉到 `src/lib/core/`，
+ * 与 `BlueprintViewer` 共用同一套实现（见 docs/BlueprintViewer-实施计划.md 阶段 A）。
+ * 本文件只保留 Vue 交互：放置 / 删除 / 预览 / 选中 / 快捷键 / 侧栏联动。
+ */
+import { BeltParameters } from "@/blueprint/parser";
+import { calcBuildingTrans, PositionedBlueprint } from "@/planet/planet";
+import { Vector3 } from "three";
+import { itemIconId } from "@/data/icons";
+import { Updater } from "@/render/command";
+import { PLANET_RADIUS } from "@/planet/planetConstants";
+import { AllBuildings } from "@/lib/core/AllBuildings";
 import {
-    Group,
-    LineSegments,
-    InstancedMesh,
-    WebGLRenderer,
-    LineBasicMaterial,
-    MeshStandardMaterial,
-    MeshLambertMaterial,
-    MeshBasicMaterial,
-    CylinderGeometry,
-    BoxGeometry,
-    PlaneGeometry,
-    Path,
-    Shape,
-    ShapeGeometry,
-    DoubleSide,
-    Matrix4,
-    DirectionalLight,
-    Vector3,
-    Object3D,
-    Color,
-    Ray,
-    Sphere,
-    Vector2,
-    Mesh,
-    Line,
-    BufferGeometry,
-    Float32BufferAttribute,
-} from "three";
-import {
-    SphereLatitudeGridGeometry,
-    SphereLongitudeGridGeometry,
-} from "@/SphereGridGeometry";
-import {
-    gridAreas,
-    calcBuildingTrans,
-    PositionedBlueprint,
-    HEIGHT_GRID_SIZE,
-} from "@/blueprint/planet";
-import { buildReforms, Reforms } from "@/blueprint/reform";
-import {
-    buildSceneData,
-    INSERTER_HEIGHT,
-    inserterTrans,
-    rebuildScene,
-} from "@/editor/scene";
-import { buildingMeta, noIconBuildings } from "@/data/building";
-import { itemIconId, recipeIconId } from "@/data/icons";
-import { IconTexture } from "@/iconTexture";
-import { IconGeometry, Icons } from "@/icons";
-import { IconSubscript } from "@/iconSubscript";
-import { Cargos, CargoGeometry, makeCargoGeometry } from "@/cargos";
-import { BVH } from "@/bvh";
-import { Updater } from "@/command";
-import { RemoveBuildingCommand } from "@/blueprint/removeBuilding";
-import { commandQueueKey } from "@/define";
-import {
-    BeltParameters,
-    BlueprintBuilding,
-    LabParamerters,
-    ResearchMode,
-} from "@/blueprint/parser";
-import { isBelt, isInserter, isLab } from "@/data/items";
-function buildPlanetGrid(radius = 1, segment = 200) {
-    const allGrids = new Group();
-    const material = new LineBasicMaterial({
-        color: 0xf0f0f0,
-        depthWrite: false,
-    });
+    buildingIconId,
+    beltIconPos,
+    beltIconScale,
+    sorterIconPos,
+    sorterIconScale,
+} from "@/lib/core/iconHelpers";
 
-    const latitudeGeometry = new SphereLatitudeGridGeometry({
-        radius,
-        widthSegments: segment,
-        heightSegments: segment / 2,
-    });
-    allGrids.add(new LineSegments(latitudeGeometry, material));
-
-    const radPerSeg = (2 * Math.PI) / segment;
-    for (const { minLatitudeSeg, latitudeSeg, longitudeSeg } of gridAreas(
-        segment
-    )) {
-        const geometry = new SphereLongitudeGridGeometry({
-            radius,
-            widthSegments: longitudeSeg,
-            heightSegments: Math.abs(latitudeSeg),
-            phiStart: 0,
-            phiLength: Math.PI * 2,
-            thetaStart: (minLatitudeSeg + segment / 4) * radPerSeg,
-            thetaLength: latitudeSeg * radPerSeg,
-        });
-        allGrids.add(new LineSegments(geometry, material));
-    }
-    return { grids: allGrids, material };
-}
-
-class AllBuildings extends Object3D {
-    constructor(
-        objects: Object3D[],
-        public readonly iconsMesh: Icons,
-        public readonly iconTexture: IconTexture,
-        public readonly cargos: Cargos[],
-        public readonly modelRef: { mesh: InstancedMesh; instance: number }[],
-        public readonly subscriptMesh: IconSubscript | null = null,
-        /** 建筑 → 下标文本在 subscriptMesh 中的起始字符位置与长度；belt count 变化时用于局部刷新 */
-        public readonly subscriptMap: Map<
-            BlueprintBuilding,
-            { startIdx: number; length: number }
-        > = new Map()
-    ) {
-        super();
-        this.add(...objects);
-        this.add(iconsMesh);
-        for (const c of cargos) this.add(c);
-        if (subscriptMesh) this.add(subscriptMesh);
-    }
-
-    public get icons() {
-        return this.iconsMesh.geometry;
-    }
-
-    public dispose() {
-        this.traverse((o) => {
-            if (o instanceof Mesh) {
-                (o as Mesh).geometry.dispose();
-            }
-            if (o instanceof InstancedMesh) {
-                o.dispose();
-            }
-        });
-    }
-}
-
-function buildingIconId(b: BlueprintBuilding) {
-    if (isLab(b.itemId)) {
-        const mode = (b.parameters as LabParamerters | null)?.researchMode;
-        // 矩阵合成：有配方显示配方图标，无配方退回研究站自身图标
-        if (mode === ResearchMode.Compose && b.recipeId > 0) {
-            return recipeIconId(b.recipeId);
-        }
-        // 科研模式 / 选择模式 / 合成但未选配方：显示研究站自身图标
-        return itemIconId(b.itemId);
-    }
-    return b.recipeId > 0 ? recipeIconId(b.recipeId) : itemIconId(b.itemId);
-}
-
-const scale3 = new Vector3();
-const trans = new Matrix4();
-function buildingIconPos(
-    b: BlueprintBuilding,
-    buildingTrans: Matrix4,
-    pos: Vector3,
-    scale: Vector2
-) {
-    const meta = buildingMeta.get(b.modelIndex);
-    if (meta === undefined) return false; // TODO: unknown building, print warning
-    trans.multiplyMatrices(buildingTrans, meta.iconTrans);
-    scale3.setFromMatrixScale(trans);
-    scale.set(scale3.x, scale3.y);
-    pos.setFromMatrixPosition(trans);
-    return true;
-}
-
-const beltIconScale = new Vector2(1.1, 1.1);
-const beltIconTrans = new Matrix4().makeTranslation(0, 0, 0.5);
-function beltIconPos(
-    b: BlueprintBuilding,
-    buildingTrans: Matrix4,
-    pos: Vector3
-) {
-    trans.multiplyMatrices(buildingTrans, beltIconTrans);
-    pos.setFromMatrixPosition(trans);
-}
-
-const sorterIconScale = new Vector2(0.8, 0.8);
-const sorterIconTrans = new Matrix4().makeTranslation(0, 0, INSERTER_HEIGHT);
-function sorterIconPos(
-    b: BlueprintBuilding,
-    buildingTrans: Matrix4,
-    pos: Vector3
-) {
-    trans.multiplyMatrices(buildingTrans, sorterIconTrans);
-    pos.setFromMatrixPosition(trans);
-}
-
-/** 传送带货物：正六棱柱，外接圆半径 0.15，长 0.4，轴向沿 z CylinderGeometry */
-function createBeltCargoGeometry(count: number): CargoGeometry {
-    const geo = new BoxGeometry(0.4, 0.4, 0.4);
-    geo.rotateX(Math.PI / 2); // 圆柱轴向从 y 转到 z
-    return makeCargoGeometry(geo, count);
-}
-
-/** 分拣器货物：正四棱柱，正方形截面 0.15 × 0.15，长 0.4（沿 z）BoxGeometry */
-function createInserterCargoGeometry(count: number): CargoGeometry {
-    const geo = new BoxGeometry(0.4, 0.4, 0.6);
-    return makeCargoGeometry(geo, count);
-}
-
-function buildBuildings(
-    transforms: Matrix4[][],
-    buildings: BlueprintBuilding[],
-    renderer: WebGLRenderer
-) {
-    const buildBelts = (belts: BlueprintBuilding[]) => {
-        const thickness = 0.1;
-        const material = new MeshLambertMaterial();
-        const objects: Object3D[] = [];
-        {
-            const geometry = new CylinderGeometry(0.32, 0.32, thickness, 6);
-            const mesh = new InstancedMesh(geometry, material, belts.length);
-            const offset = new Matrix4().makeRotationX(Math.PI / 2);
-            offset.premultiply(
-                new Matrix4().makeTranslation(0, 0, thickness / 2)
-            );
-            const trans = new Matrix4();
-            for (let i = 0; i < belts.length; i++) {
-                const b = belts[i];
-                trans.copy(transforms[b.index][0]);
-                trans.multiply(offset);
-                mesh.setMatrixAt(i, trans);
-                mesh.setColorAt(i, buildingColor(b));
-                modelRef[b.index] = { mesh, instance: i };
-            }
-            mesh.instanceMatrix.needsUpdate = true;
-            mesh.instanceColor!.needsUpdate = true;
-            objects.push(mesh);
-        }
-        const linkThickness = 0.6 * thickness;
-        {
-            // links
-            const geometry = new BoxGeometry(0.15, linkThickness, 1.0);
-            const mesh = new InstancedMesh(geometry, material, belts.length);
-            let numLinks = 0;
-            const offset = new Matrix4().makeTranslation(
-                0,
-                linkThickness / 2,
-                -0.5
-            );
-            const pos1 = new Vector3();
-            const pos2 = new Vector3();
-            const dir = new Vector3();
-            const temp = new Matrix4();
-            const trans = new Matrix4();
-            for (let i = 0; i < belts.length; i++) {
-                const b1 = belts[i];
-                if (b1.outputObjIdx < 0) continue;
-                pos1.setFromMatrixPosition(transforms[b1.index][0]);
-                pos2.setFromMatrixPosition(transforms[b1.outputObjIdx][0]);
-                const len = dir.subVectors(pos1, pos2).length();
-                trans.identity();
-                trans.lookAt(pos1, pos2, pos1);
-                trans.premultiply(temp.makeTranslation(pos1.x, pos1.y, pos1.z));
-
-                const color = buildingColor(b1);
-                addBeltCargo(trans, color, len);
-
-                trans.multiply(temp.makeScale(1, 1, len));
-                trans.multiply(offset);
-                mesh.setMatrixAt(numLinks, trans);
-                mesh.setColorAt(numLinks, color);
-                numLinks++;
-            }
-            if (numLinks) {
-                mesh.count = numLinks;
-                mesh.instanceMatrix.needsUpdate = true;
-                mesh.instanceColor!.needsUpdate = true;
-                objects.push(mesh);
-            }
-        }
-        return objects;
-    };
-    const buildInserters = (inserters: BlueprintBuilding[]) => {
-        const geometry = new BoxGeometry(0.1, 0.1, 1.0);
-        const material = new MeshLambertMaterial();
-        const mesh = new InstancedMesh(geometry, material, inserters.length);
-        const offset = new Matrix4().makeTranslation(0, 0, -0.5);
-        const temp = new Matrix4();
-        const trans = new Matrix4();
-        for (let i = 0; i < inserters.length; i++) {
-            const b = inserters[i];
-
-            const len = inserterTrans(transforms[b.index], trans);
-            const color = buildingColor(b);
-            addInserterCargo(trans, color, len);
-
-            trans.multiply(temp.makeScale(1, 1, len));
-            trans.multiply(offset);
-            mesh.setMatrixAt(i, trans);
-            mesh.setColorAt(i, color);
-            modelRef[b.index] = { mesh, instance: i };
-        }
-        mesh.instanceMatrix.needsUpdate = true;
-        mesh.instanceColor!.needsUpdate = true;
-        return [mesh];
-    };
-    const buildBoxes = (boxes: BlueprintBuilding[]) => {
-        const geometry = new BoxGeometry(1.0, 1.0, 1.0);
-        const material = new MeshLambertMaterial();
-        const mesh = new InstancedMesh(geometry, material, boxes.length);
-        const trans = new Matrix4();
-        for (let i = 0; i < boxes.length; i++) {
-            const b = boxes[i];
-            const meta = buildingMeta.get(b.modelIndex);
-            if (meta === undefined) continue;
-            trans.multiplyMatrices(transforms[b.index][0], meta.unitBoxTrans);
-            mesh.setMatrixAt(i, trans);
-            mesh.setColorAt(i, meta.color);
-            modelRef[b.index] = { mesh, instance: i };
-        }
-        mesh.instanceMatrix.needsUpdate = true;
-        mesh.instanceColor!.needsUpdate = true;
-        return [mesh];
-    };
-    const buildIcons = (
-        iconBuildings: BlueprintBuilding[],
-        iconBelts: BlueprintBuilding[],
-        iconInsterters: BlueprintBuilding[]
-    ) => {
-        const subscripts = new Map<BlueprintBuilding, string>();
-        for (const b of iconBelts) {
-            if (b.parameters === null) continue;
-            const p = b.parameters as BeltParameters;
-            if (p.count === 0) continue;
-            let s;
-            if (p.count >= 100000)
-                s = Math.floor(p.count / 1000).toFixed(0) + "k";
-            else s = p.count.toFixed(0);
-            subscripts.set(b, s);
-        }
-
-        const count =
-            iconBuildings.length + iconBelts.length + iconInsterters.length;
-        const icons = new IconGeometry(count);
-
-        let subscriptsMesh: null | IconSubscript = null;
-        const subscriptMap = new Map<
-            BlueprintBuilding,
-            { startIdx: number; length: number }
-        >();
-        if (subscripts.size > 0) {
-            let numChars = 0;
-            for (const s of subscripts.values()) {
-                numChars += s.length;
-            }
-            subscriptsMesh = new IconSubscript(numChars);
-        }
-        const pos = new Vector3();
-
-        let subscriptIdx = 0;
-        for (let i = 0; i < iconBelts.length; i++) {
-            const b = iconBelts[i];
-            beltIconPos(b, transforms[b.index][0], pos);
-            const iconId = iconTexture.requestIcon(
-                (b.parameters as BeltParameters).iconId
-            );
-            icons.addIcon(b, iconId, pos, beltIconScale);
-
-            const sub = subscripts.get(b);
-            if (sub !== undefined) {
-                subscriptsMesh!.setText(subscriptIdx, pos, beltIconScale, sub);
-                subscriptMap.set(b, {
-                    startIdx: subscriptIdx,
-                    length: sub.length,
-                });
-                subscriptIdx += sub.length;
-            }
-        }
-
-        for (let i = 0; i < iconInsterters.length; i++) {
-            const b = iconInsterters[i];
-            sorterIconPos(b, transforms[b.index][0], pos);
-            const iconId = iconTexture.requestIcon(itemIconId(b.filterId));
-            icons.addIcon(b, iconId, pos, sorterIconScale);
-        }
-
-        const buildingIconScale = new Vector2();
-        for (let i = 0; i < iconBuildings.length; i++) {
-            const b = iconBuildings[i];
-            if (
-                !buildingIconPos(
-                    b,
-                    transforms[b.index][0],
-                    pos,
-                    buildingIconScale
-                )
-            )
-                continue;
-            const iconId = iconTexture.requestIcon(buildingIconId(b));
-            icons.addIcon(b, iconId, pos, buildingIconScale);
-        }
-
-        if (subscriptsMesh !== null) {
-            subscriptsMesh.needsUpdate();
-        }
-        return [icons, subscriptsMesh, subscriptMap] as const;
-    };
-
-    const belts = buildings.filter((b) => isBelt(b.itemId));
-    const inserters = buildings.filter((b) => isInserter(b.itemId));
-
-    const boxes = buildings.filter(
-        (b) => !isInserter(b.itemId) && !isBelt(b.itemId)
-    );
-
-    const iconBuildings = boxes.filter((b) => !noIconBuildings.has(b.itemId));
-    const iconBelts = belts.filter(
-        (b) => b.parameters && (b.parameters as BeltParameters).iconId > 0
-    );
-    const iconInsterters = inserters.filter((b) => b.filterId > 0);
-
-    const modelRef = new Array<{ mesh: InstancedMesh; instance: number }>(
-        buildings.length
-    );
-    const beltCargosMesh = new Cargos(
-        createBeltCargoGeometry(belts.length),
-        belts.length
-    );
-    const inserterCargosMesh = new Cargos(
-        createInserterCargoGeometry(inserters.length),
-        inserters.length
-    );
-    let numBeltCargos = 0;
-    let numInserterCargos = 0;
-    const addBeltCargo = (trans: Matrix4, color: Color, distance: number) => {
-        beltCargosMesh.setMatrixAt(numBeltCargos, trans);
-        beltCargosMesh.setColorAt(numBeltCargos, color);
-        beltCargosMesh.setCargoDistanceAt(numBeltCargos, distance);
-        numBeltCargos++;
-    };
-    const addInserterCargo = (
-        trans: Matrix4,
-        color: Color,
-        distance: number
-    ) => {
-        inserterCargosMesh.setMatrixAt(numInserterCargos, trans);
-        inserterCargosMesh.setColorAt(numInserterCargos, color);
-        inserterCargosMesh.setCargoDistanceAt(numInserterCargos, distance);
-        numInserterCargos++;
-    };
-
-    const meshes: Object3D[] = [];
-    if (belts.length) meshes.push(...buildBelts(belts));
-
-    if (inserters.length) meshes.push(...buildInserters(inserters));
-
-    if (numBeltCargos) {
-        beltCargosMesh.count = numBeltCargos;
-        beltCargosMesh.instanceMatrix.needsUpdate = true;
-        beltCargosMesh.instanceColor!.needsUpdate = true;
-        beltCargosMesh.geometry.cargoDistance.needsUpdate = true;
-    }
-    if (numInserterCargos) {
-        inserterCargosMesh.count = numInserterCargos;
-        inserterCargosMesh.instanceMatrix.needsUpdate = true;
-        inserterCargosMesh.instanceColor!.needsUpdate = true;
-        inserterCargosMesh.geometry.cargoDistance.needsUpdate = true;
-    }
-
-    if (boxes.length) meshes.push(...buildBoxes(boxes));
-
-    const iconTexture = new IconTexture(renderer);
-    const [icons, subscriptsMesh, subscriptMap] = buildIcons(
-        iconBuildings,
-        iconBelts,
-        iconInsterters
-    );
-    if (subscriptsMesh) {
-        subscriptsMesh.renderOrder = 11;
-    }
-
-    const iconMesh = new Icons(iconTexture.texture, icons);
-    iconMesh.renderOrder = 10;
-
-    return new AllBuildings(
-        meshes,
-        iconMesh,
-        iconTexture,
-        [beltCargosMesh, inserterCargosMesh],
-        modelRef,
-        subscriptsMesh,
-        subscriptMap
-    );
-}
-
-/** 建筑颜色：未知模型用中性灰兜底（`!` 断言会让一个未知模型毁掉整次场景重建） */
-const UNKNOWN_BUILDING_COLOR = new Color(0x808080);
-function buildingColor(b: BlueprintBuilding): Color {
-    return buildingMeta.get(b.modelIndex)?.color ?? UNKNOWN_BUILDING_COLOR;
-}
-
+/**
+ * 注册编辑器的增量刷新回调（图标 / 下标局部更新）。
+ *
+ * **留在 Vue 层**（方案 §5 第 7 行）：它依赖 `Updater`（`@/command`，import vue），
+ * 放进 `lib/core` 会破坏「core 不依赖 Vue」的约束。core 只提供 `AllBuildings`
+ * 的公开面（`icons` / `iconTexture` / `subscriptMesh` / `subscriptMap`）。
+ */
 function registerUpdater(
     updater: Updater,
     buildings: AllBuildings,
@@ -523,7 +66,7 @@ function registerUpdater(
         } else if (iconId !== 0) {
             // 之前无图标，现在有了 → 动态添加
             const pos = new Vector3();
-            const trans = calcBuildingTrans(R, posBP, b);
+            const trans = calcBuildingTrans(PLANET_RADIUS, posBP, b);
             beltIconPos(b, trans[0], pos);
             icons.addIcon(b, iconId, pos, beltIconScale, true);
         }
@@ -543,7 +86,7 @@ function registerUpdater(
         // 原因：subscriptMesh 是连续字符池，长度变化会覆盖/遗漏后续 belt 的下标
         if (s.length !== subEntry.length) return;
         const pos = new Vector3();
-        const trans = calcBuildingTrans(R, posBP, b);
+        const trans = calcBuildingTrans(PLANET_RADIUS, posBP, b);
         beltIconPos(b, trans[0], pos);
         buildings.subscriptMesh.setText(
             subEntry.startIdx,
@@ -567,7 +110,7 @@ function registerUpdater(
         } else if (iconId !== 0) {
             // 之前无图标，现在有了 → 动态添加
             const pos = new Vector3();
-            const trans = calcBuildingTrans(R, posBP, b);
+            const trans = calcBuildingTrans(PLANET_RADIUS, posBP, b);
             sorterIconPos(b, trans[0], pos);
             icons.addIcon(b, iconId, pos, sorterIconScale, true);
         }
@@ -576,50 +119,97 @@ function registerUpdater(
     // updateStationInfo：当前物流塔面板自己响应式刷新即可；
     // 若未来要按库存首物品染色，在这里改颜色 attribute。
 }
-
-const R = 200.2;
-const SEGMENT = 200;
 </script>
 
 <script setup lang="ts">
 import {
     ref,
+    shallowRef,
     onMounted,
     Ref,
     onUnmounted,
-    shallowRef,
     watchEffect,
     computed,
     inject,
 } from "vue";
-import { Scene, PerspectiveCamera, SphereGeometry, AmbientLight } from "three";
-import { PlanetMapControls } from "@/PlanetMapControls";
+import {
+    Scene,
+    PerspectiveCamera,
+    WebGLRenderer,
+    Matrix4,
+    Ray,
+    Sphere,
+    Mesh,
+    BoxGeometry,
+    MeshStandardMaterial,
+    MeshBasicMaterial,
+    LineBasicMaterial,
+    InstancedMesh,
+    Line,
+    Color,
+    Path,
+    Shape,
+    ShapeGeometry,
+    PlaneGeometry,
+    SphereGeometry,
+    DoubleSide,
+    BufferGeometry,
+    Float32BufferAttribute,
+} from "three";
+import { RemoveBuildingCommand } from "@/blueprint/removeBuilding";
+import { commandQueueKey } from "@/define";
+import { findPosForAreas } from "@/planet/planet";
+import { buildReforms } from "@/blueprint/reform";
+import { onBuildingModelsChanged } from "@/models/buildingModel";
+import { PlanetMapControls } from "@/planet/PlanetMapControls";
+import { createSkyGradient } from "@/planet/skyGradient";
 import { attachCamera, attachRenderer } from "@/utils";
+import {
+    createNeutralEnvironment,
+    setBuildingEnvironment,
+} from "@/models/envMap";
+import { setTextureMaxAnisotropy } from "@/models/textureMaps";
+import { setKtx2Renderer } from "@/models/ktx2";
+import { getAppliedRenderSettings } from "@/render/renderSettings";
+import { setSettingsProvider } from "@/models/glbLoader";
+import { IconTexture } from "@/icon/iconTexture";
+import {
+    HEIGHT_GRID_SIZE,
+    GRID_PER_SEGMENT,
+    PLANET_SEGMENT,
+} from "@/planet/planetConstants";
+import { buildBuildings } from "@/lib/core/buildBuildings";
+import { buildBVH } from "@/lib/core/buildBVH";
+import { createPlanetScene } from "@/planet/planetScene";
+import type { BuildBuildingsResult } from "@/lib/core/buildBuildings";
+import type { BuildingModelRef } from "@/lib/core/types";
+import type { BlueprintBuilding } from "@/blueprint/parser";
+
+// ---- 编辑交互层（从 editing_mode 移植，坐标/构造全部走新架构的库）----
 import { usePlacement, resetToIdle } from "@/editor/placementState";
 import {
+    ROOT_GRID_SIZE,
     areaGridSize,
     canvasTargetAt,
     materializeCanvasTarget,
     planetToLocal,
-    type AreaGridOrigin,
-    type CanvasTarget,
 } from "@/blueprint/globe";
+import type { AreaGridOrigin, CanvasTarget } from "@/blueprint/globe";
 import { createBuilding, CreateBuildingCommand } from "@/blueprint/create";
-import {
-    buildBeltLine,
-    CreateBeltLineCommand,
-    type BeltPathMode,
-    type BeltPortEnd,
-} from "@/blueprint/beltLine";
+import { buildBeltLine, CreateBeltLineCommand } from "@/blueprint/beltLine";
+import type { BeltPathMode, BeltPortEnd } from "@/blueprint/beltLine";
 import {
     getBeltPorts,
     hasBeltPorts,
     pickBeltPort,
     portWorldNormal,
     portWorldOffset,
-    type BeltPort,
 } from "@/data/beltPorts";
-import { createSorterBetween, collectOccupiedSlots } from "@/blueprint/sorter";
+import type { BeltPort } from "@/data/beltPorts";
+import {
+    createSorterBetween,
+    collectOccupiedSlots,
+} from "@/blueprint/sorter";
 import { PaintReformCellCommand, reformColorHex } from "@/blueprint/reformEdit";
 import { getBuildingSlots, slotDisplayPos } from "@/data/buildingSlots";
 import {
@@ -631,12 +221,12 @@ import {
     stackYawFor,
     stackedZ,
 } from "@/data/stacking";
+import { buildingMeta } from "@/data/building";
+import { isBelt, isInserter } from "@/data/items";
 
-/**
- * 只需要屏幕坐标的事件最小结构：MouseEvent / PointerEvent 均可赋值，
- * 也让"鼠标静止时用最后一次坐标重算预览"可以直接传一个普通对象。
- */
-type PointerCoords = { clientX: number; clientY: number };
+// 加载器需要在「GLB 到达」与「设置变更重挂贴图」时读取当前贴图设置。
+// 注入 reactive 单例的读取函数，保持设置面板的响应式驱动（方案 D2）。
+setSettingsProvider(() => getAppliedRenderSettings());
 
 const props = defineProps<{
     selectedBuildingIndex: number | null;
@@ -644,116 +234,122 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     (e: "update:selectedBuildingIndex", index: number | null): void;
+    // App.vue：`@click-empty="palette?.collapse()"`。左键点在空白处（非放置态）时发。
     (e: "clickEmpty"): void;
 }>();
 
-const scene = new Scene();
-scene.add(new AmbientLight(0xffffff, 0.3));
-const dirLight = new DirectionalLight(0xffffff, 2);
-scene.add(dirLight);
-{
-    const geometry = new SphereGeometry(R, SEGMENT, SEGMENT / 2);
-    const material = new MeshStandardMaterial({ color: 0xb0b0b0 });
-    const planet = new Mesh(geometry, material);
-    scene.add(planet);
-}
-const { grids: planetGrid, material: gridMaterial } = buildPlanetGrid(
-    R * 1.0001,
-    SEGMENT
-);
-scene.add(planetGrid);
+/**
+ * 只需要屏幕坐标的事件最小结构：MouseEvent / PointerEvent 均可赋值，
+ * 也让"鼠标静止时用最后一次坐标重算预览"可以直接传一个普通对象。
+ */
+type PointerCoords = { clientX: number; clientY: number };
 
+/** 编辑模式状态（放置/删除/地基 + 朝向/吸附），与 App.vue 共用同一个 reactive 单例 */
 const placement = usePlacement();
-// 网格线随模式变色：预览原色 / 编辑绿 / 删除红 / 地基蓝
+
+const scene = new Scene();
+const planetScene = createPlanetScene(PLANET_RADIUS, PLANET_SEGMENT);
+const dirLight = planetScene.dirLight;
+scene.add(planetScene.root);
+
+// 网格线随编辑状态变色：预览原色 / 放置绿 / 删除红 / 地基蓝。
+// 粗线与细线取同一个颜色，细线仍保持自己的半透明（见 `createPlanetScene`）。
 watchEffect(() => {
+    let color = 0xf0f0f0;
     if (placement.appMode === "edit") {
-        if (placement.mode === "deleting") gridMaterial.color.set(0xff5050);
-        else if (placement.mode === "reforming")
-            gridMaterial.color.set(0x40a0ff);
-        else gridMaterial.color.set(0x50fa50);
-    } else gridMaterial.color.set(0xf0f0f0);
+        if (placement.mode === "deleting") color = 0xff5050;
+        else if (placement.mode === "reforming") color = 0x40a0ff;
+        else color = 0x50fa50;
+    }
+    planetScene.gridMaterial.color.setHex(color);
+    planetScene.fineGridMaterial?.color.setHex(color);
 });
 
 const root: Ref<HTMLDivElement | null> = ref(null);
 const renderer = new WebGLRenderer({ antialias: true });
 attachRenderer(root, renderer);
 
+// 建筑材质：贴图各向异性过滤 + 程序化中性环境反射。
+// 环境反射只挂到建筑材质（material.envMap），不设 scene.environment，
+// 免得行星本体、网格线跟着泛白。
+setTextureMaxAnisotropy(renderer.capabilities.getMaxAnisotropy());
+// KTX2 转码目标要按当前 GPU 能力挑（ASTC / ETC2 / BC7 / PVRTC），
+// 所以必须把渲染器交给 ktx2 模块，GLTFLoader 解析 GLB 时才有转码器可用。
+setKtx2Renderer(renderer);
+setBuildingEnvironment(createNeutralEnvironment(renderer));
+
 const camera = new PerspectiveCamera(50);
+// near 保持 0.5：相机最低离地 1.5（PlanetMapControls.minHeight），最近可见面约 1.5，
+// 再往小会让 24 位深度缓冲在 z≈200 处的精度掉到 0.015 的地基抬升量以下，地基会闪
 camera.near = 0.5;
 camera.far = 3000;
-camera.position.z = 2 * R;
+camera.position.z = 2 * PLANET_RADIUS;
 attachCamera(root, camera);
+
+// 天光/星空背景：平视时地平线上一条大气雾带 + 头顶星空；拉远时星球带一圈大气边缘光
+const sky = createSkyGradient({ planetRadius: PLANET_RADIUS });
+scene.add(sky.mesh);
+onUnmounted(() => {
+    scene.remove(sky.mesh);
+    sky.dispose();
+});
 
 const commandQueue = inject(commandQueueKey)!;
 
 let controls: PlanetMapControls | null = null;
 
-/** 一次重建产出的场景模型（建筑 + 地基 + 拾取结构 + 区域定位） */
-interface SceneModel {
-    buildings: AllBuildings;
-    reforms: Reforms | null;
-    bvh: BVH;
-    pos: PositionedBlueprint;
-}
+/** 外部 GLB 模型到达时自增，触发场景按“GLB 优先”重建 */
+const modelVersion = ref(0);
 
 /**
- * 当前生效的场景模型。
- *
- * 语义与旧实现一致（下游都读 `b.value.xxx`），但**替换是原子的**：新模型构建成功后才
- * 移除旧模型。旧实现用 `watchEffect` + `onCleanup`，清理函数在每次重算**之前**执行 ——
- * 一旦新一次计算抛错（区域越界 / 未知模型 / 定位失败），旧模型已从场景移除、新模型没加
- * 进去，表现就是"模型整体消失且不会自己回来"。
+ * 图标图集跨重建复用：每次重建都 new 一个会重新分配 1920×1920 纹理，
+ * 并重发全部图标请求（方案 §5 第 9 行的配套修正）。
  */
-const b = shallowRef<SceneModel | null>(null);
+const editorIconTexture = new IconTexture(renderer);
+onUnmounted(() => editorIconTexture.dispose());
 
-/** 上一次真正加进场景的模型（用于原子替换时移除旧内容） */
-let appliedModel: SceneModel | null = null;
-
-function applySceneModel(next: SceneModel | null) {
-    if (next === appliedModel) return;
-    if (appliedModel !== null) {
-        scene.remove(appliedModel.buildings);
-        appliedModel.buildings.dispose();
-        if (appliedModel.reforms !== null) scene.remove(appliedModel.reforms);
-    }
-    appliedModel = next;
-    b.value = next;
-    if (next !== null) {
-        scene.add(next.buildings);
-        if (next.reforms !== null) scene.add(next.reforms);
-    }
-}
-
-watchEffect(() => {
+const b = computed(() => {
     // 任意命令（剔除建筑 / 撤销 / 重做）后整体重建场景
     commandQueue.value?.execVersion.value;
-    const queue = commandQueue.value;
-    if (queue === null) {
-        applySceneModel(null);
-        return;
-    }
-    rebuildScene(
-        (): SceneModel => {
-            const data = buildSceneData(queue.data, R, SEGMENT);
-            const reforms = buildReforms(
-                R,
-                data.pos,
-                queue.data.reformData,
-                data.reformCells
-            );
-            const buildings = buildBuildings(
-                data.transforms,
-                queue.data.buildings,
-                renderer
-            );
-            // 放在最后：只有模型建成了才换掉 updater 的回调
-            registerUpdater(queue.updater, buildings, data.pos);
-            return { buildings, reforms, bvh: data.bvh, pos: data.pos };
-        },
-        applySceneModel,
-        (error) =>
-            console.error("3D 场景重建失败，保留上一次的模型", error)
+    // 外部 GLB 模型加载完成 → 重建场景，让新模型接管渲染（旧场景由下面的 watchEffect 回收）
+    modelVersion.value;
+    if (!commandQueue.value) return null;
+    const d = commandQueue.value.data;
+    // 区域定位：渲染与编辑交互（放置幽灵、铺带、架接、地基）共用这一份，
+    // 保证预览、落位与真实模型逐格一致（见 `@/blueprint/globe` 的全球画布）。
+    const pos = findPosForAreas(d.areas, PLANET_SEGMENT);
+    const transforms = d.buildings.map((building) =>
+        calcBuildingTrans(PLANET_RADIUS, pos, building)
     );
+    const applied = getAppliedRenderSettings();
+    const built: BuildBuildingsResult = buildBuildings(
+        transforms,
+        d.buildings,
+        {
+            settings: applied,
+            textureSink: renderer,
+            iconTexture: editorIconTexture,
+            textureSettings: applied,
+        }
+    );
+    const { bvh } = buildBVH(transforms, d.buildings);
+    const reforms = buildReforms(PLANET_RADIUS, pos, d.reformData);
+    registerUpdater(commandQueue.value.updater, built.buildings, pos);
+    return { buildings: built.buildings, bvh, reforms, pos };
+});
+
+watchEffect((onCleanUp) => {
+    if (b.value !== null) {
+        const buildings = b.value.buildings;
+        const reforms = b.value.reforms;
+        scene.add(buildings);
+        if (reforms) scene.add(reforms);
+        onCleanUp(() => {
+            scene.remove(buildings);
+            buildings.dispose();
+            if (reforms) scene.remove(reforms);
+        });
+    }
 });
 
 {
@@ -776,7 +372,36 @@ watchEffect(() => {
     });
 }
 
-// 放置预览：半透明绿盒，编辑模式 placing 时跟随鼠标吸附网格（单个 Mesh 复用）
+// =============================================================================================
+// 编辑交互层
+//
+// 以下全部是 editing_mode 分支的 3D 编辑交互，已适配 growingTree 的渲染骨架：
+// 世界矩阵一律用 `calcBuildingTrans(PLANET_RADIUS, b.value.pos, …)` 现算，
+// 坐标空间一律走 `@/blueprint/globe` 的全球画布（一条纬度带一个区域）。
+// =============================================================================================
+
+/**
+ * 放置/铺带失败提示：1.6 s 自动消失。
+ * TODO(i18n)：交互层唯一的内联文案，后续应迁入 `src/locales/*.json`（本次只改本文件）。
+ */
+const hint = ref("");
+let hintTimer: number | null = null;
+function showHint(text: string) {
+    hint.value = text;
+    if (hintTimer !== null) window.clearTimeout(hintTimer);
+    hintTimer = window.setTimeout(() => {
+        hintTimer = null;
+        hint.value = "";
+    }, 1600);
+}
+onUnmounted(() => {
+    if (hintTimer !== null) {
+        window.clearTimeout(hintTimer);
+        hintTimer = null;
+    }
+});
+
+/** 放置幽灵：半透明绿盒，placing 时跟随鼠标吸附网格（单个 Mesh 复用） */
 const previewVisible = ref(false);
 const previewMesh = new Mesh(
     new BoxGeometry(1, 1, 1),
@@ -790,9 +415,12 @@ const previewMesh = new Mesh(
 previewMesh.matrixAutoUpdate = false;
 previewMesh.renderOrder = 9;
 watchEffect(() => {
+    // 传送带/分拣器有各自的预览层：切到它们时绿盒必须立即让位（否则会留下上一次的幽灵）
     const show =
         placement.appMode === "edit" &&
         placement.mode === "placing" &&
+        !isPlacingBelt() &&
+        !isPlacingSorter() &&
         previewVisible.value;
     if (show) scene.add(previewMesh);
     else scene.remove(previewMesh);
@@ -845,7 +473,7 @@ const sorterSource = ref<number | null>(null);
 // 传送带路径走法（R 键循环切换）：latFirst → lonFirst → straight → latFirst
 let beltPathMode: BeltPathMode = "latFirst";
 const BELT_PATH_MODES: BeltPathMode[] = ["latFirst", "lonFirst", "straight"];
-// 实际切换函数在 onMounted 内部定义（需访问 lastMouseEvent/updateBeltPreview），
+// 实际切换函数在 onMounted 内部定义（需访问 lastPointer/updateBeltPreview），
 // 此处用 ref 桥接供 defineExpose 调用
 const cycleBeltPathModeFn = ref<(() => BeltPathMode) | null>(null);
 
@@ -981,8 +609,13 @@ const sorterSrcBox = new Mesh(
 );
 sorterSrcBox.matrixAutoUpdate = false;
 watchEffect(() => {
-    if (b.value !== null && isPlacingSorter() && sorterSource.value !== null) {
-        sorterSrcBox.matrix.copy(b.value.bvh.boxes[sorterSource.value]);
+    // 命令重建后下标可能越界（撤销/剔除），取不到选择盒就当作不可显示
+    const box =
+        b.value !== null && sorterSource.value !== null
+            ? b.value.bvh.boxes[sorterSource.value]
+            : undefined;
+    if (isPlacingSorter() && box !== undefined) {
+        sorterSrcBox.matrix.copy(box);
         scene.add(sorterSrcBox);
     } else {
         scene.remove(sorterSrcBox);
@@ -1088,7 +721,7 @@ const overlayY = new Vector3();
 
 /**
  * 光标（连续网格坐标）→ 建筑上的传送带口。
- * 与 `BlueprintEditor.portEndAt` / 标记覆盖层共用同一套换算：
+ * 与 `portEndAt` / 标记覆盖层共用同一套换算：
  * 命中点 → 建筑局部系（`x` 按纬度归一到赤道基准）→ `pickBeltPort`（先按高度层、再按 xy 最近）。
  */
 function beltPortAtPointer(
@@ -1100,6 +733,7 @@ function beltPortAtPointer(
     if (!hasBeltPorts(building.itemId, building.modelIndex)) return null;
     const bp = building.localOffset[0];
     const area = pos.areas[building.areaIndex];
+    if (area === undefined) return null;
     const turn = areaGridSize(area.segment);
     // 经向环形坐标取短弧（该区域自己的格数，不是固定的 1000）
     let dx = anchor.x - bp.x;
@@ -1107,7 +741,8 @@ function beltPortAtPointer(
     else if (dx < -turn / 2) dx += turn;
     const dy = anchor.y - bp.y;
     const cosLat = Math.cos(
-        (area.latitude + bp.y) * ((2 * Math.PI) / (SEGMENT * 5))
+        (area.latitude + bp.y) *
+            ((2 * Math.PI) / (PLANET_SEGMENT * GRID_PER_SEGMENT))
     );
     const yaw = building.yaw[0];
     const r = (yaw * Math.PI) / 180;
@@ -1160,7 +795,8 @@ function refreshSorterOverlay() {
     if (hover === null) return;
     const data = queue.data;
     const hoverBuilding = data.buildings[hover];
-    const trans = calcBuildingTrans(R, bp.pos, hoverBuilding);
+    if (hoverBuilding === undefined) return;
+    const trans = calcBuildingTrans(PLANET_RADIUS, bp.pos, hoverBuilding);
 
     if (placingSorter && isBelt(hoverBuilding.itemId)) {
         // 皮带：青色范围条沿主轴（盒 y 轴随 yaw 旋转对齐）
@@ -1172,10 +808,12 @@ function refreshSorterOverlay() {
 
     // 已选源且悬停有效目标 → 全真预演（含被占后的平行切换；与实际放置完全一致）
     const src = placingSorter ? sorterSource.value : null;
+    // 撤销/剔除后源下标可能越界：越界就当作"没有源"，别让覆盖层抛错
+    const srcBuilding = src === null ? undefined : data.buildings[src];
     let preview: BlueprintBuilding | null = null;
-    if (src !== null && src !== hover) {
+    if (src !== null && srcBuilding !== undefined && src !== hover) {
         preview = createSorterBetween(
-            data.buildings[src],
+            srcBuilding,
             hoverBuilding,
             placement.selectedItemId,
             placement.selectedModelIndex,
@@ -1268,23 +906,19 @@ function refreshSorterOverlay() {
     }
 
     // 预览连线（建筑有无 slot 数据均显示；绿=可放置，红=不可）
-    if (src !== null && src !== hover) {
+    if (src !== null && srcBuilding !== undefined && src !== hover) {
         if (preview) {
-            const et = calcBuildingTrans(R, bp.pos, preview);
+            const et = calcBuildingTrans(PLANET_RADIUS, bp.pos, preview);
             overlayP0.setFromMatrixPosition(et[0]);
             overlayP1.setFromMatrixPosition(et[1]);
-            (sorterPreviewMesh.material as MeshBasicMaterial).color.setHex(
-                0x50fa50
-            );
+            sorterPreviewMesh.material.color.setHex(0x50fa50);
         } else {
             // 不可放置：连两建筑中心的红线提示
             overlayP0.setFromMatrixPosition(
-                calcBuildingTrans(R, bp.pos, data.buildings[src])[0]
+                calcBuildingTrans(PLANET_RADIUS, bp.pos, srcBuilding)[0]
             );
             overlayP1.setFromMatrixPosition(trans[0]);
-            (sorterPreviewMesh.material as MeshBasicMaterial).color.setHex(
-                0xff4040
-            );
+            sorterPreviewMesh.material.color.setHex(0xff4040);
         }
         // 右手正交基：x=切向(yaw 轴)，y=径向，z=沿连线（连线方向在局部 xy 平面内）
         overlayZ.subVectors(overlayP1, overlayP0);
@@ -1325,23 +959,117 @@ watchEffect(() => {
     }
 });
 
+/** 入场仰角：85° ≈ 俯瞰（旧版的「正上方地图」视角） */
+const HOME_TILT = (85 * Math.PI) / 180;
+
+/**
+ * 按当前场景算出入场姿态并回到它。
+ *
+ * 锚点 = 所有建筑的世界坐标质心对应的球面点，距离按图纸外接圆半径给，
+ * 朝向取「垂直于图纸长边的切向」，这样打开蓝图时图纸长边横在屏幕水平方向。
+ */
+const applyHome = () => {
+    const c = controls;
+    if (c === null) return;
+
+    let distance = 150;
+    const boxes = b.value?.bvh.boxes;
+    if (boxes !== undefined && boxes.length > 0) {
+        // 质心
+        let cx = 0,
+            cy = 0,
+            cz = 0;
+        for (const m of boxes) {
+            const e = m.elements;
+            cx += e[12];
+            cy += e[13];
+            cz += e[14];
+        }
+        const n = boxes.length;
+        cx /= n;
+        cy /= n;
+        cz /= n;
+        const length = Math.hypot(cx, cy, cz);
+        if (length > 1e-6) {
+            // 锚点：球面法线
+            const nx = cx / length,
+                ny = cy / length,
+                nz = cz / length;
+            // 切平面基：e1 取 +Z 在切平面上的投影（退化成 +X）
+            let e1x = -nz * nx,
+                e1y = -nz * ny,
+                e1z = 1 - nz * nz;
+            if (e1x * e1x + e1y * e1y + e1z * e1z < 1e-6) {
+                e1x = 1 - nx * nx;
+                e1y = -nx * ny;
+                e1z = -nx * nz;
+            }
+            const e1Len = Math.hypot(e1x, e1y, e1z);
+            e1x /= e1Len;
+            e1y /= e1Len;
+            e1z /= e1Len;
+            // e2 = n × e1
+            const e2x = ny * e1z - nz * e1y;
+            const e2y = nz * e1x - nx * e1z;
+            const e2z = nx * e1y - ny * e1x;
+            // 在切平面上量一下图纸的延展
+            let min1 = Infinity,
+                max1 = -Infinity,
+                min2 = Infinity,
+                max2 = -Infinity;
+            for (const m of boxes) {
+                const e = m.elements;
+                const px = e[12] - cx,
+                    py = e[13] - cy,
+                    pz = e[14] - cz;
+                const a = px * e1x + py * e1y + pz * e1z;
+                const b2 = px * e2x + py * e2y + pz * e2z;
+                min1 = Math.min(min1, a);
+                max1 = Math.max(max1, a);
+                min2 = Math.min(min2, b2);
+                max2 = Math.max(max2, b2);
+            }
+            const extent1 = max1 - min1;
+            const extent2 = max2 - min2;
+            // 相机站在「垂直于长边」的方向上，长边自然横在屏幕水平方向
+            const long = extent1 >= extent2;
+            c.anchor.set(nx, ny, nz);
+            if (long) c.viewDir.set(e2x, e2y, e2z);
+            else c.viewDir.set(e1x, e1y, e1z);
+            // 外接圆半径 → 视野刚好兜住图纸的距离
+            distance = Math.max(40, 0.5 * Math.hypot(extent1, extent2) * 2.4);
+        }
+    }
+
+    c.setHome(c.anchor, c.viewDir, HOME_TILT, distance);
+    c.reset();
+};
+
 onMounted(() => {
     const rootEl = root.value!;
 
+    // 星球地图相机：锚点在球面上，可自由俯仰（0 = 平视，85° = 俯瞰）
     controls = new PlanetMapControls(camera, renderer.domElement);
     const c = controls;
     c.listenToKeyEvents(rootEl);
-    c.minDistance = R * 1.04;
-    c.maxDistance = R * 4;
-    c.targetRadius = R;
+    c.planetRadius = PLANET_RADIUS;
+    c.minDistance = 3;
+    c.maxDistance = 1200;
+    c.minHeight = 1.5;
+    c.minTilt = 0;
+    c.maxTilt = (85 * Math.PI) / 180;
+    c.tilt = (85 * Math.PI) / 180;
+    c.distance = 150;
     onUnmounted(() => c.dispose());
     c.update();
+    // 有蓝图就锚到图纸质心，没有就停在「+Z 正上方俯瞰」的默认位置
+    applyHome();
 
     const ray = new Ray();
-    const planetSphere = new Sphere(new Vector3(), R);
+    const planetSphere = new Sphere(new Vector3(), PLANET_RADIUS);
     const v = new Vector3();
-    const GRID_SIZE = 1000; // 200 segments * 5 grids/segment
-    const RAD_TO_GRID = GRID_SIZE / (2 * Math.PI);
+    /** 全星球经向格数（赤道带一整圈）：把弧度换成 1000 格/圈口径的网格坐标 */
+    const RAD_TO_GRID = ROOT_GRID_SIZE / (2 * Math.PI);
 
     const setupRay = (e: PointerCoords) => {
         ray.origin.setFromMatrixPosition(camera.matrixWorld);
@@ -1367,7 +1095,7 @@ onMounted(() => {
 
         return intersects.length === 0 ? null : intersects[0].index;
     };
-    /** Raycast to planet sphere, return 3D hit point or null */
+    /** Raycast 到星球球面：返回世界坐标命中点（供放置/地基换算） */
     const screenToPlanet = (e: PointerCoords): Vector3 | null => {
         setupRay(e);
         return ray.intersectSphere(planetSphere, v);
@@ -1386,7 +1114,7 @@ onMounted(() => {
         const queue = commandQueue.value;
         const hit = screenToPlanet(e);
         if (queue === null || b.value === null || hit === null) return null;
-        const latGrid = Math.asin(hit.y / R) * RAD_TO_GRID;
+        const latGrid = Math.asin(hit.y / PLANET_RADIUS) * RAD_TO_GRID;
         const lonGrid = Math.atan2(hit.x, hit.z) * RAD_TO_GRID;
         const row = snap ? Math.floor(latGrid) : latGrid;
         const target = canvasTargetAt(queue.data, b.value.pos, row, lonGrid);
@@ -1414,7 +1142,7 @@ onMounted(() => {
     };
     /** 用某个区域原点构造合成定位：预览对象还没入库时也能算出世界矩阵 */
     const syntheticPos = (origin: AreaGridOrigin): PositionedBlueprint => ({
-        segment: SEGMENT,
+        segment: PLANET_SEGMENT,
         areas: [{ ...origin }],
     });
     /**
@@ -1428,7 +1156,7 @@ onMounted(() => {
     ): { x: number; y: number } => {
         const fromTurn = areaGridSize(from.segment);
         const toTurn = areaGridSize(to.segment);
-        const col = ((from.longitude + p.x) % fromTurn + fromTurn) % fromTurn;
+        const col = (((from.longitude + p.x) % fromTurn) + fromTurn) % fromTurn;
         const x = ((col / fromTurn) * toTurn - to.longitude) % toTurn;
         return {
             x: (x + toTurn) % toTurn,
@@ -1461,47 +1189,14 @@ onMounted(() => {
             );
         return {
             index: intersects[0].index,
-            z: (p.length() - R) / HEIGHT_GRID_SIZE,
+            z: (p.length() - PLANET_RADIUS) / HEIGHT_GRID_SIZE,
         };
     };
+    /** 屏幕位置 → 连续网格坐标（不取整）。用于分拣器的 slot 锚点 */
+    const anchorPoint = new Vector3();
     /**
-     * 光标 → 建筑传送带口绑定（串联用）。
-     * 命中的建筑有口表、且光标在某个口附近（`pickBeltPort` 的 limit）时返回该口；
-     * 否则返回 null（当作普通空格/带格处理）。换算与标记覆盖层共用 `beltPortAtPointer`。
-     */
-    const portEndAt = (e: PointerCoords): BeltPortEnd | null => {
-        const queue = commandQueue.value;
-        if (!queue || b.value === null) return null;
-        const hit = pickBuildingHit(e);
-        if (hit === null) return null;
-        const building = queue.data.buildings[hit.index];
-        if (!building) return null;
-        const a = anchorOffset(e, building.areaIndex);
-        if (a === null) return null;
-        const picked = beltPortAtPointer(building, a, hit.z, b.value.pos);
-        if (!picked) return null;
-        const bp = building.localOffset[0];
-        const area = b.value.pos.areas[building.areaIndex];
-        const cosLat = Math.cos(
-            (area.latitude + bp.y) * ((2 * Math.PI) / (SEGMENT * 5))
-        );
-        const off = portWorldOffset(picked.port, building.yaw[0], cosLat);
-        const n = portWorldNormal(picked.port, building.yaw[0]);
-        return {
-            building,
-            slot: picked.slot,
-            point: { x: bp.x + off.x, y: bp.y + off.y, z: off.z },
-            nx: n.x,
-            ny: n.y,
-        };
-    };
-    /**
-     * 屏幕位置 → 连续网格坐标（不取整）。用于分拣器的 slot 锚点：
-     * 与游戏一致，光标落在哪一列/哪一行就决定挂哪个 slot。
-     * 命中建筑时用建筑表面命中点径向投影回球面，否则用星球表面点。
      * @param areaIndex 用哪个区域的坐标空间换算（分拣器/传送带口必须用建筑自己的区域）
      */
-    const anchorPoint = new Vector3();
     const anchorOffset = (e: PointerCoords, areaIndex?: number) => {
         const queue = commandQueue.value;
         if (b.value === null || queue === null) return null;
@@ -1524,8 +1219,8 @@ onMounted(() => {
             return null;
         }
         // 径向投影回球面后再转网格（建筑命中点浮在地表上方）
-        anchorPoint.normalize().multiplyScalar(R);
-        const latGrid = Math.asin(anchorPoint.y / R) * RAD_TO_GRID;
+        anchorPoint.normalize().multiplyScalar(PLANET_RADIUS);
+        const latGrid = Math.asin(anchorPoint.y / PLANET_RADIUS) * RAD_TO_GRID;
         const lonGrid = Math.atan2(anchorPoint.x, anchorPoint.z) * RAD_TO_GRID;
         const origin =
             areaIndex !== undefined
@@ -1536,33 +1231,66 @@ onMounted(() => {
         return planetToLocal(latGrid, lonGrid, origin);
     };
     /**
+     * 光标 → 建筑传送带口绑定（串联用）。
+     * 命中的建筑有口表、且光标在某个口附近（`pickBeltPort` 的 limit）时返回该口；
+     * 否则返回 null（当作普通空格/带格处理）。换算与标记覆盖层共用 `beltPortAtPointer`。
+     */
+    const portEndAt = (e: PointerCoords): BeltPortEnd | null => {
+        const queue = commandQueue.value;
+        if (!queue || b.value === null) return null;
+        const hit = pickBuildingHit(e);
+        if (hit === null) return null;
+        const building = queue.data.buildings[hit.index];
+        if (!building) return null;
+        const a = anchorOffset(e, building.areaIndex);
+        if (a === null) return null;
+        const picked = beltPortAtPointer(building, a, hit.z, b.value.pos);
+        if (!picked) return null;
+        const bp = building.localOffset[0];
+        const area = b.value.pos.areas[building.areaIndex];
+        if (area === undefined) return null;
+        const cosLat = Math.cos(
+            (area.latitude + bp.y) *
+                ((2 * Math.PI) / (PLANET_SEGMENT * GRID_PER_SEGMENT))
+        );
+        const off = portWorldOffset(picked.port, building.yaw[0], cosLat);
+        const n = portWorldNormal(picked.port, building.yaw[0]);
+        return {
+            building,
+            slot: picked.slot,
+            point: { x: bp.x + off.x, y: bp.y + off.y, z: off.z },
+            nx: n.x,
+            ny: n.y,
+        };
+    };
+    /**
      * 放置建筑。
-     * 可堆叠建筑（储物仓 / 储液罐 / 矩阵研究站 / 四向分流器 / 战场分析基站）在光标落在
-     * 底座上时**叠到该列最上层**（z = 底座 z + 一层高度，x/y 对齐底座中心，写 15/14 端口）；
+     * 可堆叠建筑在光标落在底座上时**叠到该列最上层**（z = 底座 z + 一层高度，x/y 对齐底座中心）；
      * 研究站还会沿用底座的模式与配方（一列研究站共享设置）；
-     * 底座对朝向有要求时（分析基站上的大箱子必须转 90°）按 `stackYawFor` 强制对齐。
      * 物流配送器（2107）没有箱子底座时直接拒绝（游戏：只能放在箱盖上方）。
      */
     const placeBuilding = (e: PointerCoords) => {
         const queue = commandQueue.value;
-        if (
-            !queue ||
-            placement.selectedItemId === null ||
-            placement.selectedModelIndex === null
-        )
-            return;
+        const itemId = placement.selectedItemId;
+        const modelIndex = placement.selectedModelIndex;
+        if (!queue || itemId === null || modelIndex === null) return;
         const target = placementTargetAt(e);
         if (target === null) return;
         // 该纬度带还没有区域 → 按规范布局补一条（画布扩张；建筑绝对位置不受影响）
         const areaIndex = materializeTarget(target);
-        if (areaIndex < 0) return;
+        if (areaIndex < 0) {
+            showHint("放置失败：无法创建该纬度带的区域");
+            return;
+        }
         const offset = { x: target.x, y: target.y };
-        const itemId = placement.selectedItemId;
         const parent = placeBaseFor(e, offset, itemId, areaIndex);
-        if (requiresBase(itemId) && parent === null) return;
+        if (requiresBase(itemId) && parent === null) {
+            showHint("放置失败：只能放在储物仓顶部");
+            return;
+        }
         const building = createBuilding(
             itemId,
-            placement.selectedModelIndex,
+            modelIndex,
             parent
                 ? {
                       x: parent.localOffset[0].x,
@@ -1580,7 +1308,8 @@ onMounted(() => {
             // areaIndex = 建筑所在纬度带的区域（全球画布下每条带一个区域）
             queue.push(new CreateBuildingCommand(building, areaIndex));
         } catch {
-            // 纬度带外 / 区域不存在 — ignore
+            // 纬度带外 / 区域不存在：给一次可见反馈，避免"点了没反应"
+            showHint("放置失败：超出纬度带范围");
         }
     };
     /** 放置/预览共用的堆叠底座求解（光标所指建筑优先，其次同格最上层可承载建筑） */
@@ -1604,15 +1333,15 @@ onMounted(() => {
             areaIndex
         );
     };
-    /** 鼠标跟随预览：placing 模式下更新半透明绿盒的位置与朝向（分拣器走两点架接，无绿盒） */
     /**
      * 最后一帧的指针屏幕坐标（投影/拾取只用到 clientX/clientY）。
      * **必须是响应式**：鼠标静止时按 R 旋转 / 切建筑 / 改 Shift 吸附也要立即刷新预览。
-     * 用普通变量时，下面 onMounted 里的 watchEffect 首次执行会因 null 提前 return，
-     * 一个依赖都收集不到 → 之后永不重跑，表现为"按 R 没反应、动一下鼠标才转"。
      */
     const lastPointer = shallowRef<PointerCoords | null>(null);
+    /** 鼠标跟随预览：placing 模式下更新半透明绿盒的位置与朝向（分拣器/传送带走各自预览） */
     const updatePreview = (e: PointerCoords) => {
+        const itemId = placement.selectedItemId;
+        const modelIndex = placement.selectedModelIndex;
         if (
             placement.appMode !== "edit" ||
             placement.mode !== "placing" ||
@@ -1623,22 +1352,16 @@ onMounted(() => {
             return;
         }
         const target = placementTargetAt(e);
-        if (
-            target === null ||
-            b.value === null ||
-            placement.selectedItemId === null ||
-            placement.selectedModelIndex === null
-        ) {
+        if (target === null || b.value === null || itemId === null || modelIndex === null) {
             previewVisible.value = false;
             return;
         }
-        const meta = buildingMeta.get(placement.selectedModelIndex);
+        const meta = buildingMeta.get(modelIndex);
         if (!meta) {
             previewVisible.value = false;
             return;
         }
         const offset = { x: target.x, y: target.y };
-        const itemId = placement.selectedItemId;
         // 预演堆叠：底座高度 + 对齐底座中心 + 底座要求的朝向；
         // 只能放在底座上的建筑（物流配送器）没有箱子时不显示预览（点了也放不下去）
         const parent = placeBaseFor(e, offset, itemId, target.areaIndex);
@@ -1648,7 +1371,7 @@ onMounted(() => {
         }
         const fake = createBuilding(
             itemId,
-            placement.selectedModelIndex,
+            modelIndex,
             parent
                 ? {
                       x: parent.localOffset[0].x,
@@ -1659,7 +1382,11 @@ onMounted(() => {
             stackedZ(parent, itemId)
         );
         // 预览可能落在还没建出区域的纬度带上：用该带规范原点做合成定位，落位后与真实区域一致
-        const trans = calcBuildingTrans(R, syntheticPos(target.origin), fake)[0];
+        const trans = calcBuildingTrans(
+            PLANET_RADIUS,
+            syntheticPos(target.origin),
+            fake
+        )[0];
         previewMesh.matrix.multiplyMatrices(trans, meta.unitBoxTrans);
         previewVisible.value = true;
     };
@@ -1685,19 +1412,16 @@ onMounted(() => {
         offset: { x: number; y: number },
         origin: AreaGridOrigin
     ): Vector3 | null => {
-        if (
-            b.value === null ||
-            placement.selectedItemId === null ||
-            placement.selectedModelIndex === null
-        )
+        const itemId = placement.selectedItemId;
+        const modelIndex = placement.selectedModelIndex;
+        if (b.value === null || itemId === null || modelIndex === null)
             return null;
-        const fake = createBuilding(
-            placement.selectedItemId,
-            placement.selectedModelIndex,
-            offset,
-            0
-        );
-        const t = calcBuildingTrans(R, syntheticPos(origin), fake)[0];
+        const fake = createBuilding(itemId, modelIndex, offset, 0);
+        const t = calcBuildingTrans(
+            PLANET_RADIUS,
+            syntheticPos(origin),
+            fake
+        )[0];
         return _tmpPos.setFromMatrixPosition(t).clone();
     };
 
@@ -1709,7 +1433,11 @@ onMounted(() => {
     ): Matrix4 | null => {
         if (b.value === null) return null;
         const fake = createBuilding(1131, 0, offset, 0);
-        const t = calcBuildingTrans(R, syntheticPos(origin), fake)[0].clone();
+        const t = calcBuildingTrans(
+            PLANET_RADIUS,
+            syntheticPos(origin),
+            fake
+        )[0].clone();
         t.multiply(new Matrix4().makeScale(1, 1, 0.12));
         return t;
     };
@@ -1735,7 +1463,10 @@ onMounted(() => {
         const y = target.y;
         const area = queue.data.areas[target.areaIndex];
         // 区域还没建出来时按规范整带高度判断（点击时会补建），已建区域按它自己的 size
-        const sizeY = area === undefined ? target.band.rowHi - target.band.rowLo + 1 : area.size.y;
+        const sizeY =
+            area === undefined
+                ? target.band.rowHi - target.band.rowLo + 1
+                : area.size.y;
         if (x < 0 || y < 0 || y >= sizeY) {
             reformCursorVisible.value = false;
             return;
@@ -1746,7 +1477,6 @@ onMounted(() => {
             return;
         }
         reformCursor.matrix.copy(m);
-        // 更新光标矩阵
         reformCursor.updateMatrixWorld();
         reformCursor.material.color.set(
             reformColorHex(queue.data.reformData, placement.reformColorSlot)
@@ -1764,23 +1494,29 @@ onMounted(() => {
         const areaIndex = materializeTarget(target);
         if (areaIndex < 0) return;
         const area = queue.data.areas[areaIndex];
+        if (area === undefined) return;
         const x = target.x;
         const y = target.y;
-        if (x < 0 || y < 0 || y >= area.size.y) return;
+        if (x < 0 || y < 0 || y >= area.size.y) {
+            showHint("地基失败：超出纬度带范围");
+            return;
+        }
         if (x >= area.size.x) area.size.x = Math.floor(x) + 1;
         queue.push(
-            new PaintReformCellCommand(areaIndex, x, y, placement.reformColorSlot)
+            new PaintReformCellCommand(
+                areaIndex,
+                x,
+                y,
+                placement.reformColorSlot
+            )
         );
     };
 
-    /** 未设 A 点时：在鼠标位置显示单个传送带方块（悬停建筑口时贴到口上） */
+    /** 未设 A 点时：在鼠标位置显示单个传送带节点（悬停建筑口时贴到口上） */
     const showSingleBeltPreview = (e: PointerCoords) => {
-        if (
-            b.value === null ||
-            placement.selectedItemId === null ||
-            placement.selectedModelIndex === null
-        )
-            return;
+        const itemId = placement.selectedItemId;
+        const modelIndex = placement.selectedModelIndex;
+        if (b.value === null || itemId === null || modelIndex === null) return;
         const port = portEndAt(e);
         const target = placementTargetAt(e, true);
         const offset = port
@@ -1793,14 +1529,15 @@ onMounted(() => {
             port !== null
                 ? b.value.pos.areas[port.building.areaIndex]
                 : target!.origin;
+        if (origin === undefined) return;
         const fake = createBuilding(
-            placement.selectedItemId,
-            placement.selectedModelIndex,
+            itemId,
+            modelIndex,
             offset,
             placement.yaw,
             port ? port.point.z : 0
         );
-        const t = calcBuildingTrans(R, syntheticPos(origin), fake)[0];
+        const t = calcBuildingTrans(PLANET_RADIUS, syntheticPos(origin), fake)[0];
         beltPreviewM.multiplyMatrices(t, beltLift);
         beltPreviewMesh.setMatrixAt(0, beltPreviewM);
         beltPreviewMesh.count = 1;
@@ -1812,11 +1549,16 @@ onMounted(() => {
         beltStraightLineVisible.value = false;
     };
 
-    const updateBeltPreview = (p0: { x: number; y: number }, e: MouseEvent) => {
+    const updateBeltPreview = (
+        p0: { x: number; y: number },
+        e: PointerCoords
+    ) => {
+        const itemId = placement.selectedItemId;
+        const modelIndex = placement.selectedModelIndex;
         if (
             b.value === null ||
-            placement.selectedItemId === null ||
-            placement.selectedModelIndex === null ||
+            itemId === null ||
+            modelIndex === null ||
             beltArea === null
         )
             return;
@@ -1848,7 +1590,7 @@ onMounted(() => {
                         .clone()
                         .lerp(endPos, t)
                         .normalize()
-                        .multiplyScalar(R + 0.05);
+                        .multiplyScalar(PLANET_RADIUS + 0.05);
                     positions[i * 3] = p.x;
                     positions[i * 3 + 1] = p.y;
                     positions[i * 3 + 2] = p.z;
@@ -1871,8 +1613,8 @@ onMounted(() => {
         // 起点/终点接建筑口时预览也会贴到口上）
         const previewBelts = clipBeltPath(
             buildBeltLine(
-                placement.selectedItemId,
-                placement.selectedModelIndex,
+                itemId,
+                modelIndex,
                 p0,
                 cur,
                 placement.yaw,
@@ -1886,7 +1628,7 @@ onMounted(() => {
         const n = Math.min(previewBelts.length, BELT_PREVIEW_CAP);
         const pos = syntheticPos(beltArea.origin);
         for (let i = 0; i < n; i++) {
-            const t = calcBuildingTrans(R, pos, previewBelts[i])[0];
+            const t = calcBuildingTrans(PLANET_RADIUS, pos, previewBelts[i])[0];
             beltPreviewM.multiplyMatrices(t, beltLift);
             beltPreviewMesh.setMatrixAt(i, beltPreviewM);
             beltCellPos[i].setFromMatrixPosition(t);
@@ -1897,11 +1639,19 @@ onMounted(() => {
         // 首尾端的大号六边形外圈（单格时只画一个）
         const endCount = n === 0 ? 0 : n === 1 ? 1 : 2;
         if (n > 0) {
-            const t0 = calcBuildingTrans(R, pos, previewBelts[0])[0];
+            const t0 = calcBuildingTrans(
+                PLANET_RADIUS,
+                pos,
+                previewBelts[0]
+            )[0];
             beltPreviewM.multiplyMatrices(t0, beltLift);
             beltEndMarkerMesh.setMatrixAt(0, beltPreviewM);
             if (n > 1) {
-                const t1 = calcBuildingTrans(R, pos, previewBelts[n - 1])[0];
+                const t1 = calcBuildingTrans(
+                    PLANET_RADIUS,
+                    pos,
+                    previewBelts[n - 1]
+                )[0];
                 beltPreviewM.multiplyMatrices(t1, beltLift);
                 beltEndMarkerMesh.setMatrixAt(1, beltPreviewM);
             }
@@ -1955,25 +1705,39 @@ onMounted(() => {
             updateBeltPreview(beltStart, lastPointer.value);
         return beltPathMode;
     };
+    /**
+     * 传送带只能落在**一条纬度带**里（一个建筑只有一个 `areaIndex`）：
+     * 路径越出该带的行范围就在边界处截断，与"格已被占用"同样处理，老线路不受影响。
+     */
+    const clipBeltPath = (
+        belts: BlueprintBuilding[],
+        area: { size: { x: number; y: number } } | undefined
+    ): BlueprintBuilding[] => {
+        if (area === undefined) return belts;
+        const out: BlueprintBuilding[] = [];
+        for (const belt of belts) {
+            const y = belt.localOffset[0].y;
+            if (y < 0 || y >= area.size.y) break;
+            out.push(belt);
+        }
+        return out;
+    };
     /** 点击 B 点：提交整条传送带（一次撤销）。仅在放置成功后清空 A 点。 */
     const commitBeltLine = (e: PointerCoords) => {
         const queue = commandQueue.value;
         const start = beltStart;
         const belt = beltArea;
-        if (
-            !queue ||
-            !start ||
-            belt === null ||
-            placement.selectedItemId === null ||
-            placement.selectedModelIndex === null
-        )
+        const itemId = placement.selectedItemId;
+        const modelIndex = placement.selectedModelIndex;
+        if (!queue || !start || belt === null || itemId === null || modelIndex === null)
             return;
         const area = queue.data.areas[belt.areaIndex];
         if (area === undefined) return;
         // 建筑口必须属于本条带所在区域（一条带 = 一个区域，跨区域的口无法用单条带表示）
         const endPortRaw = portEndAt(e);
         const endPort =
-            endPortRaw !== null && endPortRaw.building.areaIndex === belt.areaIndex
+            endPortRaw !== null &&
+            endPortRaw.building.areaIndex === belt.areaIndex
                 ? endPortRaw
                 : null;
         const target = placementTargetAt(e, true);
@@ -1995,8 +1759,8 @@ onMounted(() => {
         const gridSize = areaGridSize(belt.origin.segment);
         const belts = clipBeltPath(
             buildBeltLine(
-                placement.selectedItemId,
-                placement.selectedModelIndex,
+                itemId,
+                modelIndex,
                 start,
                 end,
                 placement.yaw,
@@ -2007,7 +1771,10 @@ onMounted(() => {
             ),
             area
         );
-        if (belts.length === 0) return;
+        if (belts.length === 0) {
+            showHint("铺带失败：没有可放置的传送带格");
+            return;
+        }
         beltStart = null;
         beltStartPort = null;
         beltArea = null;
@@ -2023,25 +1790,9 @@ onMounted(() => {
                 )
             );
         } catch {
-            // 纬度带外 / 区域不存在 — ignore
+            // 纬度带外 / 区域不存在 — 给一次可见反馈
+            showHint("铺带失败：超出纬度带范围");
         }
-    };
-    /**
-     * 传送带只能落在**一条纬度带**里（一个建筑只有一个 `areaIndex`）：
-     * 路径越出该带的行范围就在边界处截断，与"格已被占用"同样处理，老线路不受影响。
-     */
-    const clipBeltPath = (
-        belts: BlueprintBuilding[],
-        area: { size: { x: number; y: number } } | undefined
-    ): BlueprintBuilding[] => {
-        if (area === undefined) return belts;
-        const out: BlueprintBuilding[] = [];
-        for (const b of belts) {
-            const y = b.localOffset[0].y;
-            if (y < 0 || y >= area.size.y) break;
-            out.push(b);
-        }
-        return out;
     };
     /** 分拣器两点架接：支持建筑↔建筑、建筑↔皮带、皮带↔皮带 */
     const pickSorterPoint = (e: PointerCoords) => {
@@ -2062,35 +1813,56 @@ onMounted(() => {
         }
         const src = sorterSource.value;
         sorterSource.value = null;
+        const itemId = placement.selectedItemId;
+        const modelIndex = placement.selectedModelIndex;
         if (
             index === null ||
             index === src ||
-            placement.selectedItemId === null ||
-            placement.selectedModelIndex === null
+            itemId === null ||
+            modelIndex === null
         )
             return;
         const srcBuilding = queue.data.buildings[src];
         const dstBuilding = queue.data.buildings[index];
         // 分拣器只有一个 areaIndex：两端必须落在同一条带（跨带无法用单条分拣器表示）
-        if (srcBuilding.areaIndex !== dstBuilding.areaIndex) return;
+        if (srcBuilding.areaIndex !== dstBuilding.areaIndex) {
+            sorterSourceAnchor = null;
+            showHint("架接失败：两端不在同一个纬度带");
+            return;
+        }
         // 允许任意两端组合：建筑↔建筑、建筑↔皮带、皮带↔皮带
         // 传入 buildings 以检测 slot / offset / 分流器口占用
         // 传入两端点击锚点 以按点击所在的列/行选择 slot（与游戏光标行为一致）
         const sorter = createSorterBetween(
             srcBuilding,
             dstBuilding,
-            placement.selectedItemId,
-            placement.selectedModelIndex,
+            itemId,
+            modelIndex,
             queue.data.buildings,
             { src: sorterSourceAnchor ?? undefined, dst: anchor }
         );
         sorterSourceAnchor = null;
         if (sorter) {
             sorter.areaIndex = srcBuilding.areaIndex;
-            queue.push(
-                new CreateBuildingCommand(sorter, srcBuilding.areaIndex)
-            );
+            queue.push(new CreateBuildingCommand(sorter, srcBuilding.areaIndex));
+        } else {
+            showHint("架接失败：该位置无法连接分拣器");
         }
+    };
+
+    // ---- 鼠标事件状态机（点击 / 拖拽 / A-B 两点）----
+    /** 拖拽阈值：超过即视为"转地图/平移"，不再算点击（避免拖拽误落建筑/误选中） */
+    const DRAG_THRESHOLD = 6;
+    // 左键按下的位置：click 与 mouseup 共用（mouseup 先跑，click 负责清空）
+    let downPos: { x: number; y: number } | null = null;
+    // 右键按下的位置：右键拖拽是旋转，松开时不应剔除建筑
+    let rightDownPos: { x: number; y: number } | null = null;
+    const isDrag = (a: { x: number; y: number }, e: PointerCoords) =>
+        Math.hypot(e.clientX - a.x, e.clientY - a.y) > DRAG_THRESHOLD;
+
+    const onMouseDown = (e: MouseEvent) => {
+        if (e.button === 0) downPos = { x: e.clientX, y: e.clientY };
+        else if (e.button === 2) rightDownPos = { x: e.clientX, y: e.clientY };
     };
     const onMouseUp = (e: MouseEvent) => {
         if (downPos === null) return;
@@ -2100,21 +1872,21 @@ onMounted(() => {
             downPos = null;
             return;
         }
-        const dx = e.clientX - downPos.x;
-        const dy = e.clientY - downPos.y;
-        const isDrag = dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD;
-        // 传送带：拖拽（旋转地图）时不处理；非拖拽点击在 A/B 状态间切换
-        if (isPlacingBelt() && !isDrag) {
+        if (isDrag(downPos, e)) return;
+        // 传送带：非拖拽点击在 A/B 状态间切换
+        if (isPlacingBelt()) {
             if (beltStart === null) {
                 // 第一次点击：设为 A 点；落在建筑口上则记下"取出"端点。
                 // A 点同时决定整条带所属的区域：口 → 该建筑的区域；空格 → 所在纬度带的区域
                 const queue = commandQueue.value;
-                const port = portEndAt(e);
                 if (queue === null) return;
+                const port = portEndAt(e);
                 if (port !== null) {
+                    const origin = b.value!.pos.areas[port.building.areaIndex];
+                    if (origin === undefined) return;
                     beltArea = {
                         areaIndex: port.building.areaIndex,
-                        origin: b.value!.pos.areas[port.building.areaIndex],
+                        origin,
                     };
                     beltStart = {
                         x: Math.round(port.point.x),
@@ -2131,6 +1903,71 @@ onMounted(() => {
                 beltStartPort = port;
             } else commitBeltLine(e); // 第二次点击：A→B 放置
         }
+    };
+    const onClick = (e: MouseEvent) => {
+        if (downPos === null) return;
+        const drag = isDrag(downPos, e);
+        downPos = null;
+        // 传送带在 mouseup 中处理 A/B 点击状态机，click 忽略
+        if (isPlacingBelt()) return;
+        if (drag) return; // was a drag, not a click
+        // 左键：放置 / 删除 / 地基 / 选中
+        if (placement.mode === "placing") {
+            if (isPlacingSorter()) pickSorterPoint(e);
+            else placeBuilding(e);
+        } else if (placement.mode === "deleting") deleteBuilding(e);
+        else if (placement.mode === "reforming") paintReformCell(e);
+        else {
+            const index = pickBuilding(e);
+            if (index === null) emit("clickEmpty");
+            emit("update:selectedBuildingIndex", index);
+        }
+    };
+    const deleteBuilding = (e: PointerCoords) => {
+        const index = pickBuilding(e);
+        if (index === null) return;
+        const queue = commandQueue.value;
+        if (!queue) return;
+        queue.push(new RemoveBuildingCommand(index, queue.data));
+        emit("update:selectedBuildingIndex", null);
+    };
+    const onContextMenu = (e: MouseEvent) => {
+        e.preventDefault();
+        // 右键拖拽是旋转地图：拖过阈值的一次松开不算右键点击
+        if (rightDownPos !== null && isDrag(rightDownPos, e)) {
+            rightDownPos = null;
+            return;
+        }
+        rightDownPos = null;
+        // 预览模式：右键直接删除鼠标所指建筑（沿用 growingTree 的剔除行为）
+        if (placement.appMode === "preview") {
+            deleteBuilding(e); // 内部已 emit(selectedBuildingIndex, null)
+            return;
+        }
+        // 编辑态：先取消半途状态，其次退出当前模式，最后才允许右键剔除
+        // 传送带已设 A 点：右键取消 A 点选择，不退出放置模式
+        if (isPlacingBelt() && beltStart !== null) {
+            beltStart = null;
+            beltStartPort = null;
+            beltArea = null;
+            hideBeltPreview();
+            // 回退到"未选 A 点"的光标状态：光标处重新显示单个传送带节点
+            if (lastPointer.value) showSingleBeltPreview(lastPointer.value);
+            return;
+        }
+        // 分拣器已设 A 点（源建筑）：右键取消 A 点选择，不退出放置模式
+        if (isPlacingSorter() && sorterSource.value !== null) {
+            sorterSource.value = null;
+            sorterSourceAnchor = null;
+            return;
+        }
+        // 编辑模式：退出 placing/deleting/reforming
+        if (placement.mode !== "idle") {
+            resetToIdle();
+            return;
+        }
+        // 编辑态空闲：右键剔除（与预览模式一致）
+        deleteBuilding(e);
     };
     const onPointerMove = (e: PointerCoords) => {
         lastPointer.value = { clientX: e.clientX, clientY: e.clientY };
@@ -2184,77 +2021,10 @@ onMounted(() => {
             updatePreview(p);
         }
     });
-    /** Delete building at clicked position */
-    const deleteBuilding = (e: PointerCoords) => {
-        const index = pickBuilding(e);
-        if (index === null) return;
-        const queue = commandQueue.value;
-        if (!queue) return;
-        queue.push(new RemoveBuildingCommand(index, queue.data));
-        emit("update:selectedBuildingIndex", null);
-    };
 
-    // Drag threshold: distinguish click from drag.
-    // Listen on rootEl (parent div) — events bubble from canvas, unaffected by
-    // PlanetMapControls' setPointerCapture which only captures pointer events.
-    const DRAG_THRESHOLD = 4;
-    let downPos: { x: number; y: number } | null = null;
-    const onMouseDown = (e: PointerCoords) => {
-        downPos = { x: e.clientX, y: e.clientY };
-    };
-    const onClick = (e: PointerCoords) => {
-        if (downPos === null) return;
-        const dx = e.clientX - downPos.x;
-        const dy = e.clientY - downPos.y;
-        downPos = null;
-        // 传送带在 mouseup 中处理 A/B 点击状态机，click 忽略
-        if (isPlacingBelt()) return;
-        if (dx * dx + dy * dy > DRAG_THRESHOLD * DRAG_THRESHOLD) return; // was a drag, not a click
-        // Left click: place / delete / reform / select
-        if (placement.mode === "placing") {
-            if (isPlacingSorter()) pickSorterPoint(e);
-            else placeBuilding(e);
-        } else if (placement.mode === "deleting") deleteBuilding(e);
-        else if (placement.mode === "reforming") paintReformCell(e);
-        else {
-            const index = pickBuilding(e);
-            if (index === null) emit("clickEmpty");
-            emit("update:selectedBuildingIndex", index);
-        }
-    };
-    const onContextMenu = (e: MouseEvent) => {
-        // Right click: exit placement/deleting mode (PlanetMapControls already
-        // preventDefault on canvas; this fires via bubbling)
-        // 预览模式：右键直接删除鼠标所指建筑
-        if (placement.appMode === "preview") {
-            e.preventDefault();
-            deleteBuilding(e); // 内部已 emit(selectedBuildingIndex, null)
-            return;
-        }
-        // 传送带已设 A 点：右键取消 A 点选择，不退出放置模式
-        if (isPlacingBelt() && beltStart !== null) {
-            e.preventDefault();
-            beltStart = null;
-            beltStartPort = null;
-            beltArea = null;
-            hideBeltPreview();
-            // 回退到"未选 A 点"的光标状态：光标处重新显示单个传送带方块
-            if (lastPointer.value) showSingleBeltPreview(lastPointer.value);
-            return;
-        }
-        // 分拣器已设 A 点（源建筑）：右键取消 A 点选择，不退出放置模式
-        if (isPlacingSorter() && sorterSource.value !== null) {
-            e.preventDefault();
-            sorterSource.value = null;
-            sorterSourceAnchor = null;
-            return;
-        }
-        // 编辑模式：原行为 —— 退出 placing/deleting
-        if (placement.mode !== "idle") {
-            e.preventDefault();
-            resetToIdle();
-        }
-    };
+    // 事件挂在 rootEl（画布父节点）而不是 canvas 上：
+    // PlanetMapControls 的 setPointerCapture 只捕获 pointer 事件，mouse/click 仍从 canvas 冒泡；
+    // 用父节点还能收到 mouseleave，避免光标移出画布后幽灵预览留在原地。
     rootEl.addEventListener("mousedown", onMouseDown);
     rootEl.addEventListener("mouseup", onMouseUp);
     rootEl.addEventListener("click", onClick);
@@ -2280,34 +2050,87 @@ onMounted(() => {
         if (lastTimeStamp) {
             c.updateTimeDelta((time - lastTimeStamp) / 1000);
         }
-        if (b.value?.buildings.cargos) {
-            const move = (time % 1000) / 1000;
-            for (const c of b.value.buildings.cargos) c.cargoMove = move;
+        // 相位由货物系统自持（`Cargos.tick`），返回值再喂给横梁箭头，
+        // 保证「箭头与货物同向同速」
+        const built = b.value?.buildings;
+        if (built !== undefined) {
+            const progress = built.cargos.tick(time);
+            // 没有分拣器时 inserters 为 null，必须判空
+            if (built.inserters !== null) built.inserters.cargoMove = progress;
         }
         lastTimeStamp = time;
         requestAnimationFrame(animate);
         const cameraUpdated = c.update();
         dirLight.position.copy(camera.position);
+        // 网格 LOD：按相机到球心的距离切换细线可见性
+        planetScene.updateGridLOD(camera.position.length());
         renderer.render(scene, camera);
         if (cameraUpdated) {
             cameraPosVersion.value++;
         }
     }
     requestAnimationFrame(animate);
+
+    // 外部 GLB 模型到达：合并成一次重建，避免几十个模型各触发一次整场景重建
+    let modelRefreshTimer: number | null = null;
+    const offModelsChanged = onBuildingModelsChanged(() => {
+        if (modelRefreshTimer !== null) return;
+        modelRefreshTimer = window.setTimeout(() => {
+            modelRefreshTimer = null;
+            modelVersion.value++;
+        }, 150);
+    });
+    onUnmounted(() => {
+        offModelsChanged();
+        if (modelRefreshTimer !== null) {
+            window.clearTimeout(modelRefreshTimer);
+            modelRefreshTimer = null;
+        }
+    });
+});
+
+// 预览层几何/材质只服务本组件：卸载时释放（共用的 `beltPreviewMaterial` 只释放一次）
+onUnmounted(() => {
+    previewMesh.geometry.dispose();
+    previewMesh.material.dispose();
+    reformCursor.geometry.dispose();
+    reformCursor.material.dispose();
+    sorterSrcBox.geometry.dispose();
+    sorterSrcBox.material.dispose();
+    beltPreviewMesh.geometry.dispose();
+    beltEndMarkerMesh.geometry.dispose();
+    beltLinkMesh.geometry.dispose();
+    beltPreviewMaterial.dispose();
+    beltStraightLine.geometry.dispose();
+    beltStraightLine.material.dispose();
+    slotMarkers.geometry.dispose();
+    slotMarkers.material.dispose();
+    portMarkers.geometry.dispose();
+    portMarkers.material.dispose();
+    beltRangeMesh.geometry.dispose();
+    beltRangeMesh.material.dispose();
+    sorterPreviewMesh.geometry.dispose();
+    sorterPreviewMesh.material.dispose();
 });
 
 const selectBoxes = computed(() => b.value?.bvh.boxes);
 const cameraPosVersion = ref(0);
 const getModel = (index: number) => {
     if (b.value === null) return null;
-    const ref = b.value.buildings.modelRef[index];
-    const m = new Matrix4();
-    ref.mesh.getMatrixAt(ref.instance, m);
-    return m;
+    const ref = b.value.buildings.modelRef[index] as
+        | BuildingModelRef
+        | undefined;
+    if (ref === undefined) return null;
+    if ("mesh" in ref) {
+        const m = new Matrix4();
+        ref.mesh.getMatrixAt(ref.instance, m);
+        return m;
+    }
+    return ref.matrix;
 };
-/** 重置相机视角到默认位置（星球正上方默认距离） */
+/** 重置相机视角到入场姿态（俯瞰 + 锚在图纸质心） */
 const resetCamera = () => {
-    controls?.reset(2 * R);
+    applyHome();
 };
 defineExpose({
     selectBoxes,
@@ -2315,13 +2138,30 @@ defineExpose({
     cameraPosVersion,
     getModel,
     resetCamera,
+    /** App.vue 的 R 键：放置传送带时循环切换路径走法（latFirst / lonFirst / straight） */
     cycleBeltPathMode: () => cycleBeltPathModeFn.value?.(),
 });
 </script>
 
 <style lang="scss">
 .editor-root {
+    position: relative;
     width: 100%;
     height: 100%;
+}
+
+/* 放置/铺带失败提示：贴着画布底部居中，不拦截鼠标 */
+.editor-hint {
+    position: absolute;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+    padding: 6px 14px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.72);
+    color: #ffb4b4;
+    font-size: 13px;
+    pointer-events: none;
+    z-index: 10;
 }
 </style>

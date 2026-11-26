@@ -1,14 +1,36 @@
 import { Color, Matrix4 } from "three";
+/**
+ * 建筑元数据
+ */
 
 export interface BuildingMeta {
     color: Color;
     unitBoxTrans: Matrix4;
     selectUnitBoxTrans: Matrix4;
     iconTrans: Matrix4;
+    /**
+     * 建筑在**局部 z 轴向上**坐标系里的尺寸 `[x 宽, y 深, 高度]`。
+     * 由下方 `buildingMetaRaw` 的 `box` 字段派生（`box[1]` 是高度），
+     * 供外部 GLB 模型的等比缩放/对齐使用；不改变原有字段含义。
+     */
+    readonly boxSize: readonly [number, number, number];
+    /**
+     * 建筑在**局部 z 轴向上**坐标系里的中心 `[x, y, z]`。
+     * 由 `buildingMetaRaw` 的 `offset` 字段派生，同样只为 GLB 对齐服务。
+     */
+    readonly boxCenter: readonly [number, number, number];
 }
 
 // 'box' from selectSize in SlotConfig
 // 'offset' from selectCenter in SlotConfig
+// number：建筑编号,color: number | null：建筑的颜色，使用十六进制颜色值；null：默认灰色 0xdddddd。
+// box: [number, number, number]：建筑选择框的尺寸，三个数字分别对应原始数据里的三个轴向尺寸。当前代码约定 box[1] 是高度。
+// offset: [number, number, number]：选择框中心相对建筑原点的偏移，三个数字对应三个轴向；后续会转换到渲染使用的坐标系。
+// 元数据：
+// 1. 建筑编号：建筑在游戏中的唯一标识符，用于在代码中引用。
+// 2. 颜色：建筑的颜色，使用十六进制颜色值；null：默认灰色 0xdddddd。
+// 3. 尺寸：建筑选择框的尺寸，三个数字分别对应原始数据里的三个轴向尺寸。当前代码约定 box[1] 是高度。
+// 4. 偏移：选择框中心相对建筑原点的偏移，三个数字对应三个轴向；后续会转换到渲染使用的坐标系。
 const buildingMetaRaw: [
     number,
     {
@@ -17,29 +39,24 @@ const buildingMetaRaw: [
         offset: [number, number, number];
     }
 ][] = [
-    [
-        35,
-        { color: 0xe3a263, box: [0.64, 0.12, 0.64], offset: [0.0, 0.05, 0.0] },
-    ], // 低速传送带
-    [
-        36,
-        { color: 0x51a896, box: [0.64, 0.12, 0.64], offset: [0.0, 0.05, 0.0] },
-    ], // 高速传送带
-    [
-        37,
-        { color: 0x61a5d7, box: [0.64, 0.12, 0.64], offset: [0.0, 0.05, 0.0] },
-    ], // 极速传送带
-    [41, { color: 0xe3a263, box: [1.0, 1.0, 1.0], offset: [0.0, 0.0, 0.0] }], // 低速分拣器
-    [42, { color: 0x51a896, box: [1.0, 1.0, 1.0], offset: [0.0, 0.0, 0.0] }], // 高速分拣器
-    [43, { color: 0x61a5d7, box: [1.0, 1.0, 1.0], offset: [0.0, 0.0, 0.0] }], // 极速分拣器
-    [483, { color: 0xc0c0c0, box: [1.0, 1.0, 1.0], offset: [0.0, 0.0, 0.0] }], // 集装分拣器
-    [38, { color: 0x3b5666, box: [2.7, 2.4, 2.7], offset: [0.0, 1.2, 0.0] }], // 四向分流器 a
-    [39, { color: 0x3b5666, box: [1.5, 2.4, 2.7], offset: [0.0, 1.2, 0.0] }], // 四向分流器 b
-    [40, { color: 0x3b5666, box: [2.7, 2.4, 2.7], offset: [0.0, 1.2, 0.0] }], // 四向分流器 c
+    [35,{ color: 0xe3a263, box: [0.64, 0.64, 0.64], offset: [0.0, 0.1, 0.0] },], // 低速传送带
+    [36,{ color: 0x51a896, box: [0.64, 0.64, 0.64], offset: [0.0, 0.1, 0.0] },], // 高速传送带
+    [37,{ color: 0x61a5d7, box: [0.64, 0.64, 0.64], offset: [0.0, 0.1, 0.0] },], // 极速传送带
+    // 分拣器的 `box` 仅作为元数据占位：其长度是动态的（取决于两端点距离），
+    // 实际渲染盒在 buildBuildings.ts，拾取盒在 buildBVH.ts，均绕过 buildingMeta。
+    // 这里用相邻格（len≈1.0）的典型值标注：世界空间 scale(1,1,len+0.6)
+    // 经 Rx(π/2) 映射到局部 z-up 后为 box[0]=world_x=1, box[1]=world_z≈1.6, box[2]=world_y=1
+    [41, { color: 0xe3a263, box: [1.0, 1.6, 1.0], offset: [0.0, 0.0, 0.0] }], // 低速分拣器
+    [42, { color: 0x51a896, box: [1.0, 1.6, 1.0], offset: [0.0, 0.0, 0.0] }], // 高速分拣器
+    [43, { color: 0x61a5d7, box: [1.0, 1.6, 1.0], offset: [0.0, 0.0, 0.0] }], // 极速分拣器
+    [483, { color: 0xc0c0c0, box: [1.0, 1.6, 1.0], offset: [0.0, 0.0, 0.0] }], // 集装分拣器
+    [38, { color: 0x3b5666, box: [2.7, 2.4, 2.0], offset: [0.0, 1.2, 0.0] }], // 四向分流器 a
+    [39, { color: 0x3b5666, box: [1.5, 2.4, 2.0], offset: [0.0, 1.2, 0.0] }], // 四向分流器 b
+    [40, { color: 0x3b5666, box: [2.7, 2.4, 2.0], offset: [0.0, 1.2, 0.0] }], // 四向分流器 c
     [257, { color: 0x42b4e7, box: [2.2, 2.0, 3.0], offset: [0.0, 1.0, 0.0] }], // 自动集装机
-    [208, { color: 0x57ff8f, box: [1.3, 1.4, 2.3], offset: [0.0, 0.7, 0.05] }], // 流速监测器
+    [208, { color: 0x57ff8f, box: [1.3, 1.4, 2.3], offset: [0.0, 0.7, 0.1] }], // 流速监测器
     [120, { color: 0xffdb00, box: [1.3, 2.5, 4.8], offset: [0.0, 1.25, -0.2] }], // 喷涂机
-    [51, { color: 0xd4dedf, box: [3.2, 2.67, 3.2], offset: [0.0, 1.33, 0.0] }], // 小型储物仓
+    [ 51, { color: 0xD4DEDF, box: [3.2, 2.67, 3.2], offset: [0.0, 1.33, 0.0] }], // 小型储物仓
     [52, { color: 0xd4dedf, box: [6.2, 4.0, 4.2], offset: [0.0, 2.0, 0.0] }], // 大型储物仓
     [121, { color: 0x4696bb, box: [4.8, 4.0, 4.8], offset: [0.0, 2.0, 0.0] }], // 储液罐
     [65, { color: 0xedab5c, box: [4.2, 4.6, 4.2], offset: [0.0, 2.3, 0.0] }], // 制造台 Mk.I
@@ -47,14 +64,14 @@ const buildingMetaRaw: [
     [67, { color: 0x45c6e5, box: [4.2, 4.6, 4.2], offset: [0.0, 2.3, 0.0] }], // 制造台 Mk.III
     [456, { color: 0x365258, box: [4.2, 4.6, 4.2], offset: [0.0, 2.3, 0.0] }], // 制造台 Mk.IV
     [44, { color: 0xcccccc, box: [1.25, 6.0, 1.25], offset: [0.0, 3.0, 0.0] }], // 电力感应塔
-    [71, { color: 0x17e1e5, box: [2.3, 9.2, 2.3], offset: [0.0, 4.6, 0.0] }], // 无线输电塔
+    [71, { color: 0x17e1e5, box: [1.25, 6.0, 1.25], offset: [0.0, 3.0, 0.0] }], // 无线输电塔
     [68, { color: 0xdbe3e4, box: [3.5, 7.0, 3.5], offset: [0.0, 3.5, 0.0] }], // 卫星配电站
     [53, { color: 0xf1424f, box: [3.5, 7.4, 3.8], offset: [0.3, 3.7, 0.0] }], // 风力涡轮机
     [54, { color: 0xf73136, box: [4.8, 4.2, 9.0], offset: [-0.4, 2.1, 0.45] }], // 火力发电厂
     [118, { color: 0x2ea0ff, box: [4.8, 4.2, 9.0], offset: [-0.4, 2.1, 0.45] }], // 微型聚变发电站
     [255, { color: 0xdb6b4a, box: [6.0, 10.0, 8.0], offset: [0.0, 2.0, 0.0] }], // 地热发电站
     [57, { color: null, box: [3.8, 3.6, 6.8], offset: [0.0, 1.8, 0.3] }], // 采矿机
-    [256, { color: null, box: [5.0, 16.0, 8.0], offset: [0.0, 8.0, -0.4] }], // 大型采矿机
+    [256, { color: null, box: [8.0, 8.0, 12.0], offset: [0.0, 4.0, -0.4] }], // 大型采矿机
     [60, { color: 0x00c1b6, box: [2.6, 6.0, 5.6], offset: [0.0, 3.0, 0.1] }], // 抽水站
     [62, { color: 0x739ce5, box: [3.2, 3.8, 3.2], offset: [0.0, 1.9, 0.0] }], // 电弧熔炉
     [194, { color: 0xc84f58, box: [3.2, 3.8, 3.2], offset: [0.0, 1.9, 0.0] }], // 位面熔炉
@@ -62,10 +79,7 @@ const buildingMetaRaw: [
     [61, { color: null, box: [6.9, 11.6, 12.6], offset: [0.0, 5.8, 0.2] }], // 原油萃取站
     [63, { color: 0x354ea6, box: [4.2, 10.6, 7.4], offset: [0.0, 5.3, -0.32] }], // 原油精炼厂
     [64, { color: 0xecbb3e, box: [9.2, 6.3, 5.3], offset: [0.48, 3.15, 0.78] }], // 化工厂
-    [
-        376,
-        { color: 0x62b5e5, box: [9.7, 6.3, 5.3], offset: [0.23, 3.15, 0.78] },
-    ], // 化工厂 Mk.II
+    [376,{ color: 0x62b5e5, box: [9.7, 6.3, 5.3], offset: [0.23, 3.15, 0.78] },], // 化工厂 Mk.II
     [119, { color: null, box: [4.8, 9.4, 4.8], offset: [0.0, 4.7, 0.0] }], // 分馏塔
     [55, { color: 0x303656, box: [3.6, 4.0, 3.6], offset: [0.0, 2.0, 0.0] }], // 太阳能板
     [46, { color: null, box: [3.27, 4.46, 2.98], offset: [0.0, 2.23, -0.09] }], // 蓄电器
@@ -86,8 +100,8 @@ const buildingMetaRaw: [
     [407, { color: null, box: [7.0, 7.0, 7.5], offset: [0.0, 3.5, 0.3] }], // 导弹防御塔
     [403, { color: null, box: [6.0, 16.0, 6.0], offset: [0.0, 7.8, 0.0] }], // 信标
     [402, { color: null, box: [7.0, 14.2, 7.0], offset: [0.0, 7.0, 0.0] }], // 护盾发生器
-    [453, { color: null, box: [5.0, 8.0, 7.0], offset: [0.0, 4.0, 0.0] }], // 战场分析基站
-    [482, { color: null, box: [2.5, 15.0, 2.5], offset: [0.0, 7.5, 0.0] }], // 地面电浆炮
+    [453, { color: null, box: [5.0, 7.0, 7.0], offset: [0.0, 4.0, 0.0] }], // 战场分析基站
+    [482, { color: null, box: [2.5, 12.0, 2.5], offset: [0.0, 5, 0.0] }], // 地面电浆炮
     [422, { color: null, box: [6.0, 7.0, 6.0], offset: [0.0, 3.5, 0.0] }], // 干扰塔
     [371, { color: 0x718495, box: [3.0, 1.9, 3.2], offset: [0.0, 1.1, 0.0] }], // 物流配送器
     [664, { color: 0x7ed6df, box: [2, 3, 2], offset: [0.0, 0.9, 0.0] }], // 全息信标
@@ -121,6 +135,10 @@ for (const [id, d] of buildingMetaRaw) {
         unitBoxTrans,
         selectUnitBoxTrans,
         iconTrans,
+        // 局部 z 轴向上的尺寸/中心：box[1] 是高度、offset[1] 是高度位移，
+        // 与上面 Rx90 的变换结果严格一致（仅做轴向重排，不改表里的数值）
+        boxSize: [d.box[0], d.box[2], d.box[1]],
+        boxCenter: [d.offset[0], d.offset[2], d.offset[1]],
     });
     buildingBoxes.set(id, d.box);
 }

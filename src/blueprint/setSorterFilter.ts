@@ -1,5 +1,5 @@
 import { BlueprintBuilding, BlueprintData } from "./parser";
-import { Command, Updater } from "@/command";
+import { Command, Updater } from "@/render/command";
 
 /**
  * 修改分拣器过滤器 filterId（0 = 无过滤）的撤销命令。

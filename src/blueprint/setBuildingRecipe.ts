@@ -4,7 +4,7 @@ import {
     LabParamerters,
     ResearchMode,
 } from "./parser";
-import { Command, Updater } from "@/command";
+import { Command, Updater } from "@/render/command";
 import { stackColumn } from "@/data/stacking";
 import { isLab } from "@/data/items";
 

@@ -6,7 +6,7 @@ import {
     planetBands,
     planetBandGridRange,
     planetRowLimit,
-} from "@/blueprint/planet";
+} from "@/planet/planet";
 import {
     areaGridSize,
     canvasTargetAt,

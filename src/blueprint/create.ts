@@ -1,5 +1,5 @@
 import { BlueprintBuilding, BlueprintData } from "./parser";
-import { Command } from "@/command";
+import { Command } from "@/render/command";
 import { defaultParamsFor } from "./defaultParams";
 import { stackPortDefaults } from "@/data/stacking";
 

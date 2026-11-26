@@ -4,7 +4,7 @@ import {
     IODir,
     StationParameters,
 } from "./parser";
-import { Command } from "@/command";
+import { Command } from "@/render/command";
 import { isBelt } from "@/data/items";
 
 type LinkField = "outputObjIdx" | "inputObjIdx";

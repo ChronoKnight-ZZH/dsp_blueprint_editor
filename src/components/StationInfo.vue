@@ -254,7 +254,7 @@ import {
     BlueprintData,
     IODir,
 } from "@/blueprint/parser";
-import { Command, Updater } from "@/command";
+import { Command, Updater } from "@/render/command";
 import { BuildingInfo } from "@/blueprint/buildingInfo";
 import { itemIconId } from "@/data/icons";
 

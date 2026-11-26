@@ -1,5 +1,5 @@
 import { fromStr, toStr, BlueprintData, ResearchMode } from '@/blueprint/parser';
-import { CommandQueue } from '@/command';
+import { CommandQueue } from '@/render/command';
 import { SetBuildingRecipeCommand, SetLabResearchModeCommand } from '@/blueprint/setBuildingRecipe';
 import { isLab } from '@/data/items';
 import * as fs from 'fs';

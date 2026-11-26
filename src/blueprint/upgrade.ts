@@ -1,6 +1,6 @@
 import { BlueprintBuilding, BlueprintData } from "./parser";
 import { itemsMap, isBelt, isInserter } from "@/data/items";
-import { Command, Updater } from "@/command";
+import { Command, Updater } from "@/render/command";
 
 /**
  * 建筑升降级边（有向：低级 → 高级）。

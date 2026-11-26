@@ -12,7 +12,7 @@ import {
     planetBandGridRange,
     planetBands,
     PositionedBlueprint,
-} from "./planet";
+} from "@/planet/planet";
 
 /**
  * 全球画布：把"一颗星球的全部纬度带"当作编辑坐标空间。

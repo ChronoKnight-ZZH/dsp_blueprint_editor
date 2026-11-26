@@ -1,5 +1,9 @@
 import { MIDI } from "./types";
 
+/**
+ * MIDI 数据表
+ * 包含所有 MIDI 设备的详细信息，包括 ID、是否为乐器和音高范围
+ */
 export const midi: readonly MIDI[] = [
     { id: 1, isInstrument: true, pitchRange: [6, 101] },
     { id: 2, isInstrument: true, pitchRange: [6, 101] },

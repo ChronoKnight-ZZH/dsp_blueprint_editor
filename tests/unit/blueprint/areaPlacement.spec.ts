@@ -1,5 +1,5 @@
 import { fromStr } from '@/blueprint/parser';
-import { findPosForAreas } from '@/blueprint/planet';
+import { findPosForAreas } from '@/planet/planet';
 import { planetToLocal, localToPlanet, AreaGridOrigin } from '@/blueprint/area';
 import { createEmptyBlueprint } from '@/blueprint/create';
 import * as fs from 'fs';

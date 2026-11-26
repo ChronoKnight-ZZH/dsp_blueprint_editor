@@ -1,0 +1,1145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KTX2 GLB 加载 · 贴图批量导入 · 智能识别</title>
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #0d1013;
+      color: #e7edf3;
+      font: 13px/1.6 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    }
+    canvas {
+      display: block;
+    }
+
+    /* 左侧主画布区域，右侧设置栏 */
+    #container {
+      display: flex;
+      width: 100%;
+      height: 100%;
+    }
+    #viewport {
+      flex: 1;
+      position: relative;
+      min-width: 0; /* 防止flex溢出 */
+    }
+    #sidebar {
+      width: 340px;
+      background: rgba(16, 20, 26, 0.95);
+      border-left: 1px solid #2a3442;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      padding: 16px 14px 20px;
+      backdrop-filter: blur(6px);
+      box-shadow: -4px 0 20px rgba(0, 0, 0, 0.5);
+    }
+
+    /* 滚动条美化 */
+    #sidebar::-webkit-scrollbar {
+      width: 5px;
+    }
+    #sidebar::-webkit-scrollbar-track {
+      background: #1a1f26;
+    }
+    #sidebar::-webkit-scrollbar-thumb {
+      background: #2f4257;
+      border-radius: 4px;
+    }
+
+    h1 {
+      font-size: 14px;
+      margin: 0 0 16px;
+      letter-spacing: 0.04em;
+      color: #8fb6e0;
+      font-weight: 600;
+      border-bottom: 1px solid #26303d;
+      padding-bottom: 12px;
+    }
+    h2 {
+      font-size: 12px;
+      margin: 0 0 10px;
+      color: #9bb6d0;
+      font-weight: 500;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+    fieldset {
+      border: 1px solid #26303d;
+      border-radius: 8px;
+      margin: 0 0 16px;
+      padding: 10px 12px 12px;
+    }
+    legend {
+      padding: 0 6px;
+      color: #7f8c9b;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+    }
+    label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+      margin-top: 4px;
+    }
+    label + label {
+      margin-top: 6px;
+    }
+    input[type="checkbox"] {
+      accent-color: #3f8fd4;
+      width: 16px;
+      height: 16px;
+    }
+    input[type="color"] {
+      width: 36px;
+      height: 24px;
+      padding: 0;
+      border: 1px solid #2c3746;
+      background: none;
+      cursor: pointer;
+    }
+    input[type="text"], input[type="range"] {
+      width: 100%;
+    }
+    input[type="text"] {
+      background: #11161d;
+      color: #d7e2ed;
+      border: 1px solid #2c3746;
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-family: inherit;
+      font-size: 12px;
+    }
+    button {
+      background: #1d2b3a;
+      color: #cfe3f5;
+      border: 1px solid #2f4257;
+      border-radius: 6px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 12px;
+      transition: background 0.15s;
+    }
+    button:hover {
+      background: #26374a;
+    }
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    button.primary {
+      background: #2a5a8c;
+      border-color: #3f7ab8;
+      color: #fff;
+    }
+    button.primary:hover {
+      background: #326aa3;
+    }
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-top: 8px;
+    }
+    .row > * {
+      flex: 1 1 auto;
+    }
+    .hint {
+      color: #6f7c8a;
+      font-size: 11px;
+      margin-top: 6px;
+      line-height: 1.5;
+    }
+    #log {
+      font: 11px/1.5 ui-monospace, Consolas, monospace;
+      color: #7d8b99;
+      white-space: pre-wrap;
+      max-height: 120px;
+      overflow: auto;
+      background: #11161d;
+      padding: 8px;
+      border-radius: 6px;
+      border: 1px solid #1f2833;
+    }
+    #stats {
+      position: absolute;
+      right: 16px;
+      bottom: 16px;
+      font: 11px/1.5 ui-monospace, Consolas, monospace;
+      color: #66727f;
+      text-align: right;
+      background: rgba(13, 16, 19, 0.75);
+      padding: 4px 10px;
+      border-radius: 20px;
+      backdrop-filter: blur(4px);
+      pointer-events: none;
+    }
+
+    /* ---- 贴图拖拽区 ---- */
+    #textureDropzone {
+      border: 2px dashed #3f5f7a;
+      border-radius: 10px;
+      padding: 20px 12px;
+      text-align: center;
+      transition: border-color 0.2s, background 0.2s;
+      margin: 10px 0 6px;
+      cursor: pointer;
+      background: rgba(30, 40, 55, 0.3);
+    }
+    #textureDropzone.highlight {
+      border-color: #3f8fd4;
+      background: rgba(63, 143, 212, 0.15);
+    }
+    #textureDropzone .dz-icon {
+      font-size: 28px;
+      margin-bottom: 6px;
+      opacity: 0.7;
+    }
+    #textureDropzone .dz-text {
+      color: #8fa8c0;
+      font-size: 12px;
+    }
+    #textureDropzone .dz-sub {
+      color: #5f6e7e;
+      font-size: 10px;
+      margin-top: 6px;
+      letter-spacing: 0.03em;
+    }
+
+    /* 贴图通道列表 */
+    .texture-channel {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 0;
+      border-bottom: 1px solid #1f2833;
+    }
+    .texture-channel:last-child {
+      border-bottom: none;
+    }
+    .texture-channel .ch-name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .texture-channel .ch-preview {
+      width: 28px;
+      height: 28px;
+      border-radius: 4px;
+      background: #1a2129;
+      border: 1px solid #2c3746;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9px;
+      color: #5f6e7e;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .texture-channel .ch-preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .texture-channel .ch-status {
+      font-size: 10px;
+      color: #5f6e7e;
+      margin-left: 6px;
+      white-space: nowrap;
+    }
+    .texture-channel .ch-status.has-texture {
+      color: #6fcf97;
+    }
+    .texture-channel .ch-actions {
+      display: flex;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .texture-channel .ch-actions button {
+      padding: 2px 6px;
+      font-size: 10px;
+    }
+    .batch-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .batch-actions button {
+      flex: 1;
+    }
+
+    /* 嵌入压缩面板 */
+    .embed-panel {
+      background: #11161d;
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 10px;
+      border: 1px solid #1f2833;
+    }
+    .embed-panel .row {
+      margin-top: 6px;
+    }
+    .embed-panel select {
+      background: #1a2129;
+      color: #d7e2ed;
+      border: 1px solid #2c3746;
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-family: inherit;
+      font-size: 12px;
+      width: 100%;
+    }
+
+    /* 全屏拖拽模型提示 */
+    #dropzoneModel {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      margin: 10px;
+      border-radius: 14px;
+      background: rgba(13, 16, 19, 0.8);
+      border: 2px dashed #3f8fd4;
+      font-size: 16px;
+      letter-spacing: 0.08em;
+      color: #9cc6ec;
+      text-shadow: 0 1px 10px rgba(63, 143, 212, 0.7);
+      backdrop-filter: blur(2px);
+    }
+    #dropzoneModel.active {
+      display: flex;
+    }
+    #dropzoneModel .dz-inner {
+      text-align: center;
+      line-height: 2.2;
+    }
+    #dropzoneModel .dz-sub {
+      font-size: 12px;
+      color: #6f7c8a;
+      letter-spacing: 0.02em;
+    }
+
+    .file-input-hidden {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+<div id="container">
+  <!-- 主视口 -->
+  <div id="viewport">
+    <div id="stats">就绪</div>
+  </div>
+
+  <!-- 右侧设置栏 -->
+  <div id="sidebar">
+    <h1>KTX2 GLB · 智能贴图</h1>
+
+    <!-- 模型加载 -->
+    <fieldset>
+      <legend>模型</legend>
+      <input type="file" id="modelInput" accept=".glb,.gltf" class="file-input-hidden" />
+      <button id="loadModelBtn" class="primary" style="width:100%">📂 选择模型文件</button>
+      <div class="row">
+        <button id="clearModelBtn">清除</button>
+        <button id="reloadModelBtn">重载</button>
+      </div>
+      <div class="hint">支持 .glb / .gltf（内嵌 KTX2）<br>也可直接拖拽到左侧画布或本面板</div>
+    </fieldset>
+
+    <!-- 贴图导入区 -->
+    <fieldset>
+      <legend>贴图批量导入</legend>
+      <div id="textureDropzone">
+        <div class="dz-icon">🖼️</div>
+        <div class="dz-text">拖拽图片到这里</div>
+        <div class="dz-sub">支持 -a(底色) -n(法线) -e(自发光) -orm(粗糙度/金属)</div>
+      </div>
+      <input type="file" id="textureInput" accept="image/*" multiple class="file-input-hidden" />
+
+      <!-- 贴图通道列表 -->
+      <div id="textureChannels">
+        <div class="texture-channel" data-channel="albedo">
+          <div class="ch-name">
+            <div class="ch-preview" id="preview-albedo">—</div>
+            <span>底色 baseColor</span>
+            <span class="ch-status" id="status-albedo">未加载</span>
+          </div>
+          <div class="ch-actions">
+            <button data-channel="albedo" class="remove-channel" disabled>✕</button>
+          </div>
+        </div>
+        <div class="texture-channel" data-channel="normal">
+          <div class="ch-name">
+            <div class="ch-preview" id="preview-normal">—</div>
+            <span>法线 normal</span>
+            <span class="ch-status" id="status-normal">未加载</span>
+          </div>
+          <div class="ch-actions">
+            <button data-channel="normal" class="remove-channel" disabled>✕</button>
+          </div>
+        </div>
+        <div class="texture-channel" data-channel="emissive">
+          <div class="ch-name">
+            <div class="ch-preview" id="preview-emissive">—</div>
+            <span>自发光 emissive</span>
+            <span class="ch-status" id="status-emissive">未加载</span>
+          </div>
+          <div class="ch-actions">
+            <button data-channel="emissive" class="remove-channel" disabled>✕</button>
+          </div>
+        </div>
+        <div class="texture-channel" data-channel="orm">
+          <div class="ch-name">
+            <div class="ch-preview" id="preview-orm">—</div>
+            <span>ORM (粗糙/金属)</span>
+            <span class="ch-status" id="status-orm">未加载</span>
+          </div>
+          <div class="ch-actions">
+            <button data-channel="orm" class="remove-channel" disabled>✕</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="batch-actions">
+        <button id="applyTexturesBtn" class="primary">应用全部贴图</button>
+        <button id="clearTexturesBtn">清除全部</button>
+      </div>
+      <div class="hint">文件名需包含 -a / -n / -e / -orm 后缀（不区分大小写）<br>例如：wood-a.png, wood-n.jpg, wood-e.png, wood-orm.png</div>
+    </fieldset>
+
+    <!-- 嵌入压缩 -->
+    <fieldset>
+      <legend>嵌入与压缩 (KTX2)</legend>
+      <div class="embed-panel">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span style="color:#7f8c9b;font-size:11px;">压缩格式</span>
+          <select id="ktx2Format" style="flex:1">
+            <option value="etc1s">ETC1S (通用)</option>
+            <option value="uastc">UASTC (高质量)</option>
+          </select>
+        </div>
+        <div class="row">
+          <button id="embedCompressBtn" class="primary" style="width:100%">🔧 嵌入并压缩贴图到模型</button>
+        </div>
+        <div class="hint">将当前贴图以 KTX2 压缩并嵌入模型文件 (生成新 .glb 下载)</div>
+      </div>
+    </fieldset>
+
+    <!-- 渲染设置 -->
+    <fieldset>
+      <legend>渲染</legend>
+      <label><input type="checkbox" id="autoRotate" checked /> 自动旋转</label>
+      <label><input type="checkbox" id="wireframe" /> 线框模式</label>
+      <div class="hint" id="materialCount"></div>
+    </fieldset>
+
+    <!-- 日志 -->
+    <fieldset>
+      <legend>日志</legend>
+      <div id="log"></div>
+    </fieldset>
+  </div>
+</div>
+
+<!-- 全屏拖拽模型提示 -->
+<div id="dropzoneModel">
+  <div class="dz-inner">
+    松开鼠标导入模型<br>
+    <span class="dz-sub">支持 .glb / .gltf（内嵌 KTX2）</span>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { KTX2Loader } from "three/addons/loaders/KTX2Loader.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { KTX2Exporter } from "three/addons/exporters/KTX2Exporter.js"; // 用于嵌入压缩
+
+// ---------------------------------------------------------------- 日志
+const logEl = document.getElementById("log");
+const log = (...parts) => {
+  const line = parts.join(" ");
+  logEl.textContent += `${line}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+  console.log(...parts);
+};
+
+// ---------------------------------------------------------------- 渲染器 / 场景
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(document.getElementById("viewport").clientWidth, document.getElementById("viewport").clientHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.getElementById("viewport").appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d1013);
+
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 0.7));
+const key = new THREE.DirectionalLight(0xffffff, 2.2);
+key.position.set(3, 5, 4);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x8fc7ff, 1.0);
+rim.position.set(-4, 2, -3);
+scene.add(rim);
+
+const camera = new THREE.PerspectiveCamera(45, document.getElementById("viewport").clientWidth / document.getElementById("viewport").clientHeight, 0.1, 500);
+camera.position.set(2.4, 1.8, 3.0);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+// ---------------------------------------------------------------- KTX2Loader
+const ktx2Loader = new KTX2Loader()
+  .setTranscoderPath("https://unpkg.com/three@0.160.0/examples/jsm/libs/basis/")
+  .detectSupport(renderer);
+
+log("KTX2Loader ready · 已按当前 GPU 能力探测转码目标");
+
+const gltfLoader = new GLTFLoader().setKTX2Loader(ktx2Loader);
+
+// ---------------------------------------------------------------- 状态管理
+let currentRoot = null;
+let loadedFile = null;
+let materials = [];
+
+// 贴图槽位数据: { albedo: { texture, file }, normal: ..., emissive: ..., orm: ... }
+const textureSlots = {
+  albedo: { texture: null, file: null, label: "底色" },
+  normal: { texture: null, file: null, label: "法线" },
+  emissive: { texture: null, file: null, label: "自发光" },
+  orm: { texture: null, file: null, label: "ORM" },
+};
+
+// 材质原始快照
+const snapshots = new WeakMap();
+function snapshot(material) {
+  let snap = snapshots.get(material);
+  if (snap === undefined) {
+    snap = {
+      map: material.map,
+      normalMap: material.normalMap,
+      emissiveMap: material.emissiveMap,
+      roughnessMap: material.roughnessMap,
+      metalnessMap: material.metalnessMap,
+      emissive: material.emissive.clone(),
+      emissiveIntensity: material.emissiveIntensity,
+      normalScale: material.normalScale.clone(),
+    };
+    snapshots.set(material, snap);
+  }
+  return snap;
+}
+
+// 纯色 DataTexture (用于兜底)
+const solidCache = new Map();
+function solidTexture(hex, { srgb = false } = {}) {
+  const key = `${hex}:${srgb}`;
+  const hit = solidCache.get(key);
+  if (hit) return hit;
+  const r = (hex >> 16) & 0xff;
+  const g = (hex >> 8) & 0xff;
+  const b = hex & 0xff;
+  const texture = new THREE.DataTexture(new Uint8Array([r, g, b, 255]), 1, 1);
+  texture.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+  texture.flipY = false;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  texture.name = `solid-${hex.toString(16).padStart(6, "0")}`;
+  texture.userData.shared = true;
+  texture.needsUpdate = true;
+  solidCache.set(key, texture);
+  return texture;
+}
+
+// 收集材质
+function collectMaterials(root) {
+  const found = new Map();
+  root.traverse((object) => {
+    if (!object.isMesh) return;
+    const list = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of list) {
+      if (!material || !material.isMeshStandardMaterial) continue;
+      found.set(material.uuid, material);
+    }
+  });
+  return [...found.values()];
+}
+
+// 应用贴图到材质
+function applyTexturesToMaterials() {
+  if (!materials.length) return;
+
+  for (const material of materials) {
+    const base = snapshot(material);
+
+    // 底色
+    material.map = textureSlots.albedo.texture ?? base.map;
+    if (textureSlots.albedo.texture) {
+      textureSlots.albedo.texture.colorSpace = THREE.SRGBColorSpace;
+    }
+
+    // 法线
+    material.normalMap = textureSlots.normal.texture ?? base.normalMap;
+    if (textureSlots.normal.texture) {
+      material.normalScale.copy(base.normalScale);
+    }
+
+    // 自发光
+    if (textureSlots.emissive.texture) {
+      material.emissiveMap = textureSlots.emissive.texture;
+      material.emissive.setRGB(1, 1, 1);
+      material.emissiveIntensity = 1.0;
+    } else {
+      material.emissiveMap = base.emissiveMap;
+      material.emissive.copy(base.emissive);
+      material.emissiveIntensity = base.emissiveIntensity;
+      // 如果原始自发光是黑色但要求显示，且无贴图则保持黑色
+    }
+
+    // ORM
+    if (textureSlots.orm.texture) {
+      material.roughnessMap = textureSlots.orm.texture;
+      material.metalnessMap = textureSlots.orm.texture;
+    } else {
+      material.roughnessMap = base.roughnessMap;
+      material.metalnessMap = base.metalnessMap;
+    }
+
+    material.needsUpdate = true;
+  }
+
+  const count = materials.length;
+  document.getElementById("materialCount").textContent = count > 0 ? `${count} 个标准材质已应用` : "";
+  log(`✔ 贴图已应用到 ${count} 个材质`);
+}
+
+// 从所有材质移除已应用的贴图（恢复原始状态）
+function resetMaterialsToOriginal() {
+  for (const material of materials) {
+    const base = snapshot(material);
+    material.map = base.map;
+    material.normalMap = base.normalMap;
+    material.emissiveMap = base.emissiveMap;
+    material.roughnessMap = base.roughnessMap;
+    material.metalnessMap = base.metalnessMap;
+    material.emissive.copy(base.emissive);
+    material.emissiveIntensity = base.emissiveIntensity;
+    material.normalScale.copy(base.normalScale);
+    material.needsUpdate = true;
+  }
+  log("材质已恢复至 GLB 原始状态");
+}
+
+// ---------------------------------------------------------------- 加载模型
+function frameObject(object) {
+  const box = new THREE.Box3().setFromObject(object);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const radius = Math.max(size.x, size.y, size.z) || 1;
+  controls.target.copy(center);
+  camera.position.copy(center).add(new THREE.Vector3(radius * 1.6, radius * 1.1, radius * 1.9));
+  camera.near = radius / 100;
+  camera.far = radius * 100;
+  camera.updateProjectionMatrix();
+  controls.update();
+}
+
+function disposeRoot(root) {
+  if (!root) return;
+  root.traverse((object) => {
+    if (!object.isMesh) return;
+    object.geometry?.dispose();
+    const list = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of list) {
+      if (!material) continue;
+      for (const value of Object.values(material)) {
+        if (value && value.isTexture && value.userData.shared !== true) value.dispose();
+      }
+      material.dispose();
+    }
+  });
+}
+
+function detachCurrent() {
+  if (currentRoot === null) return;
+  scene.remove(currentRoot);
+  disposeRoot(currentRoot);
+  currentRoot = null;
+  materials = [];
+  document.getElementById("materialCount").textContent = "";
+}
+
+function useGltf(gltf, label) {
+  detachCurrent();
+
+  currentRoot = gltf.scene ?? gltf.scenes?.[0] ?? null;
+  if (currentRoot === null) {
+    log("模型里没有场景");
+    return;
+  }
+  scene.add(currentRoot);
+  frameObject(currentRoot);
+
+  materials = collectMaterials(currentRoot);
+  for (const material of materials) snapshot(material);
+
+  // 检测模型内嵌贴图
+  const textures = new Set();
+  let ktx2 = 0;
+  let png = 0;
+  currentRoot.traverse((object) => {
+    if (!object.isMesh) return;
+    const list = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of list) {
+      if (!material) continue;
+      for (const value of Object.values(material)) {
+        if (!value || !value.isTexture || textures.has(value)) continue;
+        textures.add(value);
+        if (value.isCompressedTexture) ktx2++;
+        else png++;
+      }
+    }
+  });
+  log(`✔ ${label} · 材质 ${materials.length} · 贴图 ${textures.size}（KTX2 ${ktx2} / 非压缩 ${png}）`);
+
+  // 自动应用已选择的贴图（如果有）
+  const hasAnyTexture = Object.values(textureSlots).some(s => s.texture !== null);
+  if (hasAnyTexture) {
+    applyTexturesToMaterials();
+  } else {
+    // 如果没有贴图，重置材质为原始状态（确保显示模型自带贴图）
+    resetMaterialsToOriginal();
+  }
+
+  updateStats();
+}
+
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    gltfLoader.parse(reader.result, "", (gltf) => {
+      loadedFile = file;
+      useGltf(gltf, file.name);
+    }, (error) => {
+      log("✘ 解析失败:", error?.message ?? error);
+      console.error(error);
+    });
+  };
+  reader.onerror = () => log("✘ 文件读取失败:", reader.error?.message ?? reader.error);
+  reader.readAsArrayBuffer(file);
+}
+
+// ---------------------------------------------------------------- 贴图处理
+function getChannelFromFilename(filename) {
+  const lower = filename.toLowerCase();
+  // 匹配后缀: -a, -n, -e, -orm
+  if (/[-_]a(\.[^.]+)?$/i.test(lower) || lower.includes('-a.') || lower.includes('_a.')) return 'albedo';
+  if (/[-_]n(\.[^.]+)?$/i.test(lower) || lower.includes('-n.') || lower.includes('_n.')) return 'normal';
+  if (/[-_]e(\.[^.]+)?$/i.test(lower) || lower.includes('-e.') || lower.includes('_e.')) return 'emissive';
+  if (/[-_]orm(\.[^.]+)?$/i.test(lower) || lower.includes('-orm.') || lower.includes('_orm.')) return 'orm';
+  // 更宽松的匹配：包含 -a / -n / -e / -orm 在任何位置
+  if (lower.includes('-a')) return 'albedo';
+  if (lower.includes('-n')) return 'normal';
+  if (lower.includes('-e')) return 'emissive';
+  if (lower.includes('-orm')) return 'orm';
+  return null;
+}
+
+function loadTextureFile(file) {
+  return new Promise((resolve, reject) => {
+    const channel = getChannelFromFilename(file.name);
+    if (!channel) {
+      log(`⚠ 无法识别贴图类型：${file.name}（需包含 -a/-n/-e/-orm 后缀）`);
+      reject(new Error("无法识别贴图类型"));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const texture = new THREE.Texture(img);
+        texture.needsUpdate = true;
+        texture.flipY = false;
+        if (channel === 'albedo') {
+          texture.colorSpace = THREE.SRGBColorSpace;
+        } else {
+          texture.colorSpace = THREE.NoColorSpace;
+        }
+        resolve({ texture, channel, file });
+      };
+      img.onerror = () => reject(new Error("图片加载失败"));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error("文件读取失败"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handleTextureFiles(files) {
+  const fileArray = Array.from(files);
+  const results = [];
+
+  for (const file of fileArray) {
+    if (!file.type.startsWith('image/')) {
+      log(`⚠ 跳过非图片文件：${file.name}`);
+      continue;
+    }
+    try {
+      const result = await loadTextureFile(file);
+      results.push(result);
+    } catch (err) {
+      log(`⚠ ${err.message}：${file.name}`);
+    }
+  }
+
+  if (results.length === 0) {
+    log("没有成功识别的贴图文件");
+    return;
+  }
+
+  // 释放旧贴图
+  for (const [channel, slot] of Object.entries(textureSlots)) {
+    if (slot.texture) {
+      slot.texture.dispose();
+      slot.texture = null;
+      slot.file = null;
+    }
+  }
+
+  // 应用新贴图
+  for (const { texture, channel, file } of results) {
+    const slot = textureSlots[channel];
+    if (slot.texture) slot.texture.dispose();
+    slot.texture = texture;
+    slot.file = file;
+    log(`✔ 加载 ${slot.label} 贴图：${file.name}`);
+  }
+
+  updateTextureUI();
+  applyTexturesToMaterials();
+}
+
+function updateTextureUI() {
+  for (const [channel, slot] of Object.entries(textureSlots)) {
+    const preview = document.getElementById(`preview-${channel}`);
+    const status = document.getElementById(`status-${channel}`);
+    const removeBtn = document.querySelector(`.remove-channel[data-channel="${channel}"]`);
+
+    if (slot.texture && slot.file) {
+      // 创建预览缩略图
+      const canvas = document.createElement('canvas');
+      canvas.width = 32;
+      canvas.height = 32;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(slot.texture.image, 0, 0, 32, 32);
+      preview.innerHTML = '';
+      preview.appendChild(canvas);
+      status.textContent = slot.file.name.length > 12 ? slot.file.name.slice(0, 10) + '…' : slot.file.name;
+      status.classList.add('has-texture');
+      removeBtn.disabled = false;
+    } else {
+      preview.textContent = '—';
+      status.textContent = '未加载';
+      status.classList.remove('has-texture');
+      removeBtn.disabled = true;
+    }
+  }
+}
+
+// 清除单个通道
+document.querySelectorAll('.remove-channel').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    const channel = e.target.dataset.channel;
+    const slot = textureSlots[channel];
+    if (slot.texture) {
+      slot.texture.dispose();
+      slot.texture = null;
+      slot.file = null;
+      updateTextureUI();
+      // 恢复该通道到原始材质状态
+      for (const material of materials) {
+        const base = snapshot(material);
+        if (channel === 'albedo') material.map = base.map;
+        if (channel === 'normal') material.normalMap = base.normalMap;
+        if (channel === 'emissive') {
+          material.emissiveMap = base.emissiveMap;
+          material.emissive.copy(base.emissive);
+          material.emissiveIntensity = base.emissiveIntensity;
+        }
+        if (channel === 'orm') {
+          material.roughnessMap = base.roughnessMap;
+          material.metalnessMap = base.metalnessMap;
+        }
+        material.needsUpdate = true;
+      }
+      log(`已移除 ${slot.label} 贴图`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------- 拖拽处理
+const dropzoneModel = document.getElementById('dropzoneModel');
+let dragDepth = 0;
+
+function dragHasFiles(event) {
+  const dt = event.dataTransfer;
+  if (!dt || !dt.types) return false;
+  const types = dt.types;
+  if (typeof types.includes === 'function') return types.includes('Files');
+  for (let i = 0; i < types.length; i++) if (types[i] === 'Files') return true;
+  return false;
+}
+
+// 全局拖拽 - 模型
+window.addEventListener('dragenter', (event) => {
+  if (!dragHasFiles(event)) return;
+  event.preventDefault();
+  dragDepth++;
+  dropzoneModel.classList.add('active');
+});
+
+window.addEventListener('dragover', (event) => {
+  if (!dragHasFiles(event)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'copy';
+});
+
+window.addEventListener('dragleave', () => {
+  if (dragDepth === 0) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) dropzoneModel.classList.remove('active');
+});
+
+window.addEventListener('drop', (event) => {
+  if (!dragHasFiles(event)) return;
+  event.preventDefault();
+  dragDepth = 0;
+  dropzoneModel.classList.remove('active');
+
+  const files = event.dataTransfer?.files;
+  if (!files || files.length === 0) return;
+
+  // 检查是否有贴图文件
+  const imageFiles = [];
+  const modelFiles = [];
+
+  for (const file of files) {
+    if (file.type.startsWith('image/')) {
+      imageFiles.push(file);
+    } else if (/\.(glb|gltf)$/i.test(file.name)) {
+      modelFiles.push(file);
+    }
+  }
+
+  // 处理贴图
+  if (imageFiles.length > 0) {
+    handleTextureFiles(imageFiles);
+  }
+
+  // 处理模型
+  if (modelFiles.length > 0) {
+    const file = modelFiles[0];
+    if (modelFiles.length > 1) log(`收到 ${modelFiles.length} 个模型，只取第一个：${file.name}`);
+    log(`… 开始加载模型 ${file.name}（${(file.size / 1024 / 1024).toFixed(2)} MB）`);
+    loadFile(file);
+  }
+});
+
+window.addEventListener('blur', () => {
+  dragDepth = 0;
+  dropzoneModel.classList.remove('active');
+});
+
+// 贴图专用拖拽区
+const textureDropzone = document.getElementById('textureDropzone');
+textureDropzone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  textureDropzone.classList.add('highlight');
+});
+textureDropzone.addEventListener('dragleave', () => {
+  textureDropzone.classList.remove('highlight');
+});
+textureDropzone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  textureDropzone.classList.remove('highlight');
+  const files = e.dataTransfer?.files;
+  if (files && files.length > 0) {
+    handleTextureFiles(files);
+  }
+});
+textureDropzone.addEventListener('click', () => {
+  document.getElementById('textureInput').click();
+});
+
+// 文件选择
+document.getElementById('textureInput').addEventListener('change', (e) => {
+  if (e.target.files.length > 0) {
+    handleTextureFiles(e.target.files);
+    e.target.value = ''; // 允许重复选择
+  }
+});
+
+// ---------------------------------------------------------------- 嵌入压缩
+document.getElementById('embedCompressBtn').addEventListener('click', async () => {
+  if (!currentRoot) {
+    log("⚠ 请先加载模型");
+    return;
+  }
+  if (!textureSlots.albedo.texture && !textureSlots.normal.texture && !textureSlots.emissive.texture && !textureSlots.orm.texture) {
+    log("⚠ 没有已加载的贴图可供压缩嵌入");
+    return;
+  }
+
+  log("正在准备嵌入压缩，请稍候...");
+  document.getElementById('embedCompressBtn').disabled = true;
+
+  try {
+    const format = document.getElementById('ktx2Format').value;
+    // 这里简化：实际嵌入压缩需要导出新的 GLB，涉及复杂处理。
+    // 演示：提示用户此功能需要完整实现，或者用 KTX2Exporter 单独导出贴图。
+    log(`⚠ 嵌入压缩功能需要完整的 KTX2 导出流程。当前已选择格式：${format === 'etc1s' ? 'ETC1S' : 'UASTC'}`);
+    log("提示：实际项目中可使用 KTX2Exporter 将贴图转为 KTX2 后重新打包为 GLB。");
+    // 为演示，生成一个简单的提示
+    alert("嵌入压缩功能为演示界面，实际实现需使用 KTX2Exporter 与 GLTFExporter 组合完成。\n当前已选择格式：" + (format === 'etc1s' ? 'ETC1S' : 'UASTC'));
+  } catch (err) {
+    log("✘ 压缩失败: " + err.message);
+  } finally {
+    document.getElementById('embedCompressBtn').disabled = false;
+  }
+});
+
+// ---------------------------------------------------------------- 其他UI事件
+document.getElementById('loadModelBtn').addEventListener('click', () => {
+  document.getElementById('modelInput').click();
+});
+
+document.getElementById('modelInput').addEventListener('change', (e) => {
+  const file = e.target.files?.[0];
+  if (file) {
+    log(`… 开始加载模型 ${file.name}（${(file.size / 1024 / 1024).toFixed(2)} MB）`);
+    loadFile(file);
+  }
+  e.target.value = '';
+});
+
+document.getElementById('clearModelBtn').addEventListener('click', () => {
+  detachCurrent();
+  loadedFile = null;
+  document.getElementById('modelInput').value = '';
+  updateStats();
+  log("已清除当前模型");
+});
+
+document.getElementById('reloadModelBtn').addEventListener('click', () => {
+  const file = loadedFile ?? document.getElementById('modelInput').files?.[0];
+  if (file) loadFile(file);
+  else log("先选择一个模型文件");
+});
+
+document.getElementById('applyTexturesBtn').addEventListener('click', () => {
+  if (materials.length === 0) {
+    log("⚠ 请先加载模型");
+    return;
+  }
+  applyTexturesToMaterials();
+});
+
+document.getElementById('clearTexturesBtn').addEventListener('click', () => {
+  for (const [channel, slot] of Object.entries(textureSlots)) {
+    if (slot.texture) {
+      slot.texture.dispose();
+      slot.texture = null;
+      slot.file = null;
+    }
+  }
+  updateTextureUI();
+  resetMaterialsToOriginal();
+  log("已清除全部贴图，材质恢复至原始状态");
+});
+
+document.getElementById('autoRotate').addEventListener('change', (e) => {
+  // 在动画循环中处理
+});
+let autoRotate = true;
+document.getElementById('autoRotate').addEventListener('change', (e) => {
+  autoRotate = e.target.checked;
+});
+
+document.getElementById('wireframe').addEventListener('change', (e) => {
+  for (const material of materials) {
+    material.wireframe = e.target.checked;
+    material.needsUpdate = true;
+  }
+});
+
+// ---------------------------------------------------------------- 循环
+function updateStats() {
+  const info = renderer.info;
+  document.getElementById('stats').textContent =
+    `draw calls ${info.render.calls} · tris ${info.render.triangles.toLocaleString()} · ` +
+    `textures ${info.memory.textures} · geometries ${info.memory.geometries}`;
+}
+
+let last = 0;
+renderer.setAnimationLoop((time) => {
+  if (autoRotate && currentRoot !== null) currentRoot.rotation.y += 0.004;
+  controls.update();
+  renderer.render(scene, camera);
+  if (time - last > 500) {
+    last = time;
+    updateStats();
+  }
+});
+
+addEventListener('resize', () => {
+  const viewport = document.getElementById('viewport');
+  const width = viewport.clientWidth;
+  const height = viewport.clientHeight;
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+  renderer.setSize(width, height);
+});
+
+// 初始化
+updateTextureUI();
+log("就绪：拖拽 .glb 模型到左侧，拖拽贴图到右侧贴图区");
+</script>
+</body>
+</html>

@@ -251,50 +251,230 @@
                     />
                 </section>
             </div>
-            <ul class="operations" v-else-if="activeTab === 'operations'">
-                <template v-if="data && commandQueue">
-                    <li>
-                        <button @click="replaceModal!.open()">
-                            <img src="@/assets/icons/find_replace.svg" />
-                            {{ t("批量替换") }}
-                        </button>
-                        <ReplaceModal :blueprint="data" ref="replaceModal" />
+            <div
+                class="operations-panel"
+                v-else-if="activeTab === 'operations'"
+            >
+                <ul class="operations">
+                    <template v-if="data && commandQueue">
+                        <li>
+                            <button @click="replaceModal!.open()">
+                                <img src="@/assets/icons/find_replace.svg" />
+                                {{ t("批量替换") }}
+                            </button>
+                            <ReplaceModal
+                                :blueprint="data"
+                                ref="replaceModal"
+                            />
+                        </li>
+                        <li>
+                            <button
+                                @click="commandQueue!.undo()"
+                                :disabled="!commandQueue.canUndo()"
+                            >
+                                <img src="@/assets/icons/undo.svg" />
+                                {{ t("撤销") }}
+                            </button>
+                        </li>
+                        <li>
+                            <button
+                                @click="commandQueue!.redo()"
+                                :disabled="!commandQueue.canRedo()"
+                            >
+                                <img src="@/assets/icons/redo.svg" />
+                                {{ t("重做") }}
+                            </button>
+                        </li>
+                    </template>
+                    <div v-else class="empty-hint">{{ t("请先打开蓝图") }}</div>
+                    <li class="render-settings-li">
+                        <section class="render-settings">
+                            <button
+                                type="button"
+                                class="advanced-toggle"
+                                :class="{ open: advancedOpen }"
+                                @click="advancedOpen = !advancedOpen"
+                            >
+                                <span>{{ t("高级") }}</span>
+                                <span
+                                    class="switch-track decorative"
+                                    :class="{ on: advancedOpen }"
+                                ></span>
+                            </button>
+                            <div v-show="advancedOpen" class="advanced-body">
+                                <div class="option-row">
+                                    <span>{{ t("展示真实模型") }}</span>
+                                    <label class="switch">
+                                        <input
+                                            type="checkbox"
+                                            v-model="
+                                                renderSettings.showRealModels
+                                            "
+                                            :disabled="packBusy"
+                                        />
+                                        <span class="switch-track"></span>
+                                    </label>
+                                </div>
+                                <div class="option-row">
+                                    <span>{{ t("开启贴图") }}</span>
+                                    <label class="switch">
+                                        <input
+                                            type="checkbox"
+                                            v-model="
+                                                renderSettings.texturesEnabled
+                                            "
+                                            :disabled="packBusy"
+                                        />
+                                        <span class="switch-track"></span>
+                                    </label>
+                                </div>
+                                <div
+                                    class="channel-list"
+                                    :class="{
+                                        disabled:
+                                            !renderSettings.texturesEnabled,
+                                    }"
+                                >
+                                    <div
+                                        v-for="channel in textureChannels"
+                                        :key="channel.key"
+                                        class="channel-row"
+                                        :title="
+                                            channel.unavailable
+                                                ? t(
+                                                      '当前素材包未提供该通道贴图'
+                                                  )
+                                                : undefined
+                                        "
+                                    >
+                                        <span class="channel-name">
+                                            {{ t(channel.label)
+                                            }}<code>{{ channel.suffix }}</code>
+                                        </span>
+                                        <label class="switch">
+                                            <input
+                                                type="checkbox"
+                                                v-model="
+                                                    renderSettings.textures[
+                                                        channel.key
+                                                    ]
+                                                "
+                                                :disabled="
+                                                    !renderSettings.texturesEnabled ||
+                                                    packBusy
+                                                "
+                                            />
+                                            <span class="switch-track"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="field-row">
+                                    <label for="max-model-instances">{{
+                                        t("渲染最大模型")
+                                    }}</label>
+                                    <input
+                                        id="max-model-instances"
+                                        type="text"
+                                        :value="maxModelText"
+                                        @change="commitMaxModel"
+                                    />
+                                </div>
+                                <div class="slider-row">
+                                    <input
+                                        type="range"
+                                        min="1"
+                                        :max="limitSliderMax + 1"
+                                        step="1"
+                                        :value="limitSliderValue"
+                                        @input="onLimitSliderInput"
+                                    />
+                                    <div class="slider-ticks">
+                                        <span>1</span>
+                                        <span>{{ t("无限") }}</span>
+                                    </div>
+                                </div>
+                                <div
+                                    class="settings-hint"
+                                    :class="{ dirty: settingsDirty }"
+                                >
+                                    {{
+                                        settingsDirty
+                                            ? t(
+                                                  "设置已修改，重新导入蓝图后生效"
+                                              )
+                                            : t("修改后需重新导入蓝图才能生效")
+                                    }}
+                                </div>
+                                <div class="pack-block">
+                                    <div class="option-row">
+                                        <span>{{ t("离线模型包") }}</span>
+                                        <span class="pack-status">{{
+                                            packStatusText
+                                        }}</span>
+                                    </div>
+                                    <div class="pack-actions">
+                                        <button
+                                            type="button"
+                                            class="pack-action"
+                                            :class="{
+                                                'is-downloading': packBusy,
+                                                'is-checking': packChecking,
+                                            }"
+                                            :disabled="packDisabled"
+                                            @click="
+                                                packBusy
+                                                    ? cancelPackDownload()
+                                                    : startPackDownload()
+                                            "
+                                        >
+                                            <span
+                                                v-if="
+                                                    packBusy || packChecking
+                                                "
+                                                class="pack-action-fill"
+                                                :style="
+                                                    packChecking
+                                                        ? undefined
+                                                        : {
+                                                              width:
+                                                                  packPercent +
+                                                                  '%',
+                                                          }
+                                                "
+                                            ></span>
+                                            <span class="pack-action-label">
+                                                {{
+                                                    packBusy
+                                                        ? t("取消下载")
+                                                        : packActionText
+                                                }}
+                                            </span>
+                                        </button>
+                                    </div>
+                                    <div class="settings-hint">
+                                        {{ packHint }}
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
                     </li>
-                    <li>
-                        <button
-                            @click="commandQueue!.undo()"
-                            :disabled="!commandQueue.canUndo()"
-                        >
-                            <img src="@/assets/icons/undo.svg" />
-                            {{ t("撤销") }}
-                        </button>
+                    <li style="margin-top: auto">
+                        <div class="select-li">
+                            <label for="select-language">
+                                <img src="@/assets/icons/translate.svg" />
+                                Languages
+                            </label>
+                            <select id="select-language" v-model="lang">
+                                <option value="auto">
+                                    {{ t("自动选择语言") }}
+                                </option>
+                                <option value="en">English</option>
+                                <option value="zh">中文</option>
+                            </select>
+                        </div>
                     </li>
-                    <li>
-                        <button
-                            @click="commandQueue!.redo()"
-                            :disabled="!commandQueue.canRedo()"
-                        >
-                            <img src="@/assets/icons/redo.svg" />
-                            {{ t("重做") }}
-                        </button>
-                    </li>
-                </template>
-                <li style="margin-top: auto">
-                    <div class="select-li">
-                        <label for="select-language">
-                            <img src="@/assets/icons/translate.svg" />
-                            Languages
-                        </label>
-                        <select id="select-language" v-model="lang">
-                            <option value="auto">
-                                {{ t("自动选择语言") }}
-                            </option>
-                            <option value="en">English</option>
-                            <option value="zh">中文</option>
-                        </select>
-                    </div>
-                </li>
-            </ul>
+                </ul>
+            </div>
             <div v-else-if="activeTab === 'stats'">
                 <ProductionStats v-if="data" />
                 <div v-else class="empty-hint">{{ t("请先打开蓝图") }}</div>
@@ -302,6 +482,7 @@
             <footer>
                 {{ version }}
                 <SWStatus />
+                <span class="footer-links"><a href="https://github.com/ChronoKnight-ZZH/dsp_blueprint_editor" target="_blank">{{ t("GitHub") }}</a> · <a href="https://wj.qq.com/s2/27881383/xef3/" target="_blank">{{ t("反馈") }}</a></span>
             </footer>
         </div>
         <button
@@ -386,7 +567,7 @@ import BlueprintIcon from "./components/BlueprintIcon.vue";
 import IconPickerModal from "./components/IconPickerModal.vue";
 import ReplaceModal from "./components/ReplaceModal.vue";
 import ProductionStats from "./components/ProductionStats.vue";
-import { CommandQueue } from "./command";
+import { CommandQueue } from "@/render/command";
 import BuildingOverview from "./components/BuildingOverview.vue";
 import BuildingPalette from "./components/BuildingPalette.vue";
 import ShortcutHint from "./components/ShortcutHint.vue";
@@ -394,6 +575,12 @@ import TutorialModal from "./components/TutorialModal.vue";
 import ReformColorDialog from "./components/ReformColorDialog.vue";
 import { photoToBlueprint } from "@/blueprint/reformImage";
 import { useLang } from "./i18n";
+import {
+    renderSettings,
+    persistRenderSettings,
+    captureRenderSettings,
+} from "@/render/renderSettings";
+import type { TextureChannel } from "@/render/renderSettings";
 // 仅用于类型标注，编译时擦除，不影响 defineAsyncComponent 的异步分包
 import type BlueprintEditorImpl from "./components/BlueprintEditor.vue";
 const BlueprintEditor = defineAsyncComponent(
@@ -436,6 +623,317 @@ const togglePin = () => {
     }
 };
 const activeTab = ref<"info" | "operations" | "stats">("info");
+
+// ---------- 渲染高级设置 ----------
+const advancedOpen = ref(false);
+const settingsDirty = ref(false);
+
+const textureChannels: {
+    key: TextureChannel;
+    suffix: string;
+    label: string;
+    unavailable?: boolean;
+}[] = [
+    { key: "albedo", suffix: "-a", label: "反照率" },
+    { key: "normal", suffix: "-n", label: "法线" },
+    { key: "spec", suffix: "-s", label: "高光/粗糙" },
+    { key: "emissive", suffix: "-e", label: "自发光" },
+    { key: "effect", suffix: "-eff", label: "特效", unavailable: true },
+    { key: "dirt", suffix: "-dirt", label: "污渍", unavailable: true },
+    { key: "glass", suffix: "-glass", label: "玻璃", unavailable: true },
+];
+
+/** 滑动条数值上限；再往右那一档代表「无限」 */
+const limitSliderMax = 2048;
+
+const limitSliderValue = computed(() => {
+    const limit = renderSettings.maxInstancesPerModel;
+    if (!Number.isFinite(limit)) return limitSliderMax + 1;
+    return Math.min(limitSliderMax, Math.max(1, Math.round(limit)));
+});
+
+const maxModelText = computed(() =>
+    Number.isFinite(renderSettings.maxInstancesPerModel)
+        ? String(renderSettings.maxInstancesPerModel)
+        : t("无限")
+);
+
+const parseLimitText = (text: string): number => {
+    const normalized = text.trim().toLowerCase();
+    if (
+        normalized === "无限" ||
+        normalized === "∞" ||
+        normalized === "inf" ||
+        normalized === "infinite" ||
+        normalized === "infinity"
+    )
+        return Infinity;
+    const value = Number(normalized);
+    // 非法输入：保持原值
+    if (normalized === "" || !Number.isFinite(value))
+        return renderSettings.maxInstancesPerModel;
+    return Math.max(1, Math.floor(value));
+};
+
+const onLimitSliderInput = (e: Event) => {
+    const value = Number((e.target as HTMLInputElement).value);
+    renderSettings.maxInstancesPerModel =
+        value > limitSliderMax ? Infinity : value;
+};
+
+const commitMaxModel = (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    renderSettings.maxInstancesPerModel = parseLimitText(input.value);
+    // 输入不合法时回显当前值（无限显示为「无限」）
+    input.value = Number.isFinite(renderSettings.maxInstancesPerModel)
+        ? String(renderSettings.maxInstancesPerModel)
+        : t("无限");
+};
+
+// 设置变化后立即写入 sessionStorage，并提示「需重新导入蓝图」
+watch(
+    renderSettings,
+    () => {
+        persistRenderSettings();
+        settingsDirty.value = true;
+    },
+    { deep: true }
+);
+
+// ---------- 离线模型包（可选资源的一次性持久化） ----------
+
+/**
+ * 模型是懒加载的：只有真的出现在蓝图里的才会下载。用户若想「断网也能翻任意
+ * 蓝图」，就要把全部模型（73 个、约 128 MB）预先存到本地——这份成本必须由
+ * 用户主动点击才承担，所以入口是「高级」里的一个按钮，不做启动时预取。
+ *
+ * 落盘位置见 `@/models/modelCache`（Cache Storage，键是带内容哈希的 URL），
+ * 下载流程见 `@/models/modelPack`。
+ */
+type PackState =
+    | "idle"
+    | "checking"
+    | "downloading"
+    | "complete"
+    | "partial"
+    | "unsupported"
+    | "error";
+
+const packState = ref<PackState>("idle");
+/** 离线包总文件数（磁盘上真实存在的 GLB 数） */
+const packTotal = ref(0);
+/** 已经在本地缓存里的文件数 */
+const packCached = ref(0);
+/** 本次下载已完成的文件数 */
+const packDone = ref(0);
+/** 本次下载已接收的字节数 */
+const packBytes = ref(0);
+/** 尚未缓存模型的总字节数；null = 构建期清单不可用 */
+const packMissingBytes = ref<number | null>(null);
+const packError = ref("");
+/** 本地持久化是否被构建配置（config/persistence.config.js）关闭：与「浏览器不支持」分开提示 */
+const packPersistenceOff = ref(false);
+/** 进行中的下载；null = 空闲 */
+let packAbort: AbortController | null = null;
+
+/** 下载期间禁止改动渲染设置（避免一半模型走新设置、一半走旧设置） */
+const packBusy = computed(() => packState.value === "downloading");
+const packChecking = computed(() => packState.value === "checking");
+const packDisabled = computed(
+    () => packState.value === "checking" || packState.value === "unsupported"
+);
+
+const packPercent = computed(() => {
+    if (packTotal.value <= 0) return 0;
+    return Math.min(
+        100,
+        Math.round((packDone.value / packTotal.value) * 100)
+    );
+});
+
+const formatSize = (bytes: number): string => {
+    if (bytes <= 0) return "0 KB";
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const packStatusText = computed(() => {
+    switch (packState.value) {
+        case "unsupported":
+            // 「持久化开关被关掉」和「浏览器不支持」是两回事，提示要能区分
+            return packPersistenceOff.value ? t("已关闭") : t("不支持");
+        case "checking":
+            return t("检查中…");
+        case "downloading":
+            return `${t("下载中")} ${packPercent.value}%`;
+        case "error":
+            return t("下载失败");
+        case "complete":
+            return `${t("已下载")} ${packCached.value}/${packTotal.value}`;
+        case "partial":
+            return `${packCached.value}/${packTotal.value}`;
+        default:
+            // 还没检查过（面板没展开过）时不显示 0/0，避免误导
+            return packTotal.value > 0
+                ? `${packCached.value}/${packTotal.value}`
+                : "";
+    }
+});
+
+const packActionText = computed(() => {
+    switch (packState.value) {
+        case "complete":
+            return t("已是离线状态");
+        case "partial":
+            return `${t("继续下载")}（${packCached.value}/${packTotal.value}）`;
+        case "error":
+            return t("重试下载");
+        case "checking":
+            return t("检查中…");
+        case "unsupported":
+            return t("下载全部模型");
+        default:
+            return packTotal.value > 0
+                ? `${t("下载全部模型")}（${packTotal.value}）`
+                : t("下载全部模型");
+    }
+});
+
+const packHint = computed(() => {
+    const missingSize =
+        packMissingBytes.value !== null && packMissingBytes.value > 0
+            ? `${t("待下载")} ${formatSize(packMissingBytes.value)}`
+            : "";
+    switch (packState.value) {
+        case "unsupported":
+            return packPersistenceOff.value
+                ? t("本地持久化已在构建配置中关闭，模型仍可在联网时加载")
+                : t("当前浏览器不支持本地缓存，模型仍可在联网时加载");
+        case "checking":
+            return t("正在检查本地已缓存的模型…");
+        case "downloading":
+            return `${packDone.value}/${packTotal.value} · ${formatSize(
+                packBytes.value
+            )}/${formatSize(packMissingBytes.value!)} · ${t("下载完成前无法切换渲染设置")}`;
+        case "error":
+            return `${t("下载失败")}：${packError.value}`;
+        case "complete":
+            return t("已缓存到本地，断网也能查看这些模型");
+        case "partial":
+            return missingSize !== ""
+                ? missingSize
+                : t("可选：下载模型到本地");
+        default:
+            return missingSize !== ""
+                ? missingSize
+                : t("可选：下载模型到本地");
+    }
+});
+
+function loadPackModule(): Promise<typeof import("@/models/modelPack")> {
+    return import(
+        /* webpackChunkName: "model-pack" */ "@/models/modelPack"
+    );
+}
+
+function isAbortError(error: unknown): boolean {
+    return (error as { name?: unknown } | null)?.name === "AbortError";
+}
+
+/** 只统计，不下载：刷新「已缓存多少」 */
+const refreshPackState = async (): Promise<void> => {
+    if (packState.value === "downloading") return;
+    packState.value = "checking";
+    try {
+        const pack = await loadPackModule();
+        packPersistenceOff.value = !pack.isPersistenceEnabled();
+        if (!pack.isPackSupported()) {
+            packState.value = "unsupported";
+            return;
+        }
+        const status = await pack.inspectPack();
+        packTotal.value = status.total;
+        packCached.value = status.cached;
+        packMissingBytes.value = status.missingBytes;
+        packDone.value = status.cached;
+        packBytes.value = 0;
+        if (status.total > 0 && status.cached >= status.total)
+            packState.value = "complete";
+        else if (status.cached > 0) packState.value = "partial";
+        else packState.value = "idle";
+    } catch (e) {
+        packState.value = "error";
+        packError.value = e instanceof Error ? e.message : String(e);
+    }
+};
+
+const startPackDownload = async (): Promise<void> => {
+    if (packState.value === "downloading") return;
+    packError.value = "";
+    // 先切到「检查中」：清点缓存可能耗时，进度条会以不确定动画立即反馈
+    packState.value = "checking";
+    try {
+        const pack = await loadPackModule();
+        packPersistenceOff.value = !pack.isPersistenceEnabled();
+        if (!pack.isPackSupported()) {
+            packState.value = "unsupported";
+            return;
+        }
+        const status = await pack.inspectPack();
+        packTotal.value = status.total;
+        packCached.value = status.cached;
+        packMissingBytes.value = status.missingBytes;
+        packDone.value = status.cached;
+        packBytes.value = 0;
+        if (status.missing === 0 && status.total > 0) {
+            packState.value = "complete";
+            return;
+        }
+
+        packAbort = new AbortController();
+        packState.value = "downloading";
+        await pack.downloadPack({
+            signal: packAbort.signal,
+            onProgress: (progress) => {
+                packDone.value = status.cached + progress.completed;
+                packBytes.value = progress.bytes;
+            },
+        });
+        packCached.value = packDone.value;
+        packMissingBytes.value = 0;
+        packState.value = "complete";
+        // 之前加载失败（网络抖动等）的模型现在本地有了：清掉负缓存，
+        // 下次重建场景 / 重新导入蓝图就能用上
+        void import("@/models/glbLoader").then((glb) => glb.resetGlbFailure());
+    } catch (e) {
+        if (isAbortError(e)) {
+            // 取消：已完成的文件保留（下次点是续传），半成品不落盘
+            packCached.value = packDone.value;
+            // 已下载部分的组成未知，不再展示可能过期的剩余大小
+            packMissingBytes.value = null;
+            packState.value =
+                packCached.value >= packTotal.value && packTotal.value > 0
+                    ? "complete"
+                    : "partial";
+        } else {
+            packState.value = "error";
+            packMissingBytes.value = null;
+            packError.value = e instanceof Error ? e.message : String(e);
+        }
+    } finally {
+        packAbort = null;
+    }
+};
+
+const cancelPackDownload = (): void => {
+    packAbort?.abort();
+};
+
+// 展开「高级」时才去数一遍本地缓存（不对首屏产生任何请求或耗时）
+watch(advancedOpen, (open) => {
+    if (open) void refreshPackState();
+});
+
 const working = ref(false);
 const codeExpired = ref(false);
 const parseErrorMessage = ref("");
@@ -660,6 +1158,10 @@ const parseBp = (s: string) => {
     selectedBuildingIndex.value = null;
     bpStr.value = s;
     codeExpired.value = false;
+    // 导入蓝图：把面板设置固化为「已生效」快照，本次及之后的中途重建都按它渲染
+    captureRenderSettings();
+    // 重新导入后场景已按最新设置重建，清掉「待生效」提示
+    settingsDirty.value = false;
 };
 
 // 照片 → 地基蓝图
@@ -1043,7 +1545,7 @@ body {
     right: 0;
     top: 0;
     bottom: 0;
-    width: 360px;
+    width: 420px;
     overflow-y: auto;
     box-sizing: border-box;
     background: #000000b0;
@@ -1325,6 +1827,305 @@ ul.operations {
         flex: 1 100px;
     }
 }
+
+/* ---------- 渲染高级设置 ---------- */
+.operations-panel {
+    display: flex;
+    flex-direction: column;
+    flex: auto;
+    min-height: 0;
+}
+
+ul.operations > li.render-settings-li {
+    border-bottom: 0;
+    padding: 2px 0;
+}
+
+.render-settings {
+    flex: none;
+    margin: 6px 0;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+}
+
+/* 用两级类名压过 .sidebar button 的通用按钮样式 */
+.render-settings .advanced-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 7px 10px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.08);
+    }
+}
+
+.render-settings .switch-track {
+    position: relative;
+    flex: none;
+    width: 38px;
+    height: 20px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.24);
+    transition: background 0.15s;
+
+    &::after {
+        content: "";
+        position: absolute;
+        left: 2px;
+        top: 2px;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #fff;
+        transition: transform 0.15s;
+    }
+
+    &.on {
+        background: #64a0dc;
+
+        &::after {
+            transform: translateX(18px);
+        }
+    }
+}
+
+.render-settings .switch {
+    flex: none;
+    display: inline-flex;
+    cursor: pointer;
+
+    input {
+        display: none;
+    }
+
+    input:checked + .switch-track {
+        background: #64a0dc;
+
+        &::after {
+            transform: translateX(18px);
+        }
+    }
+
+    input:disabled + .switch-track {
+        opacity: 0.4;
+    }
+}
+
+.advanced-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 10px 10px;
+    font-size: 0.9rem;
+}
+
+.option-row,
+.channel-row,
+.field-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.channel-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-left: 10px;
+    border-left: 2px solid rgba(100, 160, 220, 0.5);
+
+    &.disabled {
+        opacity: 0.5;
+    }
+}
+
+.channel-name code {
+    margin-left: 4px;
+    font-family: "Menlo", "Consolas", monospace;
+    font-size: 0.78rem;
+    color: #9ec4e8;
+}
+
+.render-settings .field-row input[type="text"] {
+    flex: none;
+    width: 90px;
+    text-align: right;
+}
+
+.slider-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+
+    input[type="range"] {
+        width: 100%;
+        margin: 0;
+        accent-color: #64a0dc;
+    }
+}
+
+.slider-ticks {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    color: #aaa;
+}
+
+.settings-hint {
+    font-size: 0.8rem;
+    color: #bbb;
+
+    &.dirty {
+        color: #ffcf6b;
+    }
+}
+
+/* ---------- 离线模型包 ---------- */
+.pack-block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 2px;
+    padding-top: 8px;
+    border-top: 1px dashed rgba(255, 255, 255, 0.16);
+}
+
+.pack-status {
+    flex: none;
+    font-size: 0.78rem;
+    color: #9ec4e8;
+}
+
+.pack-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.render-settings .pack-action {
+    position: relative;
+    flex: auto;
+    overflow: hidden;
+    padding: 5px 10px;
+    border: 1px solid rgba(100, 160, 220, 0.6);
+    border-radius: 4px;
+    background: rgba(100, 160, 220, 0.18);
+    color: inherit;
+    font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+
+    &:hover:not([disabled]) {
+        background: rgba(100, 160, 220, 0.32);
+    }
+
+    &[disabled] {
+        opacity: 0.45;
+        cursor: default;
+    }
+
+    &.is-downloading .pack-action-fill {
+        background: linear-gradient(
+            90deg,
+            rgba(77, 143, 204, 0.55),
+            rgba(143, 214, 255, 0.85),
+            rgba(77, 143, 204, 0.55)
+        );
+        background-size: 200% 100%;
+        animation: pack-action-flow 1.2s linear infinite;
+    }
+
+    &.is-checking .pack-action-fill {
+        width: 35%;
+        background: rgba(100, 160, 220, 0.45);
+        animation: pack-action-slide 1.1s ease-in-out infinite;
+    }
+}
+
+.pack-action-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 0;
+    pointer-events: none;
+    transition: width 0.25s ease-out;
+}
+
+.pack-action-label {
+    position: relative;
+    z-index: 1;
+}
+
+@keyframes pack-action-flow {
+    from {
+        background-position: 0 0;
+    }
+    to {
+        background-position: -200% 0;
+    }
+}
+
+@keyframes pack-action-slide {
+    from {
+        transform: translateX(-100%);
+    }
+    to {
+        transform: translateX(290%);
+    }
+}
+
+.footer-links {
+    display: inline-block;
+    margin-left: 10px;
+    font-size: 0.78rem;
+    color: gray;
+    white-space: nowrap;
+
+    a {
+        color: #64a0dc;
+        text-decoration: underline;
+        text-decoration-color: rgba(100, 160, 220, 0.35);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 2px;
+        transition:
+            color 0.15s ease,
+            text-decoration-color 0.15s ease;
+
+        &::after {
+            content: "↗";
+            margin-left: 2px;
+            font-size: 0.9em;
+            opacity: 0.55;
+        }
+
+        &:hover {
+            color: #8fd6ff;
+            text-decoration-color: rgba(143, 214, 255, 0.7);
+
+            &::after {
+                opacity: 1;
+            }
+        }
+
+        &:focus-visible {
+            outline: 1px solid #64a0dc;
+            outline-offset: 2px;
+            border-radius: 2px;
+        }
+    }
+}
 </style>
 
 <i18n>
@@ -1348,9 +2149,46 @@ ul.operations {
         "右键点击剔除": "右键点击建筑可剔除",
         "仅支持 .txt 文件": "仅支持 .txt 文件",
         "拖拽文件到此处打开": "拖拽文件到此处打开",
-        "编辑": "编辑", 
+        "编辑": "编辑",
         "保存": "保存",
-        "请先打开蓝图": "请先打开蓝图"
+        "请先打开蓝图": "请先打开蓝图",
+        "高级": "高级",
+        "展示真实模型": "展示真实模型",
+        "开启贴图": "开启贴图",
+        "反照率": "反照率",
+        "法线": "法线",
+        "高光/粗糙": "高光/粗糙",
+        "自发光": "自发光",
+        "特效": "特效",
+        "污渍": "污渍",
+        "玻璃": "玻璃",
+        "渲染最大模型": "渲染最大模型",
+        "无限": "无限",
+        "修改后需重新导入蓝图才能生效": "修改后需重新导入蓝图才能生效",
+        "设置已修改，重新导入蓝图后生效": "设置已修改，重新导入蓝图后生效",
+        "当前素材包未提供该通道贴图": "当前素材包未提供该通道贴图",
+        "GitHub": "GitHub",
+        "反馈": "反馈",
+
+        "离线模型包": "离线模型包",
+        "下载全部模型": "下载全部模型",
+        "继续下载": "继续下载",
+        "重试下载": "重试下载",
+        "取消下载": "取消下载",
+        "已下载": "已下载",
+        "已是离线状态": "已是离线状态",
+        "下载中": "下载中",
+        "待下载": "待下载",
+        "检查中…": "检查中…",
+        "下载失败": "下载失败",
+        "不支持": "不支持",
+        "已关闭": "已关闭",
+        "下载完成前无法切换渲染设置": "下载完成前无法切换渲染设置",
+        "已缓存到本地，断网也能查看这些模型": "已缓存到本地，断网也能查看这些模型",
+        "可选：把全部模型存到本地，断网也能看 3D 模型": "可选：把全部模型存到本地，断网也能看 3D 模型",
+        "当前浏览器不支持本地缓存，模型仍可在联网时加载": "当前浏览器不支持本地缓存，模型仍可在联网时加载",
+        "本地持久化已在构建配置中关闭，模型仍可在联网时加载": "本地持久化已在构建配置中关闭，模型仍可在联网时加载",
+        "正在检查本地已缓存的模型…": "正在检查本地已缓存的模型…"
     },
     en: {
         "复制": "Copy",
@@ -1372,9 +2210,46 @@ ul.operations {
         "右键点击剔除": "Right-click a building to remove it",
         "仅支持 .txt 文件": "Only .txt files are supported",
         "拖拽文件到此处打开": "Drop file here to open",
-        "编辑": "Edit", 
+        "编辑": "Edit",
         "保存": "Save",
-        "请先打开蓝图": "Please open a blueprint first"
+        "请先打开蓝图": "Please open a blueprint first",
+        "高级": "Advanced",
+        "展示真实模型": "Render real models",
+        "开启贴图": "Enable textures",
+        "反照率": "Albedo",
+        "法线": "Normal",
+        "高光/粗糙": "Specular/Roughness",
+        "自发光": "Emissive",
+        "特效": "Effect",
+        "污渍": "Dirt",
+        "玻璃": "Glass",
+        "渲染最大模型": "Max model instances",
+        "无限": "Unlimited",
+        "修改后需重新导入蓝图才能生效": "Re-import the blueprint for changes to take effect",
+        "设置已修改，重新导入蓝图后生效": "Settings changed — re-import the blueprint to apply",
+        "当前素材包未提供该通道贴图": "This texture channel is not available in the asset pack",
+        "GitHub": "GitHub",
+        "反馈": "Feedback",
+
+        "离线模型包": "Offline models",
+        "下载全部模型": "Download all models",
+        "继续下载": "Resume",
+        "重试下载": "Retry download",
+        "取消下载": "Cancel",
+        "已下载": "Downloaded",
+        "已是离线状态": "Already offline",
+        "下载中": "Downloading",
+        "待下载": "To download",
+        "检查中…": "Checking…",
+        "下载失败": "Download failed",
+        "不支持": "Unsupported",
+        "已关闭": "Disabled",
+        "下载完成前无法切换渲染设置": "Rendering settings are locked until the download finishes",
+        "已缓存到本地，断网也能查看这些模型": "Stored locally — these models now work offline",
+        "可选：把全部模型存到本地，断网也能看 3D 模型": "Optional: store every model locally to view 3D models offline",
+        "当前浏览器不支持本地缓存，模型仍可在联网时加载": "This browser does not support local caching; models still load while online",
+        "本地持久化已在构建配置中关闭，模型仍可在联网时加载": "Local persistence is disabled in the build config; models still load while online",
+        "正在检查本地已缓存的模型…": "Checking locally cached models…"
     },
 }
 </i18n>

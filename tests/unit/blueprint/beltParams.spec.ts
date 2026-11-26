@@ -5,7 +5,7 @@ import {
     createBuilding,
     createEmptyBlueprint,
 } from '@/blueprint/create';
-import { Updater } from '@/command';
+import { Updater } from '@/render/command';
 import { SetBeltParamsCommand } from '@/blueprint/setBeltParams';
 import { isBelt } from '@/data/items';
 

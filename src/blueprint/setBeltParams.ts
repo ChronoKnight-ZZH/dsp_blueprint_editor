@@ -1,5 +1,5 @@
 import { BeltParameters, BlueprintBuilding, BlueprintData } from "./parser";
-import { Command, Updater } from "@/command";
+import { Command, Updater } from "@/render/command";
 
 export type BeltParamField = "iconId" | "count";
 

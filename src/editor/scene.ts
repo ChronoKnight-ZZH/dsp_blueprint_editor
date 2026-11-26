@@ -5,7 +5,7 @@ import {
     calcBuildingTrans,
     findPosForAreas,
     PositionedBlueprint,
-} from "@/blueprint/planet";
+} from "@/planet/planet";
 import { expandReformCells, ReformCell } from "@/blueprint/reform";
 import { buildingMeta } from "@/data/building";
 import { isInserter } from "@/data/items";

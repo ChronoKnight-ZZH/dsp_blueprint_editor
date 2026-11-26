@@ -1,5 +1,5 @@
 import { BlueprintBuilding, BlueprintData, IODir } from "./parser";
-import { Command } from "@/command";
+import { Command } from "@/render/command";
 import { ROOT_GRID_SIZE } from "./globe";
 import { createBuilding } from "./create";
 

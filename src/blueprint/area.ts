@@ -22,7 +22,7 @@ import {
     findPosForAreas,
     planetBandGridRange,
     PositionedBlueprint,
-} from "./planet";
+} from "@/planet/planet";
 
 export { planetToLocal, localToPlanet, ROOT_GRID_SIZE } from "./globe";
 export type { AreaGridOrigin } from "./globe";

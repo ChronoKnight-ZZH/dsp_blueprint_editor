@@ -10,7 +10,7 @@ import {
     calcBuildingTrans,
     findPosForAreas,
     planetBands,
-} from "@/blueprint/planet";
+} from "@/planet/planet";
 import {
     areaGridSize,
     canvasTargetAt,

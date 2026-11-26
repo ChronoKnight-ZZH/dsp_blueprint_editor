@@ -3,7 +3,7 @@ import {
     BlueprintReformData,
     BlueprintReformRect,
 } from "@/blueprint/parser";
-import { Command } from "@/command";
+import { Command } from "@/render/command";
 
 /**
  * 地基（地形改造）的逐格编辑工具 + 撤销命令。

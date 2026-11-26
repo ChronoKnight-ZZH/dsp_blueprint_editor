@@ -1,12 +1,21 @@
 import { items } from "./itemsData";
 import { Item } from "./types";
 
+/**
+ * 物品映射表
+ * 用于根据物品 ID 快速查找物品数据
+ */
+
+// 物品映射表
 export const itemsMap = new Map<number, Item>();
 
 for (const i of items) {
     itemsMap.set(i.id, i);
 }
 
+/**
+ * 判断物品是否需要图标
+ */
 export function isBelt(id: number) {
     return id >= 2001 && id <= 2003;
 }
@@ -75,6 +84,10 @@ export function isHoloBeacon(id: number) {
     return id === 2401;
 }
 
+/**
+ * 所有组装器物品 ID
+ * 用于快速判断物品是否为组装器
+ */
 export const allAssemblers = new Set([
     2303, // 制造台
     2304,

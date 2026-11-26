@@ -21,6 +21,26 @@ module.exports = {
     },
     overrides: [
         {
+            // lib 发布层必须保持「零 Vue 运行时依赖」：`src/command.ts` 顶层 import vue
+            // （ref / 生命周期），虽然当前对它的引用都只是类型、构建时会被擦除，
+            // 但一旦有人 import 了它的值成员，Vue 就会被打进 dist-lib。这里直接禁掉。
+            files: ['src/lib/**/*.ts'],
+            rules: {
+                'no-restricted-imports': [
+                    'error',
+                    {
+                        patterns: [
+                            {
+                                group: ['@/command', '**/command', 'vue', 'vue/*'],
+                                message:
+                                    'lib 发布层不得依赖 Vue 运行时或 src/command.ts；删除能力请复用 @/blueprint/removeBuilding 的命令类。'
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        {
             files: [
                 '**/__tests__/*.{j,t}s?(x)',
                 '**/tests/unit/**/*.spec.{j,t}s?(x)'

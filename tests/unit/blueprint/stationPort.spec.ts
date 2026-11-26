@@ -10,7 +10,7 @@ import {
     stationPortItemChoices,
     stationPortItemId,
 } from '@/blueprint/setStationPort';
-import { Updater } from '@/command';
+import { Updater } from '@/render/command';
 import * as fs from 'fs';
 import * as path from 'path';
 

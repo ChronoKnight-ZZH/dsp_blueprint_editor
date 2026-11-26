@@ -1,0 +1,4 @@
+interface:
+  display_name: "DysonSphereBox Project"
+  short_description: "Wails Vue project coding rules"
+  default_prompt: "Use $dyson-sphere-box-project to implement changes in the DysonSphereBox Wails Vue project."

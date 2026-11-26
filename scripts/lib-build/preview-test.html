@@ -1,0 +1,844 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="data:," />
+<title>增量预览（preview-delta）效果与验收 · 支持进度条 scrubbing</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        margin: 0; padding: 20px; background: #0d1117; color: #e6edf3;
+        font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    h1 { font-size: 18px; margin: 0 0 6px; }
+    .hint { color: #8b949e; margin: 0 0 14px; }
+    code { background: #21262d; padding: 1px 5px; border-radius: 4px; }
+    .banner {
+        padding: 10px 14px; border-radius: 6px; font-weight: 600;
+        margin: 14px 0; border: 1px solid #30363d; background: #161b22;
+    }
+    .banner.running { color: #8b949e; }
+    .banner.ok { color: #3fb950; border-color: #3fb950; }
+    .banner.fail { color: #f85149; border-color: #f85149; }
+    .toolbar {
+        display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+        padding: 10px 12px; background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+    }
+    .toolbar label { color: #8b949e; font-size: 13px; }
+    button, select {
+        background: #21262d; color: #e6edf3; border: 1px solid #30363d;
+        border-radius: 6px; padding: 5px 12px; font: inherit; font-size: 13px;
+    }
+    button:hover:not(:disabled) { border-color: #58a6ff; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .file-import {
+        background: #21262d; color: #e6edf3; border: 1px solid #30363d;
+        border-radius: 6px; padding: 5px 12px; font-size: 13px; cursor: pointer;
+    }
+    .file-import:hover { border-color: #58a6ff; }
+    .file-import input { display: none; }
+    .fixture-name { color: #8b949e; font-size: 12px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #viewer { height: 460px; border: 1px solid #30363d; border-radius: 6px; overflow: hidden; background: #000; margin-top: 14px; }
+
+    /* ── 进度条（scrubber） ───────────────────────────────── */
+    .scrubber {
+        margin-top: 12px;
+        padding: 10px 12px;
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        user-select: none;
+    }
+    .scrubber[hidden] { display: none; }
+    .scrubber-track {
+        position: relative;
+        height: 10px;
+        background: #21262d;
+        border-radius: 5px;
+        cursor: pointer;
+        touch-action: none;
+    }
+    .scrubber-track:hover { background: #262c36; }
+    .scrubber-fill {
+        position: absolute;
+        left: 0; top: 0; bottom: 0;
+        background: linear-gradient(90deg, #1f6feb, #58a6ff);
+        border-radius: 5px;
+        width: 0%;
+        pointer-events: none;
+        transition: none;
+    }
+    .scrubber-thumb {
+        position: absolute;
+        top: 50%;
+        width: 18px; height: 18px;
+        margin-left: -9px;
+        transform: translateY(-50%);
+        background: #e6edf3;
+        border: 2px solid #1f6feb;
+        border-radius: 50%;
+        left: 0%;
+        pointer-events: none;
+        box-shadow: 0 0 0 4px rgba(47,129,247,0.15);
+        transition: box-shadow .15s;
+    }
+    .scrubber.dragging .scrubber-thumb {
+        box-shadow: 0 0 0 6px rgba(47,129,247,0.28);
+    }
+    .scrubber-info {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 8px;
+        font: 12px/1.4 ui-monospace, Consolas, monospace;
+        color: #8b949e;
+    }
+    .scrubber-info .scrubber-pct { color: #58a6ff; font-weight: 600; }
+    .scrubber-info .scrubber-hint { color: #556; }
+
+    .grid {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+        gap: 8px; margin-top: 14px;
+    }
+    .cell { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 8px 10px; }
+    .cell .k { color: #8b949e; font-size: 12px; }
+    .cell .v { font: 600 16px/1.3 ui-monospace, Consolas, monospace; }
+    .cell .v.warn { color: #d29922; }
+    .cell .v.bad { color: #f85149; }
+    #log {
+        height: 160px; overflow: auto; margin: 14px 0 0; padding: 10px;
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        font: 12px/1.55 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-all;
+    }
+    table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 13px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #30363d; vertical-align: top; }
+    th { color: #8b949e; font-weight: 500; }
+    td.state { width: 74px; font-weight: 600; }
+    td.state.ok { color: #3fb950; }
+    td.state.fail { color: #f85149; }
+    td.state.skip { color: #8b949e; }
+</style>
+</head>
+<body>
+<h1>增量预览（preview-delta）效果与验收 · 进度条 scrubbing</h1>
+<p class="hint">
+    本页动态 <code>import()</code> 同目录的 <code>dsp-blueprint-editor.esm.js</code>，
+    用 <code>beginPreview()</code> + <code>applyPreviewDelta()</code> 按实测节拍回放 fixture。
+    <strong>新增底部进度条</strong>：导入 fixture 后可左右拖动，画面会平滑正放 / 倒放追踪，
+    不是直接跳到目标状态。
+</p>
+
+<div class="toolbar">
+    <button id="play" disabled>▶ 回放</button>
+    <button id="stop" disabled>■ 停止</button>
+    <label class="file-import">导入 fixture…
+        <input id="file" type="file" accept=".json,application/json" />
+    </label>
+    <span id="fixtureName" class="fixture-name">未加载</span>
+    <label>速度
+        <select id="speed">
+            <option value="1">1x（20ms/条，与实测一致）</option>
+            <option value="2">2x（10ms/条）</option>
+            <option value="4">4x（5ms/条，压力）</option>
+            <option value="0.5">0.5x（40ms/条，看细节）</option>
+        </select>
+    </label>
+    <label>layout 投影
+        <select id="projector">
+            <option value="sphere">sphere（球面自适应）</option>
+            <option value="plane">plane（锚点切平面）</option>
+        </select>
+    </label>
+    <label>动画
+        <select id="animation">
+            <option value="on">on（插值跟随）</option>
+            <option value="off">off（直接跳变）</option>
+        </select>
+    </label>
+    <label>抖动抑制
+        <select id="thrash">
+            <option value="120">开（120ms）</option>
+            <option value="0">关（忠实回放，会闪）</option>
+        </select>
+    </label>
+</div>
+
+<div id="viewer"></div>
+
+<!-- ── 进度条（导入 fixture 后显示） ─────────────────────── -->
+<div class="scrubber" id="scrubber" hidden>
+    <div class="scrubber-track" id="scrubberTrack">
+        <div class="scrubber-fill" id="scrubberFill"></div>
+        <div class="scrubber-thumb" id="scrubberThumb"></div>
+    </div>
+    <div class="scrubber-info">
+        <span><span id="scrubberPos">0</span> / <span id="scrubberTotal">0</span> 条事件</span>
+        <span class="scrubber-hint">拖动进度条 → 平滑正放 / 倒放</span>
+        <span class="scrubber-pct" id="scrubberPct">0%</span>
+    </div>
+</div>
+
+<div class="grid" id="stats"></div>
+
+<div id="banner" class="banner running">准备中…</div>
+
+<table>
+    <thead><tr><th>状态</th><th>检查项</th><th>详情</th></tr></thead>
+    <tbody id="report"></tbody>
+</table>
+
+<pre id="log"></pre>
+
+<script type="module">
+(async function () {
+    'use strict';
+
+    // 与 esm-test.html 同款：产物目录按真实 URL 算（不受 <base> 干扰）
+    const pageUrl = new URL(window.location.href);
+    const libUrl = new URL('dsp-blueprint-editor.esm.js', pageUrl).href;
+    const fixtureUrl = new URL('preview-fixture.json', pageUrl).href;
+
+    // 实测节拍：250 条 ≈ 5s
+    const STEP_MS = 20;
+    // 事件停后再等多久取终态统计（约 3τ）
+    const SETTLE_MS = 1200;
+
+    const bannerEl = document.getElementById('banner');
+    const logEl = document.getElementById('log');
+    const reportEl = document.getElementById('report');
+    const statsEl = document.getElementById('stats');
+    const playBtn = document.getElementById('play');
+    const stopBtn = document.getElementById('stop');
+    const speedSel = document.getElementById('speed');
+    const projectorSel = document.getElementById('projector');
+    const animationSel = document.getElementById('animation');
+    const thrashSel = document.getElementById('thrash');
+    const fileInput = document.getElementById('file');
+    const fixtureNameEl = document.getElementById('fixtureName');
+
+    // 进度条元素
+    const scrubberEl = document.getElementById('scrubber');
+    const scrubberTrack = document.getElementById('scrubberTrack');
+    const scrubberFill = document.getElementById('scrubberFill');
+    const scrubberThumb = document.getElementById('scrubberThumb');
+    const scrubberPos = document.getElementById('scrubberPos');
+    const scrubberTotal = document.getElementById('scrubberTotal');
+    const scrubberPct = document.getElementById('scrubberPct');
+
+    /** @type {any} */ let viewer = null;
+    /** @type {any[]} */ let events = [];
+    /** @type {any} */ let fixture = null;
+
+    let runToken = 0;
+    let measuring = false;
+    let firstApplyAt = 0;
+    let firstVisibleMs = null;
+    let maxIngest = 0;
+    let sumIngest = 0;
+    let appliedCount = 0;
+    let rejectedCount = 0;
+    let frameDeltas = [];
+    let slowFrames = 0;
+    let lastFrameAt = 0;
+    let lastStatsAt = 0;
+
+    /* ── 时间轴 / 播放状态 ────────────────────────────────── */
+    let autoPlaying = false;   // 「▶ 回放」自动推进中
+    let scrubbing = false;     // 用户正在拖动进度条
+    let rafRunning = false;    // 播放 rAF 是否在跑
+    let lastTickAt = 0;
+    let playhead = 0;          // 当前显示位置（浮点 0..events.length）
+    let targetPlayhead = 0;    // 目标位置（自动推进或拖动决定）
+    let appliedIndex = 0;      // 已实际应用到的事件数（整数）
+    let previewOptions = null; // 预览配置，重建时复用
+    let playbackResolve = null;
+    let playbackStartAt = 0;
+    let playbackEndAt = 0;
+
+    function log(message) {
+        const line = '[' + new Date().toLocaleTimeString() + '] ' + message;
+        logEl.textContent = logEl.textContent ? logEl.textContent + '\n' + line : line;
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    const checks = [];
+    const failures = [];
+    function check(name, ok, detail, skipped) {
+        checks.push({ name: name, ok: ok });
+        const row = document.createElement('tr');
+        const state = document.createElement('td');
+        state.className = 'state ' + (skipped ? 'skip' : ok ? 'ok' : 'fail');
+        state.textContent = skipped ? '—' : ok ? '✓' : '✗';
+        const nameCell = document.createElement('td');
+        nameCell.textContent = name;
+        const detailCell = document.createElement('td');
+        detailCell.textContent = detail || '';
+        row.append(state, nameCell, detailCell);
+        reportEl.appendChild(row);
+        log((skipped ? '— ' : ok ? '✓ ' : '✗ ') + name + (detail ? ' — ' + detail : ''));
+        if (!skipped && !ok) failures.push(name);
+        return ok;
+    }
+
+    function finish() {
+        bannerEl.className = 'banner ' + (failures.length === 0 ? 'ok' : 'fail');
+        bannerEl.textContent = failures.length === 0
+            ? '通过：' + checks.filter(c => c.ok).length + ' 项检查全部成功'
+            : '失败 ' + failures.length + ' / ' + checks.length + ' 项：' + failures.join('；');
+    }
+
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    // ---------------------------------------------------------------- 统计面板
+
+    function renderStats(patch) {
+        const rows = patch || liveStats();
+        statsEl.innerHTML = '';
+        for (const [key, value, tone] of rows) {
+            const cell = document.createElement('div');
+            cell.className = 'cell';
+            const k = document.createElement('div');
+            k.className = 'k';
+            k.textContent = key;
+            const v = document.createElement('div');
+            v.className = 'v' + (tone ? ' ' + tone : '');
+            v.textContent = value;
+            cell.append(k, v);
+            statsEl.appendChild(cell);
+        }
+    }
+
+    function liveStats() {
+        const s = viewer && viewer.previewStats ? viewer.previewStats() : null;
+        const fps = frameDeltas.length === 0 ? 0
+            : 1000 / (frameDeltas.reduce((a, b) => a + b, 0) / frameDeltas.length);
+        return [
+            ['进度', appliedIndex + ' / ' + events.length, ''],
+            ['存活 / 峰值', s ? s.alive + ' / ' + s.peakAlive : '—', ''],
+            ['槽位 / 运动', s ? s.slots + ' / ' + s.moving : '—', s && s.moving > 0 ? 'warn' : ''],
+            ['摄入 最大 / 均值', maxIngest.toFixed(2) + ' / ' + (appliedCount ? (sumIngest / appliedCount).toFixed(2) : '0') + ' ms', maxIngest > 50 ? 'bad' : ''],
+            ['首帧可见', firstVisibleMs === null ? '—' : firstVisibleMs.toFixed(1) + ' ms', firstVisibleMs !== null && firstVisibleMs > 50 ? 'bad' : ''],
+            ['帧率 / 卡顿帧', fps.toFixed(0) + ' fps / ' + slowFrames, slowFrames > 0 ? 'warn' : ''],
+            ['未知 remove / replace', s ? s.unknownRemoves + ' / ' + s.unknownReplaces : '—', ''],
+            ['抖动过滤', s ? s.filteredByThrash : '—', ''],
+            ['坐标语义', s && s.coordinateSystem ? s.coordinateSystem : '—', ''],
+        ];
+    }
+
+    // ---------------------------------------------------------------- 帧率采样
+
+    function frameLoop(t) {
+        requestAnimationFrame(frameLoop);
+        if (measuring) {
+            if (lastFrameAt > 0) {
+                const dt = t - lastFrameAt;
+                frameDeltas.push(dt);
+                if (dt > 33) slowFrames++;
+            }
+            if (firstVisibleMs === null && firstApplyAt > 0) {
+                const s = viewer.previewStats ? viewer.previewStats() : null;
+                if (s && s.slots > 0) firstVisibleMs = t - firstApplyAt;
+            }
+            if (t - lastStatsAt > 200) {
+                lastStatsAt = t;
+                renderStats();
+            }
+        }
+        lastFrameAt = t;
+    }
+
+    // ---------------------------------------------------------------- 进度条 UI
+
+    function updateScrubberUI() {
+        const total = events.length || 1;
+        const ratio = Math.max(0, Math.min(1, playhead / total));
+        const pct = ratio * 100;
+        scrubberFill.style.width = pct + '%';
+        scrubberThumb.style.left = pct + '%';
+        scrubberPos.textContent = String(Math.floor(playhead));
+        scrubberPct.textContent = pct.toFixed(0) + '%';
+    }
+
+    function setScrubberVisible(visible) {
+        scrubberEl.hidden = !visible;
+    }
+
+    // ---------------------------------------------------------------- 核心：把预览层推进到指定事件数
+
+    function ensurePreviewOptions() {
+        if (!previewOptions) {
+            previewOptions = {
+                projector: projectorSel.value,
+                enterDelayMs: Number(thrashSel.value) || 0,
+                minLifeMs: Number(thrashSel.value) || 0,
+                settleMs: 100,
+            };
+        }
+        return previewOptions;
+    }
+
+    /**
+     * 把预览层推进到 target 条事件。
+     *  - target > appliedIndex：前向增量，逐条 applyPreviewDelta（平滑正放）
+     *  - target < appliedIndex：库不支持回退，只能 discard + begin + 从 0 重放（视觉上是倒放）
+     */
+    function applyToIndex(target) {
+        if (!viewer) return;
+        target = Math.max(0, Math.min(events.length, target | 0));
+        if (target === appliedIndex) return;
+
+        // 首次应用（用户没点回放直接拖进度条）：先开预览层
+        if (!viewer.previewing && events.length > 0) {
+            try {
+                viewer.beginPreview(ensurePreviewOptions());
+            } catch (e) {
+                log('beginPreview 失败：' + e);
+                return;
+            }
+            appliedIndex = 0;
+        }
+
+        if (target > appliedIndex) {
+            // 前向增量：正放
+            for (let i = appliedIndex; i < target; i++) {
+                const t0 = performance.now();
+                let ok = false;
+                try {
+                    ok = viewer.applyPreviewDelta(events[i]);
+                } catch (e) {
+                    log('applyPreviewDelta 异常 @' + i + '：' + e);
+                    rejectedCount++;
+                    continue;
+                }
+                const cost = performance.now() - t0;
+                if (firstApplyAt === 0) firstApplyAt = t0;
+                if (ok) {
+                    appliedCount++;
+                    sumIngest += cost;
+                    if (cost > maxIngest) maxIngest = cost;
+                } else {
+                    rejectedCount++;
+                }
+            }
+        } else {
+            // 后向重建：倒放（视觉上目标索引逐渐减小，画面随之缩短）
+            try {
+                viewer.discardPreview();
+                viewer.beginPreview(ensurePreviewOptions());
+                for (let i = 0; i < target; i++) {
+                    viewer.applyPreviewDelta(events[i]);
+                }
+            } catch (e) {
+                log('重建预览失败：' + e);
+            }
+        }
+        appliedIndex = target;
+    }
+
+    // ---------------------------------------------------------------- 播放 rAF 循环
+
+    function startRaf() {
+        if (rafRunning) return;
+        rafRunning = true;
+        lastTickAt = performance.now();
+        requestAnimationFrame(rafLoop);
+    }
+
+    function rafLoop(now) {
+        if (!rafRunning) return;
+        const dt = Math.max(0, now - lastTickAt);
+        lastTickAt = now;
+
+        // 1) 自动推进目标位置
+        if (autoPlaying && !scrubbing) {
+            const speed = Number(speedSel.value) || 1;
+            targetPlayhead = Math.min(events.length, targetPlayhead + dt * speed / STEP_MS);
+        }
+
+        // 2) 平滑追踪：playhead 向 targetPlayhead 靠拢
+        const diff = targetPlayhead - playhead;
+        if (Math.abs(diff) > 0.005) {
+            const abs = Math.abs(diff);
+            const baseMove = Math.max(1, abs * 0.15);
+            const frameScale = Math.max(0.5, Math.min(4, dt / 16));
+            const move = Math.min(abs, baseMove * frameScale);
+            playhead += Math.sign(diff) * move;
+        } else {
+            playhead = targetPlayhead;
+        }
+
+        // 3) 应用到预览层
+        applyToIndex(Math.floor(playhead));
+        updateScrubberUI();
+
+        // 4) 完成判断
+        if (autoPlaying && !scrubbing &&
+            targetPlayhead >= events.length && playhead >= events.length - 0.005) {
+            playhead = events.length;
+            targetPlayhead = events.length;
+            applyToIndex(events.length);
+            updateScrubberUI();
+            autoPlaying = false;
+            playbackEndAt = performance.now();
+            finishPlayback();
+        }
+
+        // 5) 是否继续下一帧
+        const stillMoving = Math.abs(targetPlayhead - playhead) > 0.005;
+        const stillAuto = autoPlaying && !scrubbing;
+        if (stillMoving || stillAuto || scrubbing) {
+            requestAnimationFrame(rafLoop);
+        } else {
+            rafRunning = false;
+        }
+    }
+
+    // ---------------------------------------------------------------- 进度条拖动
+
+    function seekFromPointer(clientX) {
+        if (!viewer || events.length === 0) return;
+        // 首次拖动：开预览层
+        if (!viewer.previewing) {
+            try {
+                viewer.beginPreview(ensurePreviewOptions());
+            } catch (e) {
+                log('beginPreview 失败：' + e);
+                return;
+            }
+            appliedIndex = 0;
+        }
+        const rect = scrubberTrack.getBoundingClientRect();
+        const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        targetPlayhead = ratio * events.length;
+        if (!rafRunning) startRaf();
+    }
+
+    scrubberTrack.addEventListener('pointerdown', (e) => {
+        if (!viewer || events.length === 0) return;
+        e.preventDefault();
+        scrubbing = true;
+        scrubberEl.classList.add('dragging');
+        seekFromPointer(e.clientX);
+        try { scrubberTrack.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+
+    scrubberTrack.addEventListener('pointermove', (e) => {
+        if (!scrubbing) return;
+        seekFromPointer(e.clientX);
+    });
+
+    function endScrub(e) {
+        if (!scrubbing) return;
+        scrubbing = false;
+        scrubberEl.classList.remove('dragging');
+        try { scrubberTrack.releasePointerCapture(e.pointerId); } catch (_) {}
+        if (!rafRunning) startRaf();
+    }
+
+    scrubberTrack.addEventListener('pointerup', endScrub);
+    scrubberTrack.addEventListener('pointercancel', endScrub);
+
+    // ---------------------------------------------------------------- 播放控制
+
+    function waitForPlaybackComplete() {
+        return new Promise(resolve => { playbackResolve = resolve; });
+    }
+
+    function finishPlayback() {
+        if (playbackResolve) {
+            const r = playbackResolve;
+            playbackResolve = null;
+            r();
+        }
+    }
+
+    function resetMetrics() {
+        measuring = false;
+        firstApplyAt = 0;
+        firstVisibleMs = null;
+        maxIngest = 0;
+        sumIngest = 0;
+        appliedCount = 0;
+        rejectedCount = 0;
+        frameDeltas = [];
+        slowFrames = 0;
+        lastFrameAt = 0;
+    }
+
+    function stop() {
+        runToken++;
+        measuring = false;
+        autoPlaying = false;
+        scrubbing = false;
+        rafRunning = false;
+        playhead = 0;
+        targetPlayhead = 0;
+        appliedIndex = 0;
+        if (viewer && viewer.previewing) viewer.discardPreview();
+        finishPlayback();
+        updateScrubberUI();
+        playBtn.disabled = false;
+        stopBtn.disabled = true;
+    }
+
+    async function replay() {
+        if (viewer === null || events.length === 0) return;
+        const token = ++runToken;
+        playBtn.disabled = true;
+        stopBtn.disabled = false;
+        reportEl.innerHTML = '';
+        checks.length = 0;
+        failures.length = 0;
+        resetMetrics();
+        if (viewer.previewing) viewer.discardPreview();
+
+        const speed = Number(speedSel.value) || 1;
+        const thrash = Number(thrashSel.value) || 0;
+        const animationOn = animationSel.value !== 'off';
+        viewer.setRenderSettings({ previewAnimation: animationOn ? 'on' : 'off' });
+
+        previewOptions = {
+            projector: projectorSel.value,
+            enterDelayMs: thrash,
+            minLifeMs: thrash,
+            settleMs: 100,
+        };
+
+        // 预热：先跑一条事件，让材质/着色器编译与槽池分配发生在计时之外
+        viewer.beginPreview(previewOptions);
+        viewer.applyPreviewDelta(events[0]);
+        await sleep(500);
+        if (token !== runToken) return;
+        viewer.discardPreview();
+        lastFrameAt = 0;
+        frameDeltas = [];
+        slowFrames = 0;
+
+        // 开始
+        viewer.beginPreview(previewOptions);
+        appliedIndex = 0;
+        playhead = 0;
+        targetPlayhead = 0;
+        measuring = true;
+        autoPlaying = true;
+        scrubbing = false;
+        playbackStartAt = performance.now();
+        playbackEndAt = 0;
+        updateScrubberUI();
+        log('开始回放：' + events.length + ' 条事件，节拍 ' + (STEP_MS / speed).toFixed(1) + 'ms/条');
+
+        startRaf();
+
+        await waitForPlaybackComplete();
+        if (token !== runToken) return;
+
+        autoPlaying = false;
+        const streamMs = playbackEndAt > 0
+            ? (playbackEndAt - playbackStartAt)
+            : (performance.now() - playbackStartAt);
+        log('事件发完，用时 ' + streamMs.toFixed(0) + 'ms，等待收敛 ' + SETTLE_MS + 'ms…');
+        await sleep(SETTLE_MS);
+        if (token !== runToken) return;
+        measuring = false;
+        renderStats();
+        await evaluate(streamMs);
+    }
+
+    // ---------------------------------------------------------------- 断言
+
+    async function evaluate(streamMs) {
+        const s = viewer.previewStats();
+        // stats 可选：新格式（根数组）没有 stats，则跳过对比断言
+        const expected = (fixture && fixture.stats) ? fixture.stats : null;
+
+        check('事件顺序：全部事件按序接受',
+            rejectedCount === 0 && appliedIndex === events.length,
+            `rejected=${rejectedCount}, applied=${appliedIndex}/${events.length}`);
+        check('序号去重：重复投递最后一条被拒',
+            viewer.applyPreviewDelta(events[events.length - 1]) === false);
+
+        check('单事件摄入 ≤ 50ms', maxIngest <= 50, '最大 ' + maxIngest.toFixed(2) + 'ms');
+        check('首帧可见 ≤ 50ms', firstVisibleMs !== null && firstVisibleMs <= 50,
+            firstVisibleMs === null ? '未观测到槽位' : firstVisibleMs.toFixed(1) + 'ms');
+
+        if (expected) {
+            check('末态存活数 = 数据净增量', s.alive === expected.expectedAlive,
+                s.alive + ' / 期望 ' + expected.expectedAlive);
+            check('峰值存活数 = 数据峰值', s.peakAlive === expected.expectedPeak,
+                s.peakAlive + ' / 期望 ' + expected.expectedPeak);
+        } else {
+            check('末态存活数 = 数据净增量（无 stats，跳过）', true, 'alive=' + s.alive, true);
+            check('峰值存活数 = 数据峰值（无 stats，跳过）', true, 'peakAlive=' + s.peakAlive, true);
+        }
+
+        check('事件停后收敛（moving = 0）', s.moving === 0, 'moving=' + s.moving);
+
+        const slowRatio = frameDeltas.length === 0 ? 0 : slowFrames / frameDeltas.length;
+        check('帧间隔 > 33ms 的比例 < 1%', slowRatio < 0.01,
+            (slowRatio * 100).toFixed(2) + '%（' + slowFrames + ' / ' + frameDeltas.length + ' 帧）');
+
+        check('坐标语义已切到 area-local', s.coordinateSystem === 'blueprint-area-local-v1',
+            String(s.coordinateSystem));
+
+        if (Number(thrashSel.value) > 0)
+            check('抖动抑制生效（有对象被过滤）', s.filteredByThrash > 0, s.filteredByThrash + ' 个');
+        else
+            check('抖动抑制已关闭（不适用）', true, '按设置跳过', true);
+
+        check('事件流用时与实测节拍一致',
+            Math.abs(streamMs - (events.length * STEP_MS) / (Number(speedSel.value) || 1)) < 1500,
+            streamMs.toFixed(0) + 'ms');
+
+        // 回放结束后保留预览层：画面就是验收对象，播完不能清空。
+        check('回放结束后预览层保留（不自动清除）', viewer.previewing === true,
+            '存活 ' + s.alive + ' 个对象');
+        check('canvas 仍在（正式场景未受影响）',
+            !!viewer.getCanvas() && document.querySelector('#viewer canvas') !== null);
+
+        finish();
+        playBtn.disabled = false;
+        stopBtn.disabled = true;
+    }
+
+    // ---------------------------------------------------------------- 启动
+
+    /**
+     * 加载一份 fixture（默认文件 / 手工导入共用）：校验 + 重置状态 + 更新界面。
+     * 支持两种格式：
+     *   1) 根就是事件数组：[{...}, {...}]
+     *   2) 旧格式：{ version, stats, events: [...] }
+     */
+    function loadFixture(data, name) {
+        let eventList;
+        let stats = null;
+        let sourceInfo = null;
+        let versionInfo = null;
+
+        if (Array.isArray(data)) {
+            eventList = data;
+        } else if (data !== null && typeof data === 'object' && Array.isArray(data.events)) {
+            eventList = data.events;
+            stats = data.stats || null;
+            sourceInfo = data.source || null;
+            versionInfo = data.version;
+        } else {
+            throw new Error('fixture 格式无法识别（既不是事件数组，也没有 events 字段）');
+        }
+
+        if (eventList.length === 0)
+            throw new Error('fixture 里没有事件');
+
+        // 仅在替换旧数据时清空报告行；首次加载要保留上面的启动检查结果
+        if (fixture !== null) {
+            reportEl.innerHTML = '';
+            checks.length = 0;
+            failures.length = 0;
+        }
+
+        // 停掉旧播放
+        autoPlaying = false;
+        scrubbing = false;
+        rafRunning = false;
+        playhead = 0;
+        targetPlayhead = 0;
+        appliedIndex = 0;
+        finishPlayback();
+        if (viewer && viewer.previewing) viewer.discardPreview();
+
+        fixture = data;
+        events = eventList;
+
+        // 预览配置（拖动时重建复用）
+        previewOptions = {
+            projector: projectorSel.value,
+            enterDelayMs: Number(thrashSel.value) || 0,
+            minLifeMs: Number(thrashSel.value) || 0,
+            settleMs: 100,
+        };
+        if (viewer) viewer.setRenderSettings({ previewAnimation: animationSel.value !== 'off' ? 'on' : 'off' });
+
+        // 进度条
+        setScrubberVisible(true);
+        scrubberTotal.textContent = String(events.length);
+        updateScrubberUI();
+
+        fixtureNameEl.textContent = name;
+        fixtureNameEl.title = name;
+        log('已加载 fixture：' + name + '（' + events.length + ' 条事件'
+            + (stats ? ' / ' + (stats.operations || '?') + ' 个操作 / ' + stats.expectedAlive + ' 个终态对象' : '')
+            + '）');
+        if (sourceInfo) log('数据来源：' + sourceInfo + '（version ' + versionInfo + '）');
+        if (stats && Array.isArray(stats.switchSequences))
+            log('坐标切换发生在 sequence=' + (stats.switchSequences.join(',') || '无'));
+        bannerEl.className = 'banner running';
+        bannerEl.textContent = '就绪：点「▶ 回放」自动播放，或直接拖动底部进度条 scrubbing（'
+            + events.length + ' 条事件 ≈ ' + ((events.length * STEP_MS) / 1000).toFixed(1) + 's）';
+        playBtn.disabled = false;
+    }
+
+    requestAnimationFrame(frameLoop);
+    renderStats([['状态', '加载中…', '']]);
+
+    try {
+        const api = await import(libUrl);
+        const required = ['BlueprintViewer', 'parseBlueprint', 'serializeBlueprint'];
+        const previewApi = ['beginPreview', 'applyPreviewDelta', 'commitPreview', 'discardPreview', 'previewStats'];
+        for (const name of required) check('导出 ' + name, typeof api[name] === 'function');
+
+        viewer = new api.BlueprintViewer(
+            { container: '#viewer', theme: 'dark', previewAnimation: 'on' },
+            { onError: (error) => log('onError ' + error.code + ': ' + error.message) },
+        );
+        for (const name of previewApi)
+            check('BlueprintViewer.' + name, typeof viewer[name] !== 'undefined');
+        check('canvas 已挂载', !!viewer.getCanvas() && document.querySelector('#viewer canvas') !== null);
+
+        playBtn.addEventListener('click', () => { replay().catch((e) => { log('回放异常：' + e); finish(); }); });
+        stopBtn.addEventListener('click', () => { stop(); log('已停止'); });
+        fileInput.addEventListener('change', () => {
+            const file = fileInput.files && fileInput.files[0];
+            fileInput.value = ''; // 允许重复选同一文件
+            if (!file) return;
+            file.text()
+                .then((text) => {
+                    stop();
+                    log('已停止（导入新 fixture）');
+                    loadFixture(JSON.parse(text), file.name);
+                })
+                .catch((e) => {
+                    log('fixture 读取失败：' + String((e && e.message) || e));
+                    bannerEl.className = 'banner fail';
+                    bannerEl.textContent = 'fixture 读取失败：' + String((e && e.message) || e);
+                    playBtn.disabled = fixture === null;
+                });
+        });
+
+        // 默认 fixture：加载失败不阻断页面，提示手工导入
+        try {
+            const response = await fetch(fixtureUrl);
+            if (!response.ok) throw new Error('preview-fixture.json → HTTP ' + response.status);
+            loadFixture(await response.json(), 'preview-fixture.json（默认）');
+            const st = (fixture && fixture.stats) ? fixture.stats : null;
+            check('数据已加载',
+                true,
+                events.length + ' 条事件'
+                + (st ? ' / ' + st.operations + ' 个操作 / ' + st.expectedAlive + ' 个终态对象' : '（无 stats 元数据）'));
+        }
+        catch (e) {
+            log('默认 fixture 未加载：' + String((e && e.message) || e));
+            bannerEl.className = 'banner running';
+            bannerEl.textContent = '未找到默认 preview-fixture.json，请点「导入 fixture…」选择事件数组 JSON 或 build-fixture.mjs 的产物';
+        }
+    }
+    catch (error) {
+        check('启动未抛异常', false, String((error && error.stack) || error));
+        bannerEl.className = 'banner fail';
+        bannerEl.textContent = '启动失败：' + String((error && error.message) || error)
+            + '（确认已跑 yarn build:lib，且用 http(s) 打开本页）';
+        playBtn.disabled = true;
+        stopBtn.disabled = true;
+    }
+})();
+</script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 import { fromStr } from '@/blueprint/parser';
-import { findPosForAreas } from '@/blueprint/planet';
+import { findPosForAreas } from '@/planet/planet';
 import { isBelt } from '@/data/items';
 import {
     beltPortAt,

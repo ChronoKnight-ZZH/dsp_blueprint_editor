@@ -1,0 +1,64 @@
+import { availableModelNames, iconModelAliases, modelNameCandidates, resolveModelName } from '@/models/glbAssets';
+import { itemsMap } from '@/data/items';
+
+/**
+ * 只测“解析表”这一层（纯函数），不涉及 webpack 的 require.context 与 three 的 GLTFLoader：
+ * - 别名 / LOD 回退 / 变形模式的候选顺序
+ * - jest 里没有 require.context 时必须优雅降级（返回 null，由上层回退元数据表）
+ */
+describe('GLB 模型解析表', () => {
+    test('无别名时直接用图标名作为文件名', () => {
+        expect(modelNameCandidates('smelter')).toEqual(['smelter']);
+        expect(modelNameCandidates('mining-drill')).toEqual(['mining-drill']);
+        expect(modelNameCandidates('mining-drill-mk2')).toEqual(['mining-drill-mk2']);
+    });
+
+    test('制造台 Mk.I：文件名与 icon 同名（旧的 assembler.glb 副本已清理）', () => {
+        expect(modelNameCandidates('assembler-1')).toEqual(['assembler-1']);
+    });
+
+    test('共用模型：蓄电器（满）复用 accumulator', () => {
+        expect(modelNameCandidates('accumulator-full')).toEqual(['accumulator']);
+    });
+
+    test('四向分流器：三种变形按 Item.models 下标取 splitter-a/b/c', () => {
+        expect(modelNameCandidates('splitter-4dir', 0)).toEqual(['splitter-a']);
+        expect(modelNameCandidates('splitter-4dir', 1)).toEqual(['splitter-b']);
+        expect(modelNameCandidates('splitter-4dir', 2)).toEqual(['splitter-c']);
+        // 下标越界时钳制到最后一个变形，避免 undefined
+        expect(modelNameCandidates('splitter-4dir', 9)).toEqual(['splitter-c']);
+    });
+
+    test('分流器的三种变形与 itemsData 的 models 顺序一一对应', () => {
+        const splitter = itemsMap.get(2020);
+        expect(splitter).toBeDefined();
+        expect(splitter!.models).toEqual([38, 39, 40]);
+        expect(splitter!.models.map((_m, i) => modelNameCandidates(splitter!.icon, i)[0]))
+            .toEqual(['splitter-a', 'splitter-b', 'splitter-c']);
+    });
+
+    test('别名表结构自检：每条都给了说明，variants 与 primary 不冲突', () => {
+        for (const [icon, alias] of Object.entries(iconModelAliases)) {
+            expect(icon.length).toBeGreaterThan(0);
+            expect(alias.primary.length).toBeGreaterThan(0);
+            expect(alias.note.length).toBeGreaterThan(0);
+            for (const f of alias.fallbacks ?? [])
+                expect(f).not.toBe(alias.primary);
+            for (const v of alias.variants ?? [])
+                expect(v.length).toBeGreaterThan(0);
+        }
+    });
+
+    test('未登记的图标名返回 null（静默回退，不抛错）', () => {
+        expect(resolveModelName('this-model-does-not-exist')).toBeNull();
+        expect(resolveModelName('this-model-does-not-exist', 3)).toBeNull();
+    });
+
+    test('模型清单由资产解析器提供（jest 注入磁盘真值，与构建同源）', () => {
+        // 改造后「哪些文件存在」不再由 jest 环境缺 require.context 推断，
+        // 而是由 @lib/asset-resolver 的清单决定；单测里注入的是磁盘扫描结果。
+        expect(availableModelNames.has('smelter')).toBe(true);
+        expect(resolveModelName('smelter')).toBe('smelter');
+        expect(resolveModelName('accumulator-full')).toBe('accumulator');
+    });
+});
