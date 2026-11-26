@@ -34,7 +34,10 @@ describe('blueprint parser', () => {
         const bp = fromStr(raw);
         expect(bp.version).toBe(2);
 
-        // 重新序列化后再次解析，数据结构完全一致（时间戳受毫秒精度限制，允许 1ms 误差）
+        // 重新序列化后再次解析，数据结构完全一致。
+        // 时间戳允许 1ms 误差：游戏存的是 100ns tick，样本的 tick 不是毫秒整数倍，
+        // 而 `Date` 只有毫秒精度，取整后必然丢掉不足 1ms 的那部分。
+        // （注意别把这里的容差当成"tick 换算本身有误差"——见下面 ms 精确回环的用例。）
         const regenerated = toStr(bp);
         const bp2 = fromStr(regenerated);
         expect(Math.abs(bp2.header.time.getTime() - bp.header.time.getTime())).toBeLessThanOrEqual(1);
@@ -52,5 +55,24 @@ describe('blueprint parser', () => {
         // encodeURIComponent 不转义括号而游戏会转义（%28/%29），二者解码后等价，故比较解码值
         expect(dropTime(newCells).map(decodeURIComponent))
             .toEqual(dropTime(oldCells).map(decodeURIComponent));
+    });
+
+    test('毫秒对齐的时间戳逐毫秒精确回环（tick 数超过 2^53 也不能漂）', () => {
+        // 头部 tick 数 ≈ 6.4e17 已越过 double 的精确整数范围；旧实现用 Number
+        // 做 tick ↔ 毫秒换算，2026-11-26 这类时间戳导出后会稳定漂 -1ms，
+        // 于是 `toStr → fromStr` 不再是恒等（reformImage 的 round-trip 用例因此偶发失败）。
+        const bp = fromStr(V1_BLUEPRINT);
+        for (const iso of [
+            '2026-11-26T16:39:25.907Z',
+            '2026-11-26T16:39:25.908Z',
+            '2026-01-01T00:00:00.001Z',
+            '2024-02-29T23:59:59.999Z',
+        ]) {
+            const time = new Date(iso);
+            bp.header.time = time;
+            expect(fromStr(toStr(bp)).header.time.getTime()).toBe(
+                time.getTime()
+            );
+        }
     });
 });

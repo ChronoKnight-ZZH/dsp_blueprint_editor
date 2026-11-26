@@ -18,7 +18,8 @@ Dyson Sphere Program (DSP) blueprint editor/parser. Vue 3 + Three.js, TypeScript
 
 - `tests/unit/preview/fixture.spec.ts` needs the gitignored `scripts/lib-build/preview-fixture.json`. When absent it **fails at module load instead of skipping**; generate it with `node scripts/preview/build-fixture.mjs` (which needs the gitignored `data/preview-delta-*.json`).
 - `tests/unit/preview/replay.spec.ts` is skipped unless `PREVIEW_REPLAY=1` (PowerShell: `$env:PREVIEW_REPLAY=1; yarn jest tests/unit/preview/replay.spec.ts`).
-- Baseline as of 2026-11-25 on branch `belt`: `preview/projector.spec.ts` and `lib/buildBuildings.spec.ts` already fail. Verify with `git stash` before assuming your change broke them.
+- Baseline as of 2026-11-27 on branch `models_editing_mode`: the full suite is green (517 tests, `preview/replay.spec.ts` skipped without the env flag). The old 2026-11-25 note about `preview/projector.spec.ts` and `lib/buildBuildings.spec.ts` is fixed — a failure there now means your change broke it; still verify with `git stash` when unsure.
+- `tests/tools/*.txt` are game-exported samples used by `blueprint/beltPorts.spec.ts` and `blueprint/stationPort.spec.ts`. They are not fixtures for the parser itself; keep the ones the specs read, or the specs fail at module load (ENOENT).
 
 ## Architecture notes
 

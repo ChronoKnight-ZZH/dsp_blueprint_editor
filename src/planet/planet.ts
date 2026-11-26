@@ -421,9 +421,12 @@ export function calcBuildingTrans(
 
         // DSP 蓝图 tilt 是绕传送带局部 +Y（前进/roll）轴的角度。
         // 在最终地理朝向与 yaw 之后右乘局部 Y 旋转，不改变世界位置。
-        if (building.tilt !== 0) {
+        // 注意：预览层的建筑对象没有 tilt 字段（可选），缺省必须当作 0；
+        // 旧写法 `!== 0` 会让 undefined 走进旋转，把整列矩阵算成 NaN。
+        const tilt = building.tilt ?? 0;
+        if (tilt !== 0) {
             trans.multiply(
-                temp.makeRotationY((building.tilt / 180.0) * Math.PI)
+                temp.makeRotationY((tilt / 180.0) * Math.PI)
             );
         }
         return trans;

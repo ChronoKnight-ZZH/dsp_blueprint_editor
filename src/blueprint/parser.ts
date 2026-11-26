@@ -1414,6 +1414,24 @@ function importTailV2(r: BufferReader, bodyEnd: number) {
 
 const START = "BLUEPRINT:";
 const TIME_BASE = new Date(0).setUTCFullYear(1);
+/**
+ * 头部时间戳单位：自公元 1 年起的 100ns tick 数。
+ *
+ * 量级约 6.4e17，已越过 double 能精确表示整数的上限（2^53 ≈ 9e15）：用 Number
+ * 直接做 tick ↔ 毫秒换算会丢低位，于是同一个蓝图 parse → toStr 会随机漂 1ms
+ * （`reformImage.spec.ts` 的字节级 round-trip 就是被这个偶发打挂的）。
+ * 因此两个方向都走 BigInt——tick 与毫秒之间是精确的整数换算。
+ */
+const TICKS_PER_MS = 10000n;
+
+/** 头部 tick 串 → 毫秒时间；纯整数走 BigInt（不丢精度），非法写法退回 Number 截断以保持旧容错 */
+function ticksToMillis(raw: string): number {
+    const text = raw.trim();
+    if (/^-?\d+$/.test(text))
+        return Number(BigInt(text) / TICKS_PER_MS);
+    const n = Number(text);
+    return Number.isFinite(n) ? Math.trunc(n / 10000) : 0;
+}
 
 export function fromStr(strData: string): BlueprintData {
     if (!strData.startsWith(START)) throw Error("Invalid start");
@@ -1427,7 +1445,7 @@ export function fromStr(strData: string): BlueprintData {
     const header = {
         layout: parseInt(cells[1]),
         icons: cells.slice(2, 7).map((s) => parseInt(s)),
-        time: new Date(TIME_BASE + parseInt(cells[8]) / 10000),
+        time: new Date(TIME_BASE + ticksToMillis(cells[8])),
         gameVersion: cells[9],
         shortDesc: decodeURIComponent(cells[10]),
         author: headerFormatV2 ? decodeURIComponent(cells[11]) : "",
@@ -1532,7 +1550,7 @@ export function toStr(bp: BlueprintData): string {
         result += ",";
     }
     result += "0,";
-    result += (bp.header.time.getTime() - TIME_BASE) * 10000;
+    result += (BigInt(bp.header.time.getTime() - TIME_BASE) * TICKS_PER_MS).toString();
     result += ",";
     result += bp.header.gameVersion;
     result += ",";
