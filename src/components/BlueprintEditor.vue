@@ -15,6 +15,9 @@ import {
     CylinderGeometry,
     BoxGeometry,
     PlaneGeometry,
+    Path,
+    Shape,
+    ShapeGeometry,
     DoubleSide,
     Matrix4,
     DirectionalLight,
@@ -846,16 +849,58 @@ const BELT_PATH_MODES: BeltPathMode[] = ["latFirst", "lonFirst", "straight"];
 // 此处用 ref 桥接供 defineExpose 调用
 const cycleBeltPathModeFn = ref<(() => BeltPathMode) | null>(null);
 
+// ---- 传送带预建样式：白色六边形节点 + 白色连线（参考游戏内建造预览） ----
+/** 六边形路径，rotation = π/2 → 顶点朝 +y（yaw=0 时即传送带默认走向，节点随路径旋转） */
+function hexagonPath<T extends Path>(path: T, radius: number): T {
+    const rotation = Math.PI / 2;
+    for (let i = 0; i < 6; i++) {
+        const a = rotation + (i * Math.PI) / 3;
+        const x = Math.cos(a) * radius;
+        const y = Math.sin(a) * radius;
+        if (i === 0) path.moveTo(x, y);
+        else path.lineTo(x, y);
+    }
+    path.closePath();
+    return path;
+}
+
+const BELT_HEX_R = 0.5; // 节点外接圆半径（世界单位，约 0.4 格）
+const BELT_HEX_INNER = 0.36; // 空心环内半径（环宽 0.14）
+const BELT_HEX_DOT = 0.14; // 中心实心点半径
+const BELT_HEX_END_OUTER = 0.68; // 起止端外圈半径
+const BELT_HEX_END_INNER = 0.59;
+const BELT_LINK_WIDTH = 0.16; // 连线宽度
+const BELT_LINK_THICK = 0.05;
+const BELT_PREVIEW_LIFT = 0.05; // 与旧预览一致的贴地微抬
+
+/** 单个节点：空心六边形环 + 中心实心六边形点 */
+function makeBeltNodeGeometry(): BufferGeometry {
+    const ring = hexagonPath(new Shape(), BELT_HEX_R);
+    ring.holes.push(hexagonPath(new Path(), BELT_HEX_INNER));
+    const dot = hexagonPath(new Shape(), BELT_HEX_DOT);
+    return new ShapeGeometry([ring, dot]);
+}
+/** 起止端外圈（套在普通节点外面的大号空心六边形） */
+function makeBeltEndGeometry(): BufferGeometry {
+    const ring = hexagonPath(new Shape(), BELT_HEX_END_OUTER);
+    ring.holes.push(hexagonPath(new Path(), BELT_HEX_END_INNER));
+    return new ShapeGeometry(ring);
+}
+
+// 白色预览材质（节点/端圈/连线共用）
+const beltPreviewMaterial = new MeshBasicMaterial({
+    color: 0xffffff,
+    opacity: 0.95,
+    transparent: true,
+    depthWrite: false,
+    side: DoubleSide,
+});
+
 // 整条传送带的拖拽预览（复用实例网格，count 随路径变化）
 const BELT_PREVIEW_CAP = 1024;
 const beltPreviewMesh = new InstancedMesh(
-    new BoxGeometry(0.6, 0.6, 0.1),
-    new MeshBasicMaterial({
-        color: 0x50fa50,
-        opacity: 0.45,
-        transparent: true,
-        depthWrite: false,
-    }),
+    makeBeltNodeGeometry(),
+    beltPreviewMaterial,
     BELT_PREVIEW_CAP
 );
 beltPreviewMesh.matrixAutoUpdate = false;
@@ -865,16 +910,46 @@ beltPreviewMesh.renderOrder = 9;
 // 相机拉近后视锥变窄，光标移出这个（过期的）包围球就会被整体剔除 → 光标消失。
 // 预览始终贴着光标，直接关闭视锥剔除。
 beltPreviewMesh.frustumCulled = false;
+
+// 起止端的大号六边形外圈（最多首尾 2 个）
+const beltEndMarkerMesh = new InstancedMesh(
+    makeBeltEndGeometry(),
+    beltPreviewMaterial,
+    2
+);
+beltEndMarkerMesh.matrixAutoUpdate = false;
+beltEndMarkerMesh.count = 0;
+beltEndMarkerMesh.renderOrder = 9;
+beltEndMarkerMesh.frustumCulled = false;
+
+// 相邻节点之间的白色连线（单位长度盒，按两点距离沿 z 缩放）
+const beltLinkMesh = new InstancedMesh(
+    new BoxGeometry(BELT_LINK_WIDTH, BELT_LINK_THICK, 1),
+    beltPreviewMaterial,
+    BELT_PREVIEW_CAP
+);
+beltLinkMesh.matrixAutoUpdate = false;
+beltLinkMesh.count = 0;
+beltLinkMesh.renderOrder = 9;
+beltLinkMesh.frustumCulled = false;
+
 const beltPreviewVisible = ref(false);
 watchEffect(() => {
-    if (isPlacingBelt() && beltPreviewVisible.value) scene.add(beltPreviewMesh);
-    else scene.remove(beltPreviewMesh);
+    if (isPlacingBelt() && beltPreviewVisible.value) {
+        scene.add(beltPreviewMesh);
+        scene.add(beltEndMarkerMesh);
+        scene.add(beltLinkMesh);
+    } else {
+        scene.remove(beltPreviewMesh);
+        scene.remove(beltEndMarkerMesh);
+        scene.remove(beltLinkMesh);
+    }
 });
 
 // straight 模式预览：矢量直线（非阶梯状位图）
 const beltStraightLine = new Line(
     new BufferGeometry(),
-    new LineBasicMaterial({ color: 0x50fa50, opacity: 0.8, transparent: true })
+    new LineBasicMaterial({ color: 0xffffff, opacity: 0.9, transparent: true })
 );
 beltStraightLine.renderOrder = 10;
 const beltStraightLineVisible = ref(false);
@@ -885,6 +960,8 @@ watchEffect(() => {
 });
 function hideBeltPreview() {
     beltPreviewMesh.count = 0;
+    beltEndMarkerMesh.count = 0;
+    beltLinkMesh.count = 0;
     beltPreviewVisible.value = false;
     beltStraightLineVisible.value = false;
 }
@@ -1588,7 +1665,19 @@ onMounted(() => {
     };
     // 传送带拖拽预览：把起点到当前点的栅格化路径写入实例网格
     const beltPreviewM = new Matrix4();
-    const beltLift = new Matrix4().makeTranslation(0, 0, 0.05);
+    const beltLift = new Matrix4().makeTranslation(0, 0, BELT_PREVIEW_LIFT);
+    // 节点世界坐标 / 连线临时对象（复用避免每帧分配）
+    const beltCellPos = Array.from(
+        { length: BELT_PREVIEW_CAP },
+        () => new Vector3()
+    );
+    const beltLinkStart = new Vector3();
+    const beltLinkEnd = new Vector3();
+    const beltLinkMid = new Vector3();
+    const beltLinkDir = new Vector3();
+    const beltLinkLift = new Vector3();
+    const beltLinkM = new Matrix4();
+    const beltLinkScale = new Matrix4();
     const _tmpPos = new Vector3();
 
     /** 网格偏移 → 世界坐标（用于直线预览端点） */
@@ -1716,6 +1805,9 @@ onMounted(() => {
         beltPreviewMesh.setMatrixAt(0, beltPreviewM);
         beltPreviewMesh.count = 1;
         beltPreviewMesh.instanceMatrix.needsUpdate = true;
+        // 单格预览不画首尾端圈/连线
+        beltEndMarkerMesh.count = 0;
+        beltLinkMesh.count = 0;
         beltPreviewVisible.value = true;
         beltStraightLineVisible.value = false;
     };
@@ -1769,11 +1861,13 @@ onMounted(() => {
                 beltStraightLineVisible.value = true;
             }
             beltPreviewMesh.count = 0;
+            beltEndMarkerMesh.count = 0;
+            beltLinkMesh.count = 0;
             beltPreviewVisible.value = false;
             return;
         }
 
-        // latFirst / lonFirst：阶梯状传送带方块预览（复用与落位同一套路径构造，
+        // latFirst / lonFirst：六边形节点 + 白色连线预览（复用与落位同一套路径构造，
         // 起点/终点接建筑口时预览也会贴到口上）
         const previewBelts = clipBeltPath(
             buildBeltLine(
@@ -1790,17 +1884,66 @@ onMounted(() => {
             area
         );
         const n = Math.min(previewBelts.length, BELT_PREVIEW_CAP);
+        const pos = syntheticPos(beltArea.origin);
         for (let i = 0; i < n; i++) {
-            const t = calcBuildingTrans(
-                R,
-                syntheticPos(beltArea.origin),
-                previewBelts[i]
-            )[0];
+            const t = calcBuildingTrans(R, pos, previewBelts[i])[0];
             beltPreviewM.multiplyMatrices(t, beltLift);
             beltPreviewMesh.setMatrixAt(i, beltPreviewM);
+            beltCellPos[i].setFromMatrixPosition(t);
         }
         beltPreviewMesh.count = n;
         beltPreviewMesh.instanceMatrix.needsUpdate = true;
+
+        // 首尾端的大号六边形外圈（单格时只画一个）
+        const endCount = n === 0 ? 0 : n === 1 ? 1 : 2;
+        if (n > 0) {
+            const t0 = calcBuildingTrans(R, pos, previewBelts[0])[0];
+            beltPreviewM.multiplyMatrices(t0, beltLift);
+            beltEndMarkerMesh.setMatrixAt(0, beltPreviewM);
+            if (n > 1) {
+                const t1 = calcBuildingTrans(R, pos, previewBelts[n - 1])[0];
+                beltPreviewM.multiplyMatrices(t1, beltLift);
+                beltEndMarkerMesh.setMatrixAt(1, beltPreviewM);
+            }
+            beltEndMarkerMesh.instanceMatrix.needsUpdate = true;
+        }
+        beltEndMarkerMesh.count = endCount;
+
+        // 相邻节点之间的白色连线：从六边形边缘连到下一个边缘，避免穿过空心区域
+        let linkCount = 0;
+        for (let i = 0; i + 1 < n; i++) {
+            beltLinkDir.subVectors(beltCellPos[i + 1], beltCellPos[i]);
+            const dist = beltLinkDir.length();
+            if (dist <= 1e-4) continue;
+            beltLinkDir.multiplyScalar(1 / dist);
+            const len = dist - 2 * BELT_HEX_R;
+            if (len <= 0) continue;
+            // 与六边形同层微抬，避免与地面/网格线 Z-fighting
+            beltLinkLift
+                .copy(beltCellPos[i])
+                .normalize()
+                .multiplyScalar(BELT_PREVIEW_LIFT);
+            beltLinkStart
+                .copy(beltCellPos[i])
+                .add(beltLinkLift)
+                .addScaledVector(beltLinkDir, BELT_HEX_R);
+            beltLinkEnd
+                .copy(beltCellPos[i + 1])
+                .add(beltLinkLift)
+                .addScaledVector(beltLinkDir, -BELT_HEX_R);
+            beltLinkMid
+                .copy(beltLinkStart)
+                .add(beltLinkEnd)
+                .multiplyScalar(0.5);
+            // lookAt 让局部 +z 指向起点方向；缩放后沿 z 拉成从起点到终点的细长条
+            beltLinkM.lookAt(beltLinkStart, beltLinkEnd, beltLinkStart);
+            beltLinkM.setPosition(beltLinkMid);
+            beltLinkM.multiply(beltLinkScale.makeScale(1, 1, len));
+            beltLinkMesh.setMatrixAt(linkCount++, beltLinkM);
+        }
+        beltLinkMesh.count = linkCount;
+        beltLinkMesh.instanceMatrix.needsUpdate = true;
+
         beltPreviewVisible.value = n > 0;
         beltStraightLineVisible.value = false;
     };
