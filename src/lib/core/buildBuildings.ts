@@ -53,13 +53,11 @@ import {
     Inserters,
     INSERTER_BEAM_THICKNESS,
     INSERTER_BEAM_WIDTH,
-    INSERTER_FOOT_HEIGHT,
-    INSERTER_FOOT_WIDTH,
     INSERTER_FRAME_COLOR,
+    INSERTER_FRAME_HEIGHT,
     INSERTER_FRAME_WIDTH,
-    INSERTER_SUPPORT_HEIGHT,
-    INSERTER_SUPPORT_WIDTH,
 } from "@/Animation/inserter";
+import { InserterSupports } from "@/Animation/InserterSupports";
 
 /** 未知建筑（没有 buildingMeta）时使用的占位颜色，与旧 `buildBoxes` 兜底一致 */
 const UNKNOWN_BUILDING_COLOR = new Color(0xdddddd);
@@ -130,7 +128,7 @@ export function buildBuildings(
     // 传入完整贴图设置，避免依赖 glbLoader 的全局 provider（Viewer 场景下没有注入）。
     if (options.reapplyMaterials !== false)
         reapplyLoadedModelMaterials(options.textureSettings);
-    
+
     // 传送带
     const buildBelts = (belts: BlueprintBuilding[]) => {
         // 端点圆柱属于传送带节点装饰，保留原有尺寸；linkThickness 才是带状网格的挤出厚度。
@@ -407,9 +405,15 @@ export function buildBuildings(
                     color: Color
                 ) => {
                     railPositions.push(
-                        a.x, a.y, a.z,
-                        b.x, b.y, b.z,
-                        c.x, c.y, c.z
+                        a.x,
+                        a.y,
+                        a.z,
+                        b.x,
+                        b.y,
+                        b.z,
+                        c.x,
+                        c.y,
+                        c.z
                     );
                     for (let i = 0; i < 3; i++) {
                         railColors.push(color.r, color.g, color.b);
@@ -493,12 +497,48 @@ export function buildBuildings(
                     const b = lerpRailSection(startSection, endSection, tEnd);
 
                     // 顶面、内外侧壁、首尾端盖和底面，构成闭合的金属护栏截面。
-                    addRailQuad(a.innerTop, b.innerTop, b.outerTop, a.outerTop, color);
-                    addRailQuad(a.innerBottom, b.innerBottom, b.innerTop, a.innerTop, color);
-                    addRailQuad(a.outerBottom, a.outerTop, b.outerTop, b.outerBottom, color);
-                    addRailQuad(a.innerBottom, a.outerBottom, a.outerTop, a.innerTop, color);
-                    addRailQuad(b.innerBottom, b.innerTop, b.outerTop, b.outerBottom, color);
-                    addRailQuad(a.innerBottom, b.innerBottom, b.outerBottom, a.outerBottom, color);
+                    addRailQuad(
+                        a.innerTop,
+                        b.innerTop,
+                        b.outerTop,
+                        a.outerTop,
+                        color
+                    );
+                    addRailQuad(
+                        a.innerBottom,
+                        b.innerBottom,
+                        b.innerTop,
+                        a.innerTop,
+                        color
+                    );
+                    addRailQuad(
+                        a.outerBottom,
+                        a.outerTop,
+                        b.outerTop,
+                        b.outerBottom,
+                        color
+                    );
+                    addRailQuad(
+                        a.innerBottom,
+                        a.outerBottom,
+                        a.outerTop,
+                        a.innerTop,
+                        color
+                    );
+                    addRailQuad(
+                        b.innerBottom,
+                        b.innerTop,
+                        b.outerTop,
+                        b.outerBottom,
+                        color
+                    );
+                    addRailQuad(
+                        a.innerBottom,
+                        b.innerBottom,
+                        b.outerBottom,
+                        a.outerBottom,
+                        color
+                    );
                 };
 
                 const getNodeDegree = (nodeId: number) =>
@@ -590,8 +630,14 @@ export function buildBuildings(
 
                     // 在带段任意位置采样带面中心、宽度方向和实际法线。
                     // 使用节点已计算好的截面偏移，确保纹理贴合 Miter 转角与 roll。
-                    const sampleSurface = (distance: number, halfSpan: number) => {
-                        const t = Math.max(0, Math.min(1, distance / surfaceEdgeLength));
+                    const sampleSurface = (
+                        distance: number,
+                        halfSpan: number
+                    ) => {
+                        const t = Math.max(
+                            0,
+                            Math.min(1, distance / surfaceEdgeLength)
+                        );
                         const center = edge.start.clone().lerp(edge.end, t);
                         const normal = edge.startFrame.normal
                             .clone()
@@ -614,24 +660,48 @@ export function buildBuildings(
                     };
 
                     // 顶面两侧各铺一条窄类型色饰边，形成图示中的彩色轮廓线。
-                    const borderStartInset = getNodeDegree(edge.source) >= 3 ? 0.22 : 0.015;
-                    const borderEndInset = getNodeDegree(edge.target) >= 3 ? 0.22 : 0.015;
-                    const borderLength = surfaceEdgeLength - borderStartInset - borderEndInset;
+                    const borderStartInset =
+                        getNodeDegree(edge.source) >= 3 ? 0.22 : 0.015;
+                    const borderEndInset =
+                        getNodeDegree(edge.target) >= 3 ? 0.22 : 0.015;
+                    const borderLength =
+                        surfaceEdgeLength - borderStartInset - borderEndInset;
                     const borderOuterSpan = halfWidth - 0.006;
                     const borderInnerSpan = halfWidth - 0.034;
                     const borderLift = 0.003;
 
                     if (borderLength > 0.04) {
-                        const aOuter = sampleSurface(borderStartInset, borderOuterSpan);
-                        const aInner = sampleSurface(borderStartInset, borderInnerSpan);
-                        const bOuter = sampleSurface(surfaceEdgeLength - borderEndInset, borderOuterSpan);
-                        const bInner = sampleSurface(surfaceEdgeLength - borderEndInset, borderInnerSpan);
+                        const aOuter = sampleSurface(
+                            borderStartInset,
+                            borderOuterSpan
+                        );
+                        const aInner = sampleSurface(
+                            borderStartInset,
+                            borderInnerSpan
+                        );
+                        const bOuter = sampleSurface(
+                            surfaceEdgeLength - borderEndInset,
+                            borderOuterSpan
+                        );
+                        const bInner = sampleSurface(
+                            surfaceEdgeLength - borderEndInset,
+                            borderInnerSpan
+                        );
 
-                        const liftPoint = (frame: typeof aOuter, sign: number) =>
+                        const liftPoint = (
+                            frame: typeof aOuter,
+                            sign: number
+                        ) =>
                             frame.center
                                 .clone()
-                                .addScaledVector(frame.side.clone().normalize(), sign * frame.side.length())
-                                .addScaledVector(frame.normal, linkThickness + borderLift);
+                                .addScaledVector(
+                                    frame.side.clone().normalize(),
+                                    sign * frame.side.length()
+                                )
+                                .addScaledVector(
+                                    frame.normal,
+                                    linkThickness + borderLift
+                                );
 
                         // +side 一侧
                         addSurfaceQuad(
@@ -653,15 +723,23 @@ export function buildBuildings(
 
                     // 方向箭头沿 edge.start -> edge.end 排列。
                     // 短模块尽量放一个居中箭头，长模块则按约 1.6 单位的节奏重复。
-                    const arrowStartInset = getNodeDegree(edge.source) >= 3 ? 0.28 : 0.18;
-                    const arrowEndInset = getNodeDegree(edge.target) >= 3 ? 0.28 : 0.18;
-                    const arrowAvailable = surfaceEdgeLength - arrowStartInset - arrowEndInset;
+                    const arrowStartInset =
+                        getNodeDegree(edge.source) >= 3 ? 0.28 : 0.18;
+                    const arrowEndInset =
+                        getNodeDegree(edge.target) >= 3 ? 0.28 : 0.18;
+                    const arrowAvailable =
+                        surfaceEdgeLength - arrowStartInset - arrowEndInset;
                     if (arrowAvailable >= 0.42) {
                         const arrowSpacing = 1.6;
-                        const arrowCount = Math.max(1, Math.round(arrowAvailable / arrowSpacing));
+                        const arrowCount = Math.max(
+                            1,
+                            Math.round(arrowAvailable / arrowSpacing)
+                        );
                         const arrowHalfWidth = 0.072;
                         const arrowLift = 0.006;
-                        const arrowTint = edge.color.clone().lerp(arrowLighten, 0.48);
+                        const arrowTint = edge.color
+                            .clone()
+                            .lerp(arrowLighten, 0.48);
                         const arrowShape: Array<[number, number]> = [
                             [0.112, 0],
                             [0.018, 0.072],
@@ -673,17 +751,28 @@ export function buildBuildings(
                         ];
 
                         for (let i = 0; i < arrowCount; i++) {
-                            const distance = arrowStartInset +
+                            const distance =
+                                arrowStartInset +
                                 ((i + 0.5) / arrowCount) * arrowAvailable;
-                            const frame = sampleSurface(distance, arrowHalfWidth);
+                            const frame = sampleSurface(
+                                distance,
+                                arrowHalfWidth
+                            );
                             const arrowCenter = frame.center
                                 .clone()
-                                .addScaledVector(frame.normal, linkThickness + arrowLift);
-                            const arrowVertices = arrowShape.map(([forward, lateral]) =>
-                                arrowCenter
-                                    .clone()
-                                    .addScaledVector(edge.tangent, forward)
-                                    .addScaledVector(frame.side.clone().normalize(), lateral)
+                                .addScaledVector(
+                                    frame.normal,
+                                    linkThickness + arrowLift
+                                );
+                            const arrowVertices = arrowShape.map(
+                                ([forward, lateral]) =>
+                                    arrowCenter
+                                        .clone()
+                                        .addScaledVector(edge.tangent, forward)
+                                        .addScaledVector(
+                                            frame.side.clone().normalize(),
+                                            lateral
+                                        )
                             );
 
                             // 三角扇填充箭头轮廓，尖端始终朝向输出节点。
@@ -719,12 +808,14 @@ export function buildBuildings(
                     // 护栏内侧贴合带面边缘，向带面外侧延伸，不侵占有效运输宽度。
                     // 多分支节点收短 0.16，避免 T 字中心出现护栏交叉和重叠。
                     const edgeLength = edge.start.distanceTo(edge.end);
-                    const startTrim = getNodeDegree(edge.source) >= 3
-                        ? Math.min(junctionRailInset, edgeLength * 0.2)
-                        : 0;
-                    const endTrim = getNodeDegree(edge.target) >= 3
-                        ? Math.min(junctionRailInset, edgeLength * 0.2)
-                        : 0;
+                    const startTrim =
+                        getNodeDegree(edge.source) >= 3
+                            ? Math.min(junctionRailInset, edgeLength * 0.2)
+                            : 0;
+                    const endTrim =
+                        getNodeDegree(edge.target) >= 3
+                            ? Math.min(junctionRailInset, edgeLength * 0.2)
+                            : 0;
                     const startOutward = startSideOffset.clone().normalize();
                     const endOutward = endSideOffset.clone().normalize();
 
@@ -1005,50 +1096,43 @@ export function buildBuildings(
     // 分拣器
     const buildInserters = (
         inserters: BlueprintBuilding[]
-    ): [Inserters, InstancedMesh, InstancedMesh, InstancedMesh] => {
+    ): [Inserters, InserterSupports, InstancedMesh] => {
         /**
          * 横梁在 `inserterTrans` 的姿态原点（`INSERTER_HEIGHT`）之上再抬高。
          *
-         * 旧值 0.1 是按 0.06 厚的旧梁算的；梁厚翻倍到 0.12 后，若中心不动，
-         * 底面会压到货物顶面（0.34 < 0.35）。抬到 0.13 让底面仍停在 0.37，
-         * 与货物保持约 0.02 的间隙（`tests/unit/lib/buildBuildings.spec.ts` D-1）。
+         * 梁厚 0.08 时抬到 0.11，梁底仍在径向 0.37，与货物顶面（0.35）
+         * 保持约 0.02 的间隙；改梁厚时必须同步复核这个预算。
          */
-        const BEAM_EXTRA_LIFT = 0.13;
+        const BEAM_EXTRA_LIFT = 0.11;
 
         /** 货物相对基础姿态下移 */
         const CARGO_DROP = 0.1;
 
-        /** 货物末端淡出宽度，占整个运输行程的比例（条带的 0.06 见 `CARGO_FADE`） */
+        /** 货物末端淡出宽度，占整个运输行程的比例 */
         const INSERTER_CARGO_FADE = 0.15;
-
-        /** 横梁两侧轮廓的截面高度（世界单位） */
-        const FRAME_HEIGHT = 0.08;
 
         const beamMesh = new Inserters(inserters.length);
 
-        // 外框 / 支柱 / 底座都用单位盒 + 逐实例局部缩放，避免为每种尺寸新建几何。
+        /**
+         * 门形支架：每个分拣器两端各一个，由两根立柱、两个底座和一根顶部横梁组成。
+         *
+         * `InserterSupports` 只在「端点局部空间」里写矩阵（+Y = 球面法线，
+         * -Z = 臂轴）。这里传入局部端点后再右乘 `trans`，而不是直接传世界坐标：
+         * 球面上不同经/纬度的「上」并不等于世界 +Y，按世界坐标生成会让支架
+         * 偏离球面法线。两端都固定生成，不读取 `inputObjIdx` / `outputObjIdx`。
+         */
+        const supportMesh = new InserterSupports(inserters.length);
+
+        // 横梁两侧轮廓：单位盒 + 逐实例缩放。
         const frameMesh = new InstancedMesh(
             new BoxGeometry(1, 1, 1),
             new MeshLambertMaterial({ color: INSERTER_FRAME_COLOR }),
             inserters.length * 2
         );
 
-        const supportMesh = new InstancedMesh(
-            new BoxGeometry(1, 1, 1),
-            new MeshLambertMaterial({ color: INSERTER_FRAME_COLOR }),
-            inserters.length * 2
-        );
-
-        const footMesh = new InstancedMesh(
-            new BoxGeometry(1, 1, 1),
-            new MeshLambertMaterial({ color: 0x687680 }),
-            inserters.length * 2
-        );
-
         // 命名便于场景调试与单测定位（不影响渲染）
         frameMesh.name = "inserterFrames";
         supportMesh.name = "inserterSupports";
-        footMesh.name = "inserterFeet";
 
         const trans = new Matrix4();
         const temp = new Matrix4();
@@ -1056,12 +1140,15 @@ export function buildBuildings(
         const beamTrans = new Matrix4();
         const local = new Matrix4();
         const localScale = new Vector3();
+        const supportEndpoint = new Vector3();
+        const supportAxis = new Vector3(0, 0, -1);
 
         /**
-         * 在分拣器局部空间里放一个盒子：`base * T(x,y,z) * S(sx,sy,sz)`。
+         * 在分拣器局部空间里放一个盒子：
+         * `base * T(x,y,z) * S(sx,sy,sz)`。
          *
-         * 所有结构都从 `inserterTrans` 的原始矩阵派生，四个朝向共用同一套局部
-         * 坐标，不写死世界 X/Z。
+         * 所有结构都从 `inserterTrans` 的原始矩阵派生，
+         * 四个朝向共用同一套局部坐标，不写死世界 X/Z。
          */
         const setLocalBox = (
             mesh: InstancedMesh,
@@ -1080,78 +1167,75 @@ export function buildBuildings(
             mesh.setMatrixAt(index, local);
         };
 
-        // 横梁底面 / 地面 / 底座顶面在局部空间里的 Y。`trans` 原点已抬到
-        // `INSERTER_HEIGHT`，所以地面在 -INSERTER_HEIGHT，不能当成 y = 0。
-        const beamBottomY = BEAM_EXTRA_LIFT - INSERTER_BEAM_THICKNESS * 0.5;
+        // 门形支架顶部横梁与主横梁同中心；`trans` 原点已抬到 `INSERTER_HEIGHT`，
+        // 所以地面在局部 Y = -INSERTER_HEIGHT。
+        const supportTopY = BEAM_EXTRA_LIFT + INSERTER_BEAM_THICKNESS * 0.5;
         const groundY = -INSERTER_HEIGHT;
-        const footTopY = groundY + INSERTER_FOOT_HEIGHT;
 
-        // 0.65 是设计上限；实际按「梁底到地面」的净空截断，否则支柱与底座会
-        // 穿进球面（INSERTER_HEIGHT 只有 0.3）。当前净空 = 0.27。
-        const supportHeight = Math.min(
-            INSERTER_SUPPORT_HEIGHT,
-            Math.max(0, beamBottomY - footTopY)
-        );
-        const supportY = footTopY + supportHeight * 0.5;
-        const footY = groundY + INSERTER_FOOT_HEIGHT * 0.5;
+        /**
+         * 横梁 / 两侧框架 / 门形支架相对分拣器两端再向外延伸的距离。
+         *
+         * `len` 是两端建筑中心之间的距离；带面宽度约 0.7，中心到外缘是 0.35。
+         * 向外补这一截后，最外侧的梁端与支架正好压在带面外缘（截图里的红线）上，
+         * 而不是停在带子中心。所有分拣器统一延伸，端点的相对关系保持不变。
+         */
+        const ARM_END_EXTEND = 0.35;
 
         for (let i = 0; i < inserters.length; i++) {
             const b = inserters[i];
 
             // 原始姿态与臂长；后续所有结构都只在这个局部空间里偏移
             const len = inserterTrans(transforms[b.index], trans);
+            // 视觉长度比端点中心距多出两端延伸量，用来顶到相邻带面外缘
+            const armLen = len + ARM_END_EXTEND * 2;
             const color = colorOf(b.modelIndex);
 
-            // ① 货物：保持原有矩阵与运动（基础姿态下移，横梁缩放不污染货物）
+            // ① 货物：基础姿态下移，横梁缩放不污染货物
             cargoTrans.copy(trans);
             cargoTrans.multiply(temp.makeTranslation(0, -CARGO_DROP, 0));
             cargosMesh.addTrack({
                 matrix: cargoTrans,
                 distance: len,
-                // 分拣器是单件抓放：抓取点淡入、投放点淡出，两端都给同一个宽度
+                // 分拣器是单件抓放：抓取点淡入、投放点淡出
                 fadeIn: INSERTER_CARGO_FADE,
                 fadeOut: INSERTER_CARGO_FADE,
             });
 
-            // ② 横梁：抬高 + 沿局部 Z 缩放 + 前推半梁长（几何 z ∈ [-0.5, 0.5]）
-            beamTrans.copy(trans);
-            beamTrans.multiply(temp.makeTranslation(0, BEAM_EXTRA_LIFT, 0));
-            beamTrans.multiply(temp.makeScale(1, 1, len));
-            beamTrans.multiply(temp.makeTranslation(0, 0, -0.5));
+            // ② 横梁：抬高 + 沿局部 Z 缩放 + 前推半梁长
+            // 几何局部 z ∈ [-0.5, 0.5]；最终覆盖 z ∈ [ARM_END_EXTEND, -(len + ARM_END_EXTEND)]
+            beamTrans.copy(trans); // 以分拣器基础姿态为基准，避免复用上一条记录残留的变换
+            beamTrans.multiply(temp.makeTranslation(0, BEAM_EXTRA_LIFT, 0)); // 沿局部法线再抬高，与货物拉开垂直间隙
+            beamTrans.multiply(temp.makeTranslation(0, 0, ARM_END_EXTEND)); // 先向起点外侧补出延伸量，缩放后两端各多一截
+            beamTrans.multiply(temp.makeScale(1, 1, armLen)); // 只在局部 Z（臂轴）拉伸到臂长 + 两端余量，X/Y 不缩放
+            beamTrans.multiply(temp.makeTranslation(0, 0, -0.5)); // 平移半个单位，让几何中心从 [-0.5,0.5] 移到 [-1,0]，与臂起点对齐
 
-            beamMesh.setMatrixAt(i, beamTrans);
-            beamMesh.setColorAt(i, color);
+            beamMesh.setMatrixAt(i, beamTrans); // 写入第 i 个横梁实例的世界矩阵
+            beamMesh.setColorAt(i, color); // 写入该实例的逐实例颜色（分拣器元数据色）
 
-            // ③ A、B 两端支柱与底座：横梁在局部 z ∈ [-len, 0]，端点各内缩 0.04
-            const supportZ = [-0.04, -Math.max(0.04, len - 0.04)];
+            // ③ 两端门形支架：随横梁一起向外延伸，端部仍内缩 0.04
+            // 不依据 inputObjIdx / outputObjIdx 判断是否生成。
+            const supportZ = [
+                ARM_END_EXTEND - 0.04,
+                -(len + ARM_END_EXTEND - 0.04),
+            ];
 
             for (let j = 0; j < 2; j++) {
-                const index = i * 2 + j;
-                const z = supportZ[j];
-
-                setLocalBox(
-                    supportMesh,
-                    index,
-                    trans,
-                    0,
-                    supportY,
-                    z,
-                    INSERTER_SUPPORT_WIDTH,
-                    supportHeight,
-                    INSERTER_SUPPORT_WIDTH
+                supportEndpoint.set(0, supportTopY, supportZ[j]);
+                supportMesh.addSupport(
+                    supportEndpoint,
+                    supportAxis,
+                    color,
+                    groundY
                 );
+            }
 
-                setLocalBox(
-                    footMesh,
-                    index,
-                    trans,
-                    0,
-                    footY,
-                    z,
-                    INSERTER_FOOT_WIDTH,
-                    INSERTER_FOOT_HEIGHT,
-                    INSERTER_FOOT_WIDTH
-                );
+            // `addSupport` 写的是端点局部矩阵（每个端点 5 个实例：2 立柱 +
+            // 2 底座 + 1 顶梁），再统一右乘分拣器姿态落回世界空间。
+            const supportStart = i * 10;
+            for (let k = 0; k < 10; k++) {
+                supportMesh.getMatrixAt(supportStart + k, temp);
+                temp.premultiply(trans);
+                supportMesh.setMatrixAt(supportStart + k, temp);
             }
 
             // ④ 横梁两侧深色轮廓：贴着梁的 ±X 外沿，坐在梁顶面上
@@ -1169,8 +1253,8 @@ export function buildBuildings(
                     frameY,
                     -len * 0.5,
                     INSERTER_FRAME_WIDTH,
-                    FRAME_HEIGHT,
-                    len
+                    INSERTER_FRAME_HEIGHT,
+                    armLen
                 );
             }
 
@@ -1187,11 +1271,10 @@ export function buildBuildings(
         }
 
         frameMesh.instanceMatrix.needsUpdate = true;
-        supportMesh.instanceMatrix.needsUpdate = true;
-        footMesh.instanceMatrix.needsUpdate = true;
+        supportMesh.update();
 
         // 首元素是横梁：调用方用它驱动 `cargoMove`，其余是纯视觉结构
-        return [beamMesh, supportMesh, footMesh, frameMesh];
+        return [beamMesh, supportMesh, frameMesh];
     };
 
     // 建筑分类：带子 / 分拣器 / 其余（元数据盒或 GLB）
@@ -1476,6 +1559,7 @@ export function buildBuildings(
 
     // 横梁 mesh 还要交给 `AllBuildings`，帧循环才能每帧写 `cargoMove`
     let insertersMesh: Inserters | null = null;
+
     if (inserters.length) {
         const [beam, ...parts] = buildInserters(inserters);
         insertersMesh = beam;

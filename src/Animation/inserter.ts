@@ -1,12 +1,18 @@
-import { BoxGeometry, Color, InstancedMesh, MeshLambertMaterial } from "three";
+import {
+    BoxGeometry,
+    Color,
+    InstancedMesh,
+    MeshLambertMaterial,
+} from "three";
 import type { WebGLProgramParametersWithUniforms } from "three";
 
 /**
  * 分拣器横梁（Inserter beam）。
  *
- * 职责：为分拣器提供「实体 + 加宽 + 顶面流动箭头」的横梁几何，箭头图案随
+ * 职责：为分拣器提供「加宽 + 半透明 + 顶面流动箭头」的横梁几何，箭头图案随
  * `cargoMove` 滚动，与传送带条带（`belt.ts`）同一套视觉语言。机械结构（外框、
- * A/B 两端支柱与底座）由 `buildInserters` 在同一个局部空间里追加。
+ * A/B 两端门形支架与底座）由 `buildInserters` 在同一个局部空间里追加，支架
+ * 几何见 `InserterSupports.ts`。
  *
  * 使用：只被 `lib/core/buildBuildings.ts` 的 `buildInserters` 构造；横梁 mesh 随
  * `AllBuildings` 一起挂进场景，渲染循环每帧只写一个 uniform（`cargoMove`）。
@@ -16,8 +22,8 @@ import type { WebGLProgramParametersWithUniforms } from "three";
  *     `instanceMatrix[2]`（z 轴缩放）反推臂长，**不能**假设 `len` 恒定，否则长臂/短臂
  *     箭头密度不一致、跨实例相位跳变（S17）。
  *   - 宽度只改几何 `x`，实例矩阵没有 `x` 缩放，箭头 `across` 归一化才正确（S21）。
- *   - 实体梁：不透明 + `depthWrite`，箭头直接写进梁顶面的 `diffuseColor`，不再靠
- *     半透明提亮（旧版 `opacity: 0.58` 会让放大后的梁显得发灰）。
+ *   - 透明用 `depthWrite: false`：同一 InstancedMesh 内实例不按距离排序，密集分拣器
+ *     场景可能出现远近叠序瑕疵，`opacity` 较低时不显著（S18）。
  *   - 臂的端点语义、拾取盒（`inserterTrans` / `INSERTER_HEIGHT`）不受影响（S19）；
  *     机械结构只增加视觉网格，不参与 `modelRef` / BVH。
  *   - 含 GLSL 注入，Jest/CI 无 WebGL 无法验证编译，只能人工冒烟。
@@ -26,23 +32,32 @@ import type { WebGLProgramParametersWithUniforms } from "three";
 /** 横梁宽度（世界单位）：0.15 的 3.3 倍，顶面才容得下可辨识箭头（G12 / Q16） */
 export const INSERTER_BEAM_WIDTH = 0.5;
 
-/** 横梁厚度（世界单位）：原 0.06 翻倍，实体梁侧面才有厚度感 */
-export const INSERTER_BEAM_THICKNESS = 0.12;
+/** 横梁厚度（世界单位）：半透明梁侧面保留可辨识的高度，又不会压到货物 */
+export const INSERTER_BEAM_THICKNESS = 0.08;
+
+/** 横梁不透明度：0.5 太淡、0.75 太实（G13 / Q17） */
+export const INSERTER_OPACITY = 0.62;
 
 /** 机械框架（横梁外侧轮廓）颜色 */
 export const INSERTER_FRAME_COLOR = 0x263746;
 
 /** 外侧轮廓宽度（世界单位） */
-export const INSERTER_FRAME_WIDTH = 0.10;
+export const INSERTER_FRAME_WIDTH = 0.02;
+
+/** 外侧轮廓截面高度（世界单位）：贴梁顶面竖起的窄条，长度随臂长缩放 */
+export const INSERTER_FRAME_HEIGHT = 0.04;
 
 /** 支柱宽度（世界单位） */
-export const INSERTER_SUPPORT_WIDTH = 0.18;
+export const INSERTER_SUPPORT_WIDTH = 0.06;
 
-/** 支柱高度（世界单位）：从横梁底面到支柱底座顶面 */
+/**
+ * 支柱高度设计参考（世界单位）：门形支架的实际立柱高度由 `InserterSupports`
+ * 按端点顶面到地面的净空计算，不再直接使用该值。
+ */
 export const INSERTER_SUPPORT_HEIGHT = 0.65;
 
 /** 支柱底座宽度（世界单位） */
-export const INSERTER_FOOT_WIDTH = 0.30;
+export const INSERTER_FOOT_WIDTH = 0.09;
 
 /** 支柱底座高度（世界单位） */
 export const INSERTER_FOOT_HEIGHT = 0.10;
@@ -50,7 +65,7 @@ export const INSERTER_FOOT_HEIGHT = 0.10;
 /** 箭头滚动周期（世界单位）：1 格臂（约 1.2578）上约 2.5 个箭头（G14 / Q19） */
 export const INSERTER_ARROW_PERIOD = 0.5;
 
-/** 箭头颜色：与机械框架同色，在偏亮的实体横梁上对比最稳（Q18）；只经 uniform 生效 */
+/** 箭头颜色：与机械框架同色，在偏亮的半透明横梁上对比最稳（Q18）；只经 uniform 生效 */
 export const INSERTER_ARROW_COLOR = new Color(0x263746);
 
 /**
@@ -59,7 +74,7 @@ export const INSERTER_ARROW_COLOR = new Color(0x263746);
  * 必须与 `BELT_PROGRAM_KEY`（`dsp-belt-arrow-v4`）和 `CargoMaterial` 的默认
  * key 都不同，否则两份注入会串味。
  */
-const INSERTER_PROGRAM_KEY = "dsp-inserter-arrow-v2";
+const INSERTER_PROGRAM_KEY = "dsp-inserter-arrow-v3";
 
 /**
  * 箭头图案：横梁顶面的人字形斜纹，随 `cargoMove` 向局部 -z（臂尖方向）滚动。
@@ -94,17 +109,16 @@ const ARROW_FRAGMENT = `
         mask * 0.88
     );
 
-    diffuseColor.a = mix(diffuseColor.a, 1.0, mask);
+    diffuseColor.a = mix(diffuseColor.a, 0.95, mask);
 `;
 
 /**
- * 横梁材质：实体 `MeshLambertMaterial` + 顶面箭头注入。
+ * 横梁材质：半透明 `MeshLambertMaterial` + 顶面箭头注入。
  *
  * 边界：
- *   - 不透明（`transparent: false` / `depthWrite: true`）：梁体是实体金属件，
- *     同一实例网格内不需要按距离排序，也避免放大后叠序发灰；
+ *   - 透明由 `diffuseColor.a`（`opacity`）与逐实例元数据色相乘自然得到，颜色变淡；
  *   - 箭头色走独立 `uArrowColor`，且在 `color_fragment` 之后 mix，不会被元数据色染色（S20）；
- *   - alpha 仍按 mask 写 1.0，纯粹是为了让注入片段在透明材质上也能复用。
+ *   - 箭头更实：mask 区域把 alpha 提到 0.95，0.62 透明梁上仍清晰。
  */
 class InserterMaterial extends MeshLambertMaterial {
     /** 0..1 相位；每帧由渲染循环写入，GPU 侧据此滚动箭头 */
@@ -114,9 +128,9 @@ class InserterMaterial extends MeshLambertMaterial {
 
     constructor() {
         super({
-            transparent: false,
-            opacity: 1,
-            depthWrite: true,
+            transparent: true,
+            opacity: INSERTER_OPACITY,
+            depthWrite: false,
         });
     }
 
