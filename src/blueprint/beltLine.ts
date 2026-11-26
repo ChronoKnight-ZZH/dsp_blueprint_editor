@@ -7,7 +7,7 @@ import { createBuilding } from "./create";
 export type BeltPathMode =
     | "latFirst" // 默认：先走纬度线（x/东西），后走经度线（y/南北）
     | "lonFirst" // 先走经度线（y/南北），后走纬度线（x/东西）
-    | "straight"; // 两点之间直线（Bresenham 栅格化，每步仅一方向）
+    | "straight"; // 两点之间直线等分（自由角度，见 `freePath`）
 
 /** 经向短弧位移：把 x1-x0 归一化到 (-gridSize/2, gridSize/2]；`gridSize` = 该区域一整圈的经向格数 */
 function shortArcDelta(x0: number, x1: number, gridSize = ROOT_GRID_SIZE): number {
@@ -75,41 +75,43 @@ function lShape(
     return pts;
 }
 
-/** 直线栅格化（Bresenham）：每步仅沿 x 或 y 移动一格，处理经向短弧 */
-function bresenham(
+/**
+ * 自由角度直线：两端点之间按 `round(欧氏距离)` 等分，节点可以是分数格。
+ *
+ * 游戏真实蓝图（`data/不同斜角传送带.json`）即如此：端点是整格点，段数
+ * = round(直线长度)，中间节点 = 起点到终点的等分点，每段约 1 格。
+ * x 为经向环形坐标，逐点按短弧回绕。
+ */
+function freePath(
     x0: number,
     y0: number,
-    dx: number,
-    dy: number,
+    x1: number,
+    y1: number,
     gridSize = ROOT_GRID_SIZE
 ): { x: number; y: number }[] {
+    const dx = shortArcDelta(x0, x1, gridSize);
+    const dy = y1 - y0;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-6) return [{ x: wrapX(x0, gridSize), y: y0 }];
+    const n = Math.max(1, Math.round(len));
     const pts: { x: number; y: number }[] = [];
-    const adx = Math.abs(dx),
-        ady = Math.abs(dy);
-    const sx = dx > 0 ? 1 : dx < 0 ? -1 : 0;
-    const sy = dy > 0 ? 1 : dy < 0 ? -1 : 0;
-    let err = adx - ady;
-    let x = x0,
-        y = y0;
-    pts.push({ x, y });
-    while (x !== (x0 + dx + gridSize) % gridSize || y !== y0 + dy) {
-        const e2 = 2 * err;
-        if (e2 > -ady) {
-            err -= ady;
-            x = (x + sx + gridSize) % gridSize;
-        } else if (e2 < adx) {
-            err += adx;
-            y += sy;
-        }
-        pts.push({ x, y });
+    for (let i = 0; i <= n; i++) {
+        // 末点直接用目标值，避免 x0 + dx 的浮点尾巴
+        if (i === n) pts.push({ x: wrapX(x1, gridSize), y: y1 });
+        else
+            pts.push({
+                x: wrapX(x0 + (dx * i) / n, gridSize),
+                y: y0 + (dy * i) / n,
+            });
     }
     return pts;
 }
 
 /**
- * 整数网格上的传送带路径栅格化：返回从 (p0) 到 (p1) 的相邻格点，
- * 每步仅沿 x 或 y 移动一格，符合 DSP 传送带只能走 cardinal 方向的约束。
- * x 方向为经向环形坐标（0 ~ ROOT_GRID_SIZE），自动取短弧。
+ * 传送带路径：返回从 (p0) 到 (p1) 的节点序列。
+ * - `latFirst` / `lonFirst`：整数格 L 形，每步仅沿 x 或 y 移动一格；
+ * - `straight`：自由角度直线，节点可为分数（{@link freePath}）。
+ * x 方向为经向环形坐标（0 ~ gridSize），自动取短弧。
  * @param mode 路径走法：latFirst / lonFirst / straight
  */
 export function rasterizeLine(
@@ -120,39 +122,37 @@ export function rasterizeLine(
     mode: BeltPathMode = "latFirst",
     gridSize = ROOT_GRID_SIZE
 ): { x: number; y: number }[] {
+    if (mode === "straight") return freePath(x0, y0, x1, y1, gridSize);
     const dx = shortArcDelta(x0, x1, gridSize);
     const dy = y1 - y0;
-    if (mode === "straight") return bresenham(x0, y0, dx, dy, gridSize);
     return lShape(x0, y0, dx, dy, mode === "latFirst", gridSize);
 }
 
-/** 下游相对方向 (dx,dy) → 传送带 yaw（由真实蓝图标定） */
-const DIR_YAW = new Map<string, number>([
-    ["0,1", 0], // +y
-    ["1,0", 90], // +x
-    ["0,-1", 180], // -y
-    ["-1,0", 270], // -x
-]);
-
 /**
- * 计算经向环形坐标上相邻格点的方向差，归一化到 {-1, 0, 1}。
- * 处理跨越 0 经线的情况：如 999→0 实为 +x 方向，0→999 实为 -x 方向。
+ * 下游方向 (a→b) → 传送带 yaw（0° = +y，90° = +x）。
+ * 支持分数坐标，并经向按短弧计算，因此任意斜率的直线/拐角都可用。
  */
-function ringDelta(from: number, to: number): number {
-    const d = to - from;
-    if (d > 1) return -1;
-    if (d < -1) return 1;
-    return d;
+function directionYaw(
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+    gridSize = ROOT_GRID_SIZE
+): number {
+    const rad = Math.PI / 180;
+    const dx = shortArcDelta(a.x, b.x, gridSize);
+    const dy = b.y - a.y;
+    return (Math.atan2(dx, dy) / rad + 360) % 360;
 }
 
-/** 相邻两格 (a→b) 的方向 yaw；非相邻或重合返回 null */
+/** 相邻两节点 (a→b) 的方向 yaw；两点重合返回 null */
 function stepYaw(
     a: { x: number; y: number },
-    b: { x: number; y: number }
+    b: { x: number; y: number },
+    gridSize = ROOT_GRID_SIZE
 ): number | null {
-    const ddx = ringDelta(a.x, b.x);
-    const ddy = b.y - a.y;
-    return DIR_YAW.get(`${ddx},${ddy}`) ?? null;
+    const dx = shortArcDelta(a.x, b.x, gridSize);
+    const dy = b.y - a.y;
+    if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return null;
+    return directionYaw(a, b, gridSize);
 }
 
 /**
@@ -160,15 +160,18 @@ function stepYaw(
  * 直格两者相同 → 就是行进方向；拐角格两者相差 90° → 得到 45° 的斜角
  * （例如东进南出 → 135°，南进西出 → 225°），游戏里的转弯格正是这么存的；
  * 只写"离开方向"会让传送带在拐角处缺失 45° 过渡。
+ *
+ * 方向按连续坐标计算，所以自由角度直线/任意角度拐角的平分角也走同一套公式。
  */
 function cellYaw(
     prev: { x: number; y: number } | null,
     next: { x: number; y: number } | null,
     self: { x: number; y: number },
-    fallbackYaw: number
+    fallbackYaw: number,
+    gridSize = ROOT_GRID_SIZE
 ): number {
-    const dirIn = prev === null ? null : stepYaw(prev, self);
-    const dirOut = next === null ? null : stepYaw(self, next);
+    const dirIn = prev === null ? null : stepYaw(prev, self, gridSize);
+    const dirOut = next === null ? null : stepYaw(self, next, gridSize);
     if (dirIn === null) return dirOut ?? fallbackYaw;
     if (dirOut === null) return dirIn;
     const rad = Math.PI / 180;
@@ -268,13 +271,48 @@ function portKey(
     )}`;
 }
 
-/** 传送带在占用表里的键：口带按口身份，普通带按格身份 */
+/** 自由角度带的"位置身份"：经向回绕后把 x/y 量化到 1e-3 格 + 高度层 */
+function freePointKey(
+    b: BlueprintBuilding,
+    gridSize = ROOT_GRID_SIZE
+): string {
+    const p = b.localOffset[0];
+    const q = (v: number) => Math.round(v * 1000) / 1000;
+    return `${b.areaIndex}:pt:${q(wrapX(p.x, gridSize))},${q(
+        p.y
+    )},${zLayer(p.z)}`;
+}
+
+/** 坐标是否不在整格上（自由角度带的中间节点/口带端点是分数坐标） */
+function isFractional(p: { x: number; y: number }): boolean {
+    return (
+        Math.abs(p.x - Math.round(p.x)) > 1e-4 ||
+        Math.abs(p.y - Math.round(p.y)) > 1e-4
+    );
+}
+
+/**
+ * 传送带在占用表里的键：
+ * - 口带 → 口身份（见 {@link portKey}）；
+ * - 自由角度带的分数节点 → 位置身份（{@link freePointKey}）；
+ * - 其余整格节点 → 格身份（{@link cellKey}）。
+ *
+ * 不能对所有带都 round 成格：自由角度线按比例等分，两个相邻节点
+ * 可能四舍五入到同一格（样本 `data/不同斜角传送带.json` 的 #3/#4、#7/#8），
+ * 按格判重会把后一条带误判成"该格已有带"而截断。
+ * 端点仍吸整格，所以自由线和已有 cardinal 线路仍能在整格节点处复用/截断。
+ */
 function occupancyKey(
     b: BlueprintBuilding,
     byIndex: ReadonlyMap<number, BlueprintBuilding>,
     gridSize = ROOT_GRID_SIZE
 ): string {
-    return portKey(b, byIndex) ?? cellKey(b, gridSize);
+    return (
+        portKey(b, byIndex) ??
+        (isFractional(b.localOffset[0])
+            ? freePointKey(b, gridSize)
+            : cellKey(b, gridSize))
+    );
 }
 
 /** 判断某格上是否已有传送带（同 itemId 家族：2001/2002/2003） */
@@ -288,10 +326,15 @@ function isBelt(b: BlueprintBuilding): boolean {
  * 末格延续最后一段方向，单点时退回 @param fallbackYaw。
  * 相邻格之间的 outputObjIdx 在命令执行、index 分配后建立。
  *
+ * `straight` 模式是**自由角度直线**：端点仍是整格（或建筑口），中间节点按
+ * `round(欧氏距离)` 等分，坐标可为分数；游戏真实样本见 `data/不同斜角传送带.json`。
+ * `latFirst` / `lonFirst` 仍是每步一格的 L 形路径。
+ *
  * 端点绑定建筑口时（@param startPort / @param endPort）：
  * - 口格的**身份**取 `round(口坐标)`，**记录位置**写成口的精确坐标；
  * - 口格的外侧一格固定为 `口格 + 口法线`，保证带沿口的面离开/进入（游戏要求）；
  * - 整条带的高度 = 口的高度（接到 z≠0 的口时整条带在该层，见 `@/data/beltPorts`）；
+ *   未绑定口时 = `baseZ`（本期整条同高，对应 `data/阶梯高度传送带.json`）；
  * - 连接字段（out/in + slot + offset）在构造时就写好，由命令分配 index 后生效。
  * @param pathMode 路径走法模式
  */
@@ -305,9 +348,15 @@ export function buildBeltLine(
     startPort: BeltPortEnd | null = null,
     endPort: BeltPortEnd | null = null,
     /** 该区域的经向格数（一整圈）：赤道带 1000、160 段带 800 ……；缺省按赤道带 */
-    gridSize = ROOT_GRID_SIZE
+    gridSize = ROOT_GRID_SIZE,
+    /**
+     * 整条带的基准高度（高度格）：未绑定建筑口时整条带都在这一层。
+     * 本期只支持整条同高（对应 `data/阶梯高度传送带.json`）；坡度生成后续实现。
+     * 绑定建筑口时仍以口的高度为准（调用方应保证口高度与 baseZ 一致）。
+     */
+    baseZ = 0
 ): BlueprintBuilding[] {
-    const z = startPort ? startPort.point.z : endPort ? endPort.point.z : 0;
+    const z = startPort ? startPort.point.z : endPort ? endPort.point.z : baseZ;
     const g0 = startPort ? portCell(startPort.point, gridSize) : { ...p0 };
     const g1 = endPort ? portCell(endPort.point, gridSize) : { ...p1 };
     const b0 = startPort
@@ -325,7 +374,8 @@ export function buildBeltLine(
             pts[i - 1] ?? null,
             pts[i + 1] ?? null,
             pts[i],
-            fallbackYaw
+            fallbackYaw,
+            gridSize
         );
         belts[i].yaw = [yaw, yaw];
         // 传送带 slot 与游戏一致：inputToSlot 恒为 1；outputToSlot 为 1（有下游）或 0（末格）
@@ -365,15 +415,27 @@ export function buildBeltLine(
  *   已建的前缀保留并正常终结，老线路逐字段不变。
  *
  * 这样多次拖拽拼接不会出现"同一格两条传送带"（游戏里一格只能有一条）。
- * 撤销时弹出新增格并恢复被复用格的 yaw。
+ * 撤销时弹出新增格，并恢复被复用格的 yaw 与输出连接。
  *
  * `areaIndex` = 整条带所属区域（编辑器按起点所在纬度带选好；一条带只能在一个区域里，
  * 跨带的部分在编辑器侧就已按带边界截断）。`gridSize` = 该区域一整圈的经向格数。
  */
 export class CreateBeltLineCommand implements Command {
     private prevSizeX = 0;
-    /** 复用的已有传送带：撤销时恢复其原 yaw */
-    private reused: { belt: BlueprintBuilding; yaw: [number, number] }[] = [];
+    /**
+     * 复用的已有传送带：撤销时恢复其原 yaw 与输出连接。
+     *
+     * 复用格在 `do` 里会被重新接到本次新增的下一格；只恢复 yaw 不够——
+     * 新增格撤销后 outputObjIdx 会指向已弹出的下标（悬空引用，导出即非法）。
+     */
+    private reused: {
+        belt: BlueprintBuilding;
+        yaw: [number, number];
+        outputObjIdx: number;
+        outputToSlot: number;
+        outputFromSlot: number;
+        outputOffset: number;
+    }[] = [];
     /** 本次实际新增的传送带数量（undo 时按此弹出） */
     private added = 0;
     /** 本次建立的路径（新建 + 复用的对象，按路径顺序） */
@@ -436,7 +498,14 @@ export class CreateBeltLineCommand implements Command {
                 // 保证老线路完整且不产生非法数据。
                 if (hit.outputObjIdx >= 0) break;
                 // 复用它（常见于"接着上一段继续画"：上一段末格没有下游）
-                this.reused.push({ belt: hit, yaw: [hit.yaw[0], hit.yaw[1]] });
+                this.reused.push({
+                    belt: hit,
+                    yaw: [hit.yaw[0], hit.yaw[1]],
+                    outputObjIdx: hit.outputObjIdx,
+                    outputToSlot: hit.outputToSlot,
+                    outputFromSlot: hit.outputFromSlot,
+                    outputOffset: hit.outputOffset,
+                });
                 this.path.push(hit);
                 continue;
             }
@@ -506,7 +575,8 @@ export class CreateBeltLineCommand implements Command {
                 pred?.localOffset[0] ?? null,
                 succ?.localOffset[0] ?? null,
                 cell.localOffset[0],
-                cell.yaw[0]
+                cell.yaw[0],
+                this.gridSize
             );
             cell.yaw = [yaw, yaw];
         }
@@ -562,7 +632,13 @@ export class CreateBeltLineCommand implements Command {
         }
         this.portDirChanges = [];
         for (let i = 0; i < this.added; i++) data.buildings.pop();
-        for (const r of this.reused) r.belt.yaw = [r.yaw[0], r.yaw[1]];
+        for (const r of this.reused) {
+            r.belt.yaw = [r.yaw[0], r.yaw[1]];
+            r.belt.outputObjIdx = r.outputObjIdx;
+            r.belt.outputToSlot = r.outputToSlot;
+            r.belt.outputFromSlot = r.outputFromSlot;
+            r.belt.outputOffset = r.outputOffset;
+        }
         const area = data.areas[this.areaIndex];
         if (area !== undefined) area.size.x = this.prevSizeX;
     }

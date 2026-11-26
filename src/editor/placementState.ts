@@ -15,7 +15,17 @@ export interface PlacementState {
     freePlacement: boolean; // Shift held
     /** 地基模式当前使用的颜色槽位（0..31，16..31 为自定义色） */
     reformColorSlot: number;
+    /**
+     * 传送带放置高度（高度格，0 = 地面层）。
+     * ↑/↓ 每次 ±1（步进量取自 `data/阶梯高度传送带.json` 的 z 轴步进）；
+     * A 点落在建筑口/已有传送带上时继承其高度（见 BlueprintEditor 的 A 点逻辑）。
+     */
+    beltZ: number;
 }
+
+/** 传送带高度范围：游戏样本 `data/传送带最高49层.json` 最高 z=48（共 49 层） */
+export const BELT_Z_MIN = 0;
+export const BELT_Z_MAX = 48;
 
 const state = reactive<PlacementState>({
     appMode: "preview",
@@ -26,6 +36,7 @@ const state = reactive<PlacementState>({
     yaw: 0,
     freePlacement: false,
     reformColorSlot: 0,
+    beltZ: 0,
 });
 
 export function enterEditMode() {
@@ -42,6 +53,7 @@ export function exitEditMode() {
     state.selectedModelIndex = null;
     state.yaw = 0;
     state.freePlacement = false;
+    state.beltZ = 0;
 }
 export function usePlacement() {
     return state;
@@ -58,6 +70,19 @@ export function selectBuilding(itemId: number, modelIndex: number) {
     state.selectedItemId = itemId;
     state.selectedModelIndex = modelIndex;
     state.yaw = 0;
+    state.beltZ = 0;
+}
+
+/** 设置传送带放置高度（层）：夹在 [BELT_Z_MIN, BELT_Z_MAX]，保留 0.1 精度 */
+export function setBeltZ(z: number): number {
+    const v = Math.min(BELT_Z_MAX, Math.max(BELT_Z_MIN, z));
+    state.beltZ = Math.round(v * 10) / 10;
+    return state.beltZ;
+}
+
+/** ↑/↓：按整层调整传送带放置高度，返回调整后的高度 */
+export function adjustBeltZ(delta: number): number {
+    return setBeltZ(state.beltZ + delta);
 }
 
 /** 选择地基：进入地基模式（铺/涂一格），不做建筑放置 */

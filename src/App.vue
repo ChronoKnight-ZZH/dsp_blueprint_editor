@@ -557,6 +557,7 @@ import {
     cycleBuildingVariant,
     enterEditMode,
     exitEditMode,
+    adjustBeltZ,
 } from "./editor/placementState";
 import { buildingCategories } from "./data/buildingCategories";
 import { isBelt } from "./data/items";
@@ -1407,6 +1408,20 @@ const hotkey = (event: KeyboardEvent) => {
         target?.isContentEditable
     )
         return;
+
+    // ↑/↓：放置传送带时调整整条带的放置高度（整层步进，见 data/阶梯高度传送带.json）。
+    // 预览刷新由 BlueprintEditor 内部的 watchEffect 读取 placement.beltZ 自动触发。
+    if (
+        (event.code === "ArrowUp" || event.code === "ArrowDown") &&
+        isEdit &&
+        placement.mode === "placing" &&
+        placement.selectedItemId !== null &&
+        isBelt(placement.selectedItemId)
+    ) {
+        event.preventDefault();
+        adjustBeltZ(event.code === "ArrowUp" ? 1 : -1);
+        return;
+    }
 
     // /：打开使用教程
     if (event.key === "/") {

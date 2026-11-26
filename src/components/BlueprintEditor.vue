@@ -143,9 +143,7 @@ import {
     BoxGeometry,
     MeshStandardMaterial,
     MeshBasicMaterial,
-    LineBasicMaterial,
     InstancedMesh,
-    Line,
     Color,
     Path,
     Shape,
@@ -154,7 +152,6 @@ import {
     SphereGeometry,
     DoubleSide,
     BufferGeometry,
-    Float32BufferAttribute,
 } from "three";
 import { RemoveBuildingCommand } from "@/blueprint/removeBuilding";
 import { commandQueueKey } from "@/define";
@@ -186,7 +183,7 @@ import type { BuildingModelRef } from "@/lib/core/types";
 import type { BlueprintBuilding } from "@/blueprint/parser";
 
 // ---- 编辑交互层（从 editing_mode 移植，坐标/构造全部走新架构的库）----
-import { usePlacement, resetToIdle } from "@/editor/placementState";
+import { usePlacement, resetToIdle, setBeltZ } from "@/editor/placementState";
 import {
     ROOT_GRID_SIZE,
     areaGridSize,
@@ -471,6 +468,7 @@ let beltArea: { areaIndex: number; origin: AreaGridOrigin } | null = null;
 const sorterSource = ref<number | null>(null);
 
 // 传送带路径走法（R 键循环切换）：latFirst → lonFirst → straight → latFirst
+// straight = 自由角度直线（端点吸整格，中间节点按直线等分，见 `@/blueprint/beltLine`）
 let beltPathMode: BeltPathMode = "latFirst";
 const BELT_PATH_MODES: BeltPathMode[] = ["latFirst", "lonFirst", "straight"];
 // 实际切换函数在 onMounted 内部定义（需访问 lastPointer/updateBeltPreview），
@@ -574,24 +572,11 @@ watchEffect(() => {
     }
 });
 
-// straight 模式预览：矢量直线（非阶梯状位图）
-const beltStraightLine = new Line(
-    new BufferGeometry(),
-    new LineBasicMaterial({ color: 0xffffff, opacity: 0.9, transparent: true })
-);
-beltStraightLine.renderOrder = 10;
-const beltStraightLineVisible = ref(false);
-watchEffect(() => {
-    if (isPlacingBelt() && beltStraightLineVisible.value)
-        scene.add(beltStraightLine);
-    else scene.remove(beltStraightLine);
-});
 function hideBeltPreview() {
     beltPreviewMesh.count = 0;
     beltEndMarkerMesh.count = 0;
     beltLinkMesh.count = 0;
     beltPreviewVisible.value = false;
-    beltStraightLineVisible.value = false;
 }
 
 // 分拣器第一点（源建筑）高亮 / 点击锚点（决定挂哪个 slot，与游戏光标一致）
@@ -1264,6 +1249,16 @@ onMounted(() => {
         };
     };
     /**
+     * 传送带高度过滤：本期整条带只保持一个高度（`data/阶梯高度传送带.json` 的做法），
+     * 建筑口高度与所选高度不一致时先不绑定——坡度爬升将在下一步实现
+     * （`data/三种坡度上升的高度1.json` 的三种写法）。
+     */
+    const portAtBeltZ = (
+        port: BeltPortEnd | null,
+        z: number
+    ): BeltPortEnd | null =>
+        port !== null && Math.abs(port.point.z - z) < 1e-3 ? port : null;
+    /**
      * 放置建筑。
      * 可堆叠建筑在光标落在底座上时**叠到该列最上层**（z = 底座 z + 一层高度，x/y 对齐底座中心）；
      * 研究站还会沿用底座的模式与配方（一列研究站共享设置）；
@@ -1405,25 +1400,6 @@ onMounted(() => {
     const beltLinkLift = new Vector3();
     const beltLinkM = new Matrix4();
     const beltLinkScale = new Matrix4();
-    const _tmpPos = new Vector3();
-
-    /** 网格偏移 → 世界坐标（用于直线预览端点） */
-    const gridToWorld = (
-        offset: { x: number; y: number },
-        origin: AreaGridOrigin
-    ): Vector3 | null => {
-        const itemId = placement.selectedItemId;
-        const modelIndex = placement.selectedModelIndex;
-        if (b.value === null || itemId === null || modelIndex === null)
-            return null;
-        const fake = createBuilding(itemId, modelIndex, offset, 0);
-        const t = calcBuildingTrans(
-            PLANET_RADIUS,
-            syntheticPos(origin),
-            fake
-        )[0];
-        return _tmpPos.setFromMatrixPosition(t).clone();
-    };
 
     // ---- 地基模式：逐格铺/涂 ----
     /** 网格偏移 → 地基光标世界矩阵（薄板贴于格子中心，朝向球面法线） */
@@ -1535,7 +1511,7 @@ onMounted(() => {
             modelIndex,
             offset,
             placement.yaw,
-            port ? port.point.z : 0
+            port ? port.point.z : placement.beltZ
         );
         const t = calcBuildingTrans(PLANET_RADIUS, syntheticPos(origin), fake)[0];
         beltPreviewM.multiplyMatrices(t, beltLift);
@@ -1546,7 +1522,6 @@ onMounted(() => {
         beltEndMarkerMesh.count = 0;
         beltLinkMesh.count = 0;
         beltPreviewVisible.value = true;
-        beltStraightLineVisible.value = false;
     };
 
     const updateBeltPreview = (
@@ -1572,45 +1547,12 @@ onMounted(() => {
         );
         const area = commandQueue.value?.data.areas[beltArea.areaIndex];
         const gridSize = areaGridSize(beltArea.origin.segment);
-        const endPort = portEndAt(e);
-        // straight 模式：矢量直线预览（沿球面采样，非阶梯状位图）
-        if (beltPathMode === "straight") {
-            const startPos = gridToWorld(p0, beltArea.origin);
-            const endPos = gridToWorld(cur, beltArea.origin);
-            if (startPos && endPos) {
-                const dist = startPos.distanceTo(endPos);
-                const segments = Math.min(
-                    128,
-                    Math.max(2, Math.ceil(dist * 2))
-                );
-                const positions = new Float32Array((segments + 1) * 3);
-                for (let i = 0; i <= segments; i++) {
-                    const t = i / segments;
-                    const p = startPos
-                        .clone()
-                        .lerp(endPos, t)
-                        .normalize()
-                        .multiplyScalar(PLANET_RADIUS + 0.05);
-                    positions[i * 3] = p.x;
-                    positions[i * 3 + 1] = p.y;
-                    positions[i * 3 + 2] = p.z;
-                }
-                beltStraightLine.geometry.setAttribute(
-                    "position",
-                    new Float32BufferAttribute(positions, 3)
-                );
-                beltStraightLine.geometry.computeBoundingSphere();
-                beltStraightLineVisible.value = true;
-            }
-            beltPreviewMesh.count = 0;
-            beltEndMarkerMesh.count = 0;
-            beltLinkMesh.count = 0;
-            beltPreviewVisible.value = false;
-            return;
-        }
+        const endPort = portAtBeltZ(portEndAt(e), placement.beltZ);
+        const startPort = portAtBeltZ(beltStartPort, placement.beltZ);
 
-        // latFirst / lonFirst：六边形节点 + 白色连线预览（复用与落位同一套路径构造，
-        // 起点/终点接建筑口时预览也会贴到口上）
+        // latFirst / lonFirst / straight：统一用六边形节点 + 白色连线预览，
+        // 与落位共用同一套路径构造（straight 现在是自由角度直线，节点可为分数）。
+        // 起点/终点接建筑口时预览也会贴到口上。
         const previewBelts = clipBeltPath(
             buildBeltLine(
                 itemId,
@@ -1619,9 +1561,10 @@ onMounted(() => {
                 cur,
                 placement.yaw,
                 beltPathMode,
-                beltStartPort,
+                startPort,
                 endPort,
-                gridSize
+                gridSize,
+                placement.beltZ
             ),
             area
         );
@@ -1695,7 +1638,6 @@ onMounted(() => {
         beltLinkMesh.instanceMatrix.needsUpdate = true;
 
         beltPreviewVisible.value = n > 0;
-        beltStraightLineVisible.value = false;
     };
     // 切换传送带路径走法（在 onMounted 内定义，可访问 lastPointer / updateBeltPreview）
     cycleBeltPathModeFn.value = () => {
@@ -1733,13 +1675,21 @@ onMounted(() => {
             return;
         const area = queue.data.areas[belt.areaIndex];
         if (area === undefined) return;
-        // 建筑口必须属于本条带所在区域（一条带 = 一个区域，跨区域的口无法用单条带表示）
-        const endPortRaw = portEndAt(e);
+        // 建筑口必须属于本条带所在区域（一条带 = 一个区域，跨区域的口无法用单条带表示）；
+        // 且本期整条带只保持一个高度，口高度与所选高度不一致时不绑定（坡度下一步实现）。
+        const hoveredEndPort = portEndAt(e);
+        const filteredEndPort = portAtBeltZ(hoveredEndPort, placement.beltZ);
         const endPort =
-            endPortRaw !== null &&
-            endPortRaw.building.areaIndex === belt.areaIndex
-                ? endPortRaw
+            filteredEndPort !== null &&
+            filteredEndPort.building.areaIndex === belt.areaIndex
+                ? filteredEndPort
                 : null;
+        if (
+            endPort === null &&
+            hoveredEndPort !== null &&
+            hoveredEndPort.building.areaIndex === belt.areaIndex
+        )
+            showHint("传送带高度与该口不一致，本次不连接（坡度爬升将在下一步支持）");
         const target = placementTargetAt(e, true);
         const end = endPort
             ? { x: Math.round(endPort.point.x), y: Math.round(endPort.point.y) }
@@ -1753,7 +1703,8 @@ onMounted(() => {
         if (end === null) return;
         const startPort =
             beltStartPort !== null &&
-            beltStartPort.building.areaIndex === belt.areaIndex
+            beltStartPort.building.areaIndex === belt.areaIndex &&
+            portAtBeltZ(beltStartPort, placement.beltZ) !== null
                 ? beltStartPort
                 : null;
         const gridSize = areaGridSize(belt.origin.segment);
@@ -1767,7 +1718,8 @@ onMounted(() => {
                 beltPathMode,
                 startPort,
                 endPort,
-                gridSize
+                gridSize,
+                placement.beltZ
             ),
             area
         );
@@ -1888,10 +1840,15 @@ onMounted(() => {
                         areaIndex: port.building.areaIndex,
                         origin,
                     };
+                    const turn = areaGridSize(origin.segment);
                     beltStart = {
-                        x: Math.round(port.point.x),
+                        x:
+                            ((Math.round(port.point.x) % turn) + turn) %
+                            turn,
                         y: Math.round(port.point.y),
                     };
+                    // A 点接建筑口：整条带继承口的高度（分流器上层口 z=1 / 高层带）
+                    setBeltZ(port.point.z);
                 } else {
                     const target = placementTargetAt(e, true);
                     if (target === null) return;
@@ -1899,6 +1856,32 @@ onMounted(() => {
                     if (areaIndex < 0) return;
                     beltArea = { areaIndex, origin: target.origin };
                     beltStart = { x: target.x, y: target.y };
+                    // A 点接已有传送带：继承那条带的高度（本期整条同高）。
+                    // 高层带的射线落点在带面上，必须用径向投影后的格，否则会因视差偏到相邻格。
+                    const hit = pickBuildingHit(e);
+                    const hitBuilding =
+                        hit !== null ? queue.data.buildings[hit.index] : undefined;
+                    if (hitBuilding && isBelt(hitBuilding.itemId)) {
+                        setBeltZ(hitBuilding.localOffset[0].z);
+                        const origin = b.value!.pos.areas[hitBuilding.areaIndex];
+                        const local =
+                            origin !== undefined
+                                ? anchorOffset(e, hitBuilding.areaIndex)
+                                : null;
+                        if (origin !== undefined && local !== null) {
+                            const turn = areaGridSize(origin.segment);
+                            beltArea = {
+                                areaIndex: hitBuilding.areaIndex,
+                                origin,
+                            };
+                            beltStart = {
+                                x:
+                                    ((Math.round(local.x) % turn) + turn) %
+                                    turn,
+                                y: Math.round(local.y),
+                            };
+                        }
+                    }
                 }
                 beltStartPort = port;
             } else commitBeltLine(e); // 第二次点击：A→B 放置
@@ -2101,8 +2084,6 @@ onUnmounted(() => {
     beltEndMarkerMesh.geometry.dispose();
     beltLinkMesh.geometry.dispose();
     beltPreviewMaterial.dispose();
-    beltStraightLine.geometry.dispose();
-    beltStraightLine.material.dispose();
     slotMarkers.geometry.dispose();
     slotMarkers.material.dispose();
     portMarkers.geometry.dispose();
@@ -2138,7 +2119,7 @@ defineExpose({
     cameraPosVersion,
     getModel,
     resetCamera,
-    /** App.vue 的 R 键：放置传送带时循环切换路径走法（latFirst / lonFirst / straight） */
+    /** App.vue 的 R 键：放置传送带时循环切换路径走法（latFirst / lonFirst / straight）——straight 为自由角度直线 */
     cycleBeltPathMode: () => cycleBeltPathModeFn.value?.(),
 });
 </script>

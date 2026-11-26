@@ -28,6 +28,7 @@
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { usePlacement } from "@/editor/placementState";
+import { isBelt } from "@/data/items";
 
 const { t } = useI18n();
 const placement = usePlacement();
@@ -67,17 +68,26 @@ const rows = computed<[string, string][]>(() => {
             ["右键 / Esc", "退出地基模式"],
             ["N", "重置镜头"],
         ];
-    return [
+    const rows: [string, string][] = [
         ["1-9", "切换分类"],
         ["F1-F12", "选建筑"],
         ["左键", "放置/堆叠建筑"],
         ["R", "旋转 90°"],
         ["Tab", "切换变形样式"],
+    ];
+    // 传送带专属：↑/↓ 调整整条带放置高度（整层步进）
+    if (
+        placement.selectedItemId !== null &&
+        isBelt(placement.selectedItemId)
+    )
+        rows.push(["↑ / ↓", `传送带高度（${placement.beltZ} 层）`]);
+    rows.push(
         ["X", "删除模式"],
         ["Esc", "取消/收起"],
         ["Shift", "自由放置"],
-        ["N", "重置镜头"],
-    ];
+        ["N", "重置镜头"]
+    );
+    return rows;
 });
 </script>
 
