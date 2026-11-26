@@ -10,7 +10,6 @@ import {
     Color,
     Object3D,
     BoxGeometry,
-    CylinderGeometry,
     MeshLambertMaterial,
 } from "three";
 import type { TextureSink } from "@/icon/iconTexture";
@@ -131,30 +130,7 @@ export function buildBuildings(
 
     // 传送带
     const buildBelts = (belts: BlueprintBuilding[]) => {
-        // 端点圆柱属于传送带节点装饰，保留原有尺寸；linkThickness 才是带状网格的挤出厚度。
-        const thickness = 0.1;
-        const material = new MeshLambertMaterial();
         const objects: Object3D[] = [];
-        {
-            const geometry = new CylinderGeometry(0.12, 0.12, thickness, 32);
-            const mesh = new InstancedMesh(geometry, material, belts.length);
-            const offset = new Matrix4().makeRotationX(Math.PI / 2);
-            offset.premultiply(
-                new Matrix4().makeTranslation(0, 0, thickness / 2)
-            );
-            const trans = new Matrix4();
-            for (let i = 0; i < belts.length; i++) {
-                const b = belts[i];
-                trans.copy(transforms[b.index][0]);
-                trans.multiply(offset);
-                mesh.setMatrixAt(i, trans);
-                mesh.setColorAt(i, colorOf(b.modelIndex));
-                modelRef[b.index] = { mesh, instance: i };
-            }
-            mesh.instanceMatrix.needsUpdate = true;
-            mesh.instanceColor!.needsUpdate = true;
-            objects.push(mesh);
-        }
 
         const linkThickness = BELT_RIBBON_THICKNESS;
         {
@@ -163,6 +139,8 @@ export function buildBuildings(
             const halfWidth = 0.35;
             const beltSurfaceColor = new Color(0x4a4744);
             const miterLimit = 4;
+            const capSegments = 12;
+            const railCapSegments = 8;
             const p1 = new Vector3();
             const p2 = new Vector3();
             const direction = new Vector3();
@@ -257,6 +235,20 @@ export function buildBuildings(
                 incoming.set(edge.target, inc);
             }
 
+            // 孤立带子格由两个半圆端帽合成传送带半径的整圆；有连接的格由
+            // 跑道形条带端帽覆盖，不再需要端点圆柱。
+            const linkedBelts = new Set<number>();
+            for (const edge of links) {
+                linkedBelts.add(edge.source);
+                linkedBelts.add(edge.target);
+            }
+            const isolatedBelts = belts.filter((b) => !linkedBelts.has(b.index));
+            for (const b of belts) {
+                // 带子不再依赖 InstancedMesh 实例做 modelRef，
+                // 返回节点 base 矩阵即可满足 getBuildingModel 与定位需求。
+                modelRef[b.index] = { matrix: transforms[b.index][0].clone() };
+            }
+
             // 连接图收齐后再建货物：淡出必须按端点拓扑决定，不能只看单条边。
             //
             // 所有货物共用一个 `cargoMove`，相邻段的货物在节点处是「一件停住、下一件接力」的
@@ -275,7 +267,7 @@ export function buildBuildings(
                 });
             }
 
-            if (links.length) {
+            if (links.length || isolatedBelts.length) {
                 const nodeFrames = new Map<number, BeltNodeFrame>();
                 const nodeIds = new Set<number>();
                 for (const edge of links) {
@@ -541,6 +533,190 @@ export function buildBuildings(
                     );
                 };
 
+                /**
+                 * 在带段端点生成半圆端帽：圆心落在节点中心，半径等于该端实际半宽，
+                 * 半圆朝向带段外侧（起点向后、终点向前），与矩形带身拼成跑道形。
+                 */
+                const addHalfDiscCap = (
+                    center: Vector3,
+                    normal: Vector3,
+                    sideDir: Vector3,
+                    forwardDir: Vector3,
+                    radius: number,
+                    color: Color
+                ) => {
+                    if (radius < 1e-6) return;
+
+                    const bottomCenter = center.clone();
+                    const topCenter = center
+                        .clone()
+                        .addScaledVector(normal, linkThickness);
+                    const arcBottom: Vector3[] = [];
+                    const arcTop: Vector3[] = [];
+
+                    for (let i = 0; i <= capSegments; i++) {
+                        const theta = -Math.PI / 2 + (Math.PI * i) / capSegments;
+                        const u = Math.cos(theta);
+                        const v = Math.sin(theta);
+                        const radial = forwardDir
+                            .clone()
+                            .multiplyScalar(u)
+                            .add(sideDir.clone().multiplyScalar(v));
+                        const p = center
+                            .clone()
+                            .addScaledVector(radial, radius);
+                        arcBottom.push(p);
+                        arcTop.push(
+                            p.clone().addScaledVector(normal, linkThickness)
+                        );
+                    }
+
+                    // 弧形侧壁
+                    for (let i = 0; i < capSegments; i++) {
+                        addQuad(
+                            arcBottom[i],
+                            arcBottom[i + 1],
+                            arcTop[i + 1],
+                            arcTop[i],
+                            color
+                        );
+                    }
+
+                    // 顶面半圆（扇形）
+                    for (let i = 0; i < capSegments; i++) {
+                        addTriangle(
+                            topCenter,
+                            arcTop[i + 1],
+                            arcTop[i],
+                            color
+                        );
+                    }
+
+                    // 底面半圆（扇形，法线朝下）
+                    for (let i = 0; i < capSegments; i++) {
+                        addTriangle(
+                            bottomCenter,
+                            arcBottom[i],
+                            arcBottom[i + 1],
+                            color
+                        );
+                    }
+                };
+
+                /**
+                 * 沿半圆路径挤出护栏截面，连接矩形带身两端的护栏端点，形成闭合边框。
+                 */
+                const addCurvedRail = (
+                    center: Vector3,
+                    normal: Vector3,
+                    sideDir: Vector3,
+                    forwardDir: Vector3,
+                    radius: number,
+                    color: Color
+                ) => {
+                    if (radius < 1e-6) return;
+
+                    const sections: RailSection[] = [];
+                    for (let i = 0; i <= railCapSegments; i++) {
+                        const theta =
+                            -Math.PI / 2 + (Math.PI * i) / railCapSegments;
+                        const u = Math.cos(theta);
+                        const v = Math.sin(theta);
+                        const outward = forwardDir
+                            .clone()
+                            .multiplyScalar(u)
+                            .add(sideDir.clone().multiplyScalar(v));
+                        const base = center
+                            .clone()
+                            .addScaledVector(outward, radius);
+                        sections.push(makeRailSection(base, normal, outward));
+                    }
+
+                    for (let i = 0; i < railCapSegments; i++) {
+                        const a = sections[i];
+                        const b = sections[i + 1];
+                        // 顶面
+                        addRailQuad(
+                            a.innerTop,
+                            b.innerTop,
+                            b.outerTop,
+                            a.outerTop,
+                            color
+                        );
+                        // 外侧壁
+                        addRailQuad(
+                            a.outerBottom,
+                            b.outerBottom,
+                            b.outerTop,
+                            a.outerTop,
+                            color
+                        );
+                        // 内侧壁
+                        addRailQuad(
+                            a.innerBottom,
+                            a.innerTop,
+                            b.innerTop,
+                            b.innerBottom,
+                            color
+                        );
+                        // 底面
+                        addRailQuad(
+                            a.innerBottom,
+                            b.innerBottom,
+                            b.outerBottom,
+                            a.outerBottom,
+                            color
+                        );
+                    }
+                };
+
+                // 孤立带子格：两个半圆端帽朝相反方向合成传送带半径的整圆，
+                // 并用同款弧形边框围一圈，与有连接格的跑道形端帽保持同一视觉语言。
+                for (const b of isolatedBelts) {
+                    transforms[b.index][0].extractBasis(axisX, axisY, axisZ);
+                    const center = new Vector3().setFromMatrixPosition(
+                        transforms[b.index][0]
+                    );
+                    const normal = axisZ.clone().normalize();
+                    const sideDir = axisY.clone().normalize();
+                    const forwardDir = axisX.clone().normalize();
+                    const radius = halfWidth;
+
+                    addHalfDiscCap(
+                        center,
+                        normal,
+                        sideDir,
+                        forwardDir,
+                        radius,
+                        beltSurfaceColor
+                    );
+                    addHalfDiscCap(
+                        center,
+                        normal,
+                        sideDir,
+                        forwardDir.clone().negate(),
+                        radius,
+                        beltSurfaceColor
+                    );
+
+                    addCurvedRail(
+                        center,
+                        normal,
+                        sideDir,
+                        forwardDir,
+                        radius,
+                        colorOf(b.modelIndex)
+                    );
+                    addCurvedRail(
+                        center,
+                        normal,
+                        sideDir,
+                        forwardDir.clone().negate(),
+                        radius,
+                        colorOf(b.modelIndex)
+                    );
+                }
+
                 const getNodeDegree = (nodeId: number) =>
                     (incoming.get(nodeId)?.length ?? 0) +
                     (outgoing.get(nodeId)?.length ?? 0);
@@ -659,11 +835,24 @@ export function buildBuildings(
                         return { center, normal, side };
                     };
 
+                    // 端帽半径取该端实际半宽；带身始终从节点中心铺到节点中心，
+                    // 端帽朝带段外侧延伸，嘴部正好与带身端面重合，不再留缝。
+                    const startCap = getNodeDegree(edge.source) < 3;
+                    const endCap = getNodeDegree(edge.target) < 3;
+                    const startRadius = startSideOffset.length();
+                    const endRadius = endSideOffset.length();
+
                     // 顶面两侧各铺一条窄类型色饰边，形成图示中的彩色轮廓线。
-                    const borderStartInset =
-                        getNodeDegree(edge.source) >= 3 ? 0.22 : 0.015;
-                    const borderEndInset =
-                        getNodeDegree(edge.target) >= 3 ? 0.22 : 0.015;
+                    const borderStartInset = startCap
+                        ? 0.02
+                        : getNodeDegree(edge.source) >= 3
+                        ? 0.22
+                        : 0.015;
+                    const borderEndInset = endCap
+                        ? 0.02
+                        : getNodeDegree(edge.target) >= 3
+                        ? 0.22
+                        : 0.015;
                     const borderLength =
                         surfaceEdgeLength - borderStartInset - borderEndInset;
                     const borderOuterSpan = halfWidth - 0.006;
@@ -723,10 +912,17 @@ export function buildBuildings(
 
                     // 方向箭头沿 edge.start -> edge.end 排列。
                     // 短模块尽量放一个居中箭头，长模块则按约 1.6 单位的节奏重复。
-                    const arrowStartInset =
-                        getNodeDegree(edge.source) >= 3 ? 0.28 : 0.18;
-                    const arrowEndInset =
-                        getNodeDegree(edge.target) >= 3 ? 0.28 : 0.18;
+                    // 端帽区域不排箭头，让箭头完整落在矩形带身上。
+                    const arrowStartInset = startCap
+                        ? 0.05
+                        : getNodeDegree(edge.source) >= 3
+                        ? 0.28
+                        : 0.18;
+                    const arrowEndInset = endCap
+                        ? 0.05
+                        : getNodeDegree(edge.target) >= 3
+                        ? 0.28
+                        : 0.18;
                     const arrowAvailable =
                         surfaceEdgeLength - arrowStartInset - arrowEndInset;
                     if (arrowAvailable >= 0.42) {
@@ -788,99 +984,151 @@ export function buildBuildings(
                         }
                     }
 
-                    const startLeft = edge.start.clone().add(startSideOffset);
-                    const startRight = edge.start.clone().sub(startSideOffset);
-                    const endLeft = edge.end.clone().add(endSideOffset);
-                    const endRight = edge.end.clone().sub(endSideOffset);
-                    const startTopLeft = startLeft
+                    // 跑道形带身：矩形中段 + 两端半圆端帽。
+                    const startBody = edge.start.clone();
+                    const endBody = edge.end.clone();
+
+                    const bodyStartLeft = startBody.clone().add(startSideOffset);
+                    const bodyStartRight = startBody.clone().sub(
+                        startSideOffset
+                    );
+                    const bodyEndLeft = endBody.clone().add(endSideOffset);
+                    const bodyEndRight = endBody.clone().sub(endSideOffset);
+
+                    const bodyStartTopLeft = bodyStartLeft
                         .clone()
                         .addScaledVector(startFrame.normal, linkThickness);
-                    const startTopRight = startRight
+                    const bodyStartTopRight = bodyStartRight
                         .clone()
                         .addScaledVector(startFrame.normal, linkThickness);
-                    const endTopLeft = endLeft
+                    const bodyEndTopLeft = bodyEndLeft
                         .clone()
                         .addScaledVector(endFrame.normal, linkThickness);
-                    const endTopRight = endRight
+                    const bodyEndTopRight = bodyEndRight
                         .clone()
                         .addScaledVector(endFrame.normal, linkThickness);
 
                     // 护栏内侧贴合带面边缘，向带面外侧延伸，不侵占有效运输宽度。
                     // 多分支节点收短 0.16，避免 T 字中心出现护栏交叉和重叠。
-                    const edgeLength = edge.start.distanceTo(edge.end);
-                    const startTrim =
-                        getNodeDegree(edge.source) >= 3
-                            ? Math.min(junctionRailInset, edgeLength * 0.2)
-                            : 0;
-                    const endTrim =
-                        getNodeDegree(edge.target) >= 3
-                            ? Math.min(junctionRailInset, edgeLength * 0.2)
-                            : 0;
+                    const bodyLength = startBody.distanceTo(endBody);
+                    const startTrim = startCap
+                        ? 0
+                        : Math.min(junctionRailInset, bodyLength * 0.2);
+                    const endTrim = endCap
+                        ? 0
+                        : Math.min(junctionRailInset, bodyLength * 0.2);
                     const startOutward = startSideOffset.clone().normalize();
                     const endOutward = endSideOffset.clone().normalize();
 
-                    addGuardRail(
-                        startTopLeft,
-                        endTopLeft,
-                        startFrame.normal,
-                        endFrame.normal,
-                        startOutward,
-                        endOutward,
-                        startTrim,
-                        endTrim,
-                        edgeLength,
-                        edge.color
-                    );
-                    addGuardRail(
-                        startTopRight,
-                        endTopRight,
-                        startFrame.normal,
-                        endFrame.normal,
-                        startOutward.clone().negate(),
-                        endOutward.clone().negate(),
-                        startTrim,
-                        endTrim,
-                        edgeLength,
-                        edge.color
-                    );
+                    if (bodyLength > 1e-6) {
+                        addGuardRail(
+                            bodyStartTopLeft,
+                            bodyEndTopLeft,
+                            startFrame.normal,
+                            endFrame.normal,
+                            startOutward,
+                            endOutward,
+                            startTrim,
+                            endTrim,
+                            bodyLength,
+                            edge.color
+                        );
+                        addGuardRail(
+                            bodyStartTopRight,
+                            bodyEndTopRight,
+                            startFrame.normal,
+                            endFrame.normal,
+                            startOutward.clone().negate(),
+                            endOutward.clone().negate(),
+                            startTrim,
+                            endTrim,
+                            bodyLength,
+                            edge.color
+                        );
+                    }
 
-                    // 顶面
-                    addQuad(
-                        startTopLeft,
-                        endTopLeft,
-                        endTopRight,
-                        startTopRight,
-                        beltSurfaceColor
-                    );
+                    // 两端半圆端帽 + 弧形边框
+                    const startSideDir = startOutward;
+                    const endSideDir = endOutward;
 
-                    // 底面
-                    addQuad(
-                        startLeft,
-                        endLeft,
-                        endRight,
-                        startRight,
-                        beltSurfaceColor,
-                        true
-                    );
+                    if (startCap && startRadius > 1e-6) {
+                        addCurvedRail(
+                            edge.start,
+                            startFrame.normal,
+                            startSideDir,
+                            edge.tangent.clone().negate(),
+                            startRadius,
+                            edge.color
+                        );
+                        addHalfDiscCap(
+                            edge.start,
+                            startFrame.normal,
+                            startSideDir,
+                            edge.tangent.clone().negate(),
+                            startRadius,
+                            beltSurfaceColor
+                        );
+                    }
 
-                    // 左侧面
-                    addQuad(
-                        startLeft,
-                        endLeft,
-                        endTopLeft,
-                        startTopLeft,
-                        beltSurfaceColor
-                    );
+                    if (endCap && endRadius > 1e-6) {
+                        addCurvedRail(
+                            edge.end,
+                            endFrame.normal,
+                            endSideDir,
+                            edge.tangent,
+                            endRadius,
+                            edge.color
+                        );
+                        addHalfDiscCap(
+                            edge.end,
+                            endFrame.normal,
+                            endSideDir,
+                            edge.tangent,
+                            endRadius,
+                            beltSurfaceColor
+                        );
+                    }
 
-                    // 右侧面
-                    addQuad(
-                        startRight,
-                        endRight,
-                        endTopRight,
-                        startTopRight,
-                        beltSurfaceColor,
-                        true
-                    );
+                    // 矩形带身
+                    if (bodyLength > 1e-6) {
+                        // 顶面
+                        addQuad(
+                            bodyStartTopLeft,
+                            bodyEndTopLeft,
+                            bodyEndTopRight,
+                            bodyStartTopRight,
+                            beltSurfaceColor
+                        );
+
+                        // 底面
+                        addQuad(
+                            bodyStartLeft,
+                            bodyEndLeft,
+                            bodyEndRight,
+                            bodyStartRight,
+                            beltSurfaceColor,
+                            true
+                        );
+
+                        // 左侧面
+                        addQuad(
+                            bodyStartLeft,
+                            bodyEndLeft,
+                            bodyEndTopLeft,
+                            bodyStartTopLeft,
+                            beltSurfaceColor
+                        );
+
+                        // 右侧面
+                        addQuad(
+                            bodyStartRight,
+                            bodyEndRight,
+                            bodyEndTopRight,
+                            bodyStartTopRight,
+                            beltSurfaceColor,
+                            true
+                        );
+                    }
                 }
 
                 // ============================================================
