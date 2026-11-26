@@ -1082,8 +1082,14 @@ export class RenderCore {
                 );
             this.lastTimestamp = time;
 
-            if (this.bundle !== null)
-                this.bundle.buildings.cargos.cargoMove = (time % 1000) / 1000;
+            if (this.bundle !== null) {
+                // 相位由货物系统自持（`Cargos.tick`），返回值再喂给横梁箭头，
+                // 保证「箭头与货物同向同速」且只有一处算时间。
+                const progress = this.bundle.buildings.cargos.tick(time);
+                // 没有分拣器时 inserters 为 null，必须判空
+                const inserters = this.bundle.buildings.inserters;
+                if (inserters !== null) inserters.cargoMove = progress;
+            }
 
             const cameraUpdated = this.controls.update();
             this.planet.dirLight.position.copy(this._camera.position);

@@ -471,8 +471,14 @@ onMounted(() => {
         if (lastTimeStamp) {
             c.updateTimeDelta((time - lastTimeStamp) / 1000);
         }
-        if (b.value?.buildings.cargos)
-            b.value.buildings.cargos.cargoMove = (time % 1000) / 1000;
+        // 相位由货物系统自持（`Cargos.tick`），返回值再喂给横梁箭头，
+        // 保证「箭头与货物同向同速」
+        const built = b.value?.buildings;
+        if (built !== undefined) {
+            const progress = built.cargos.tick(time);
+            // 没有分拣器时 inserters 为 null，必须判空
+            if (built.inserters !== null) built.inserters.cargoMove = progress;
+        }
         lastTimeStamp = time;
         requestAnimationFrame(animate);
         const cameraUpdated = c.update();
