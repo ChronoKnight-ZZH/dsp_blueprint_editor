@@ -9,6 +9,8 @@ node_modules
 /temp
 # 增量预览测试页的数据：由 `node scripts/preview/build-fixture.mjs` 从 data/ 下的抓包生成
 /scripts/lib-build/preview-fixture.json
+# yarn 1.x 的安装状态缓存：机器相关，`yarn install` 会重写，不入库
+/.yarn
 # local env files
 .env.local
 .env.*.local
