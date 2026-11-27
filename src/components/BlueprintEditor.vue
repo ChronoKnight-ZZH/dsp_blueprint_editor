@@ -484,6 +484,13 @@ let beltStartPort: BeltPortEnd | null = null;
  */
 let beltStartZ = 0;
 /**
+ * A 点来自已有传送带末格时记录其建筑下标（null = 空白网格/建筑口起点）。
+ * 用 ref：高亮覆盖层的 watchEffect 要在"确认/取消 A 点"时立即重算，
+ * 不能只依赖 beltHover（取消时它可能仍是 null，不会触发重跑）。
+ * 提交时复用该末格（CreateBeltLineCommand 按格+高度层匹配）。
+ */
+const beltStartBuildingIndex = ref<number | null>(null);
+/**
  * 本条拖拽传送带所属的区域（一条带一个区域）：A 点按下时确定，
  * 之后 B 点/预览都换算到这个区域的局部坐标，越出该带的部分按边界截断。
  */
@@ -659,6 +666,56 @@ function hideBeltPreview() {
     beltGuideVisible.value = false;
     beltPreviewVisible.value = false;
 }
+
+// ---- 已有传送带节点悬停/选中高亮（建造模式下从末格续建）----
+// 悬停：鼠标指向的传送带单格；选中：已确定为 A 点的末格（拖拽期间保持高亮）。
+// 只画在预览层（黄色外圈），不改真实传送带材质，也不进 library 渲染路径。
+const beltHover = ref<{ index: number } | null>(null);
+const beltHoverMaterial = new MeshBasicMaterial({
+    color: 0xffc22e,
+    opacity: 0.95,
+    transparent: true,
+    depthWrite: false,
+    side: DoubleSide,
+    // 高亮要能透过传送带本体/地面网格看到，与游戏内选中效果一致
+    depthTest: false,
+});
+const beltHoverMarker = new Mesh(makeBeltEndGeometry(), beltHoverMaterial);
+beltHoverMarker.matrixAutoUpdate = false;
+beltHoverMarker.renderOrder = 12;
+beltHoverMarker.frustumCulled = false;
+const beltHoverLift = new Matrix4().makeTranslation(
+    0,
+    0,
+    BELT_PREVIEW_LIFT + 0.01
+);
+const beltHoverM = new Matrix4();
+const beltHoverVisible = ref(false);
+watchEffect(() => {
+    const bp = b.value;
+    const data = commandQueue.value?.data;
+    // 优先级：已确定的 A 点末格 > 鼠标悬停节点
+    const index = beltStartBuildingIndex.value ?? beltHover.value?.index ?? null;
+    const building = index === null ? undefined : data?.buildings[index];
+    if (
+        !isPlacingBelt() ||
+        bp === null ||
+        building === undefined ||
+        !isBelt(building.itemId)
+    ) {
+        beltHoverVisible.value = false;
+        return;
+    }
+    const trans = calcBuildingTrans(PLANET_RADIUS, bp.pos, building)[0];
+    beltHoverM.multiplyMatrices(trans, beltHoverLift);
+    beltHoverMarker.matrix.copy(beltHoverM);
+    beltHoverMarker.updateMatrixWorld();
+    beltHoverVisible.value = true;
+});
+watchEffect(() => {
+    if (beltHoverVisible.value) scene.add(beltHoverMarker);
+    else scene.remove(beltHoverMarker);
+});
 
 // 分拣器第一点（源建筑）高亮 / 点击锚点（决定挂哪个 slot，与游戏光标一致）
 let sorterSourceAnchor: { x: number; y: number } | null = null;
@@ -1015,6 +1072,8 @@ watchEffect(() => {
         beltStart = null;
         beltStartPort = null;
         beltStartZ = 0;
+        beltStartBuildingIndex.value = null;
+        beltHover.value = null;
         beltArea = null;
         hideBeltPreview();
     }
@@ -1853,6 +1912,7 @@ onMounted(() => {
         beltStart = null;
         beltStartPort = null;
         beltStartZ = 0;
+        beltStartBuildingIndex.value = null;
         beltArea = null;
         hideBeltPreview();
         try {
@@ -1956,6 +2016,7 @@ onMounted(() => {
                 // A 点同时决定整条带所属的区域：口 → 该建筑的区域；空格 → 所在纬度带的区域
                 const queue = commandQueue.value;
                 if (queue === null) return;
+                beltStartBuildingIndex.value = null;
                 const port = portEndAt(e);
                 if (port !== null) {
                     const origin = b.value!.pos.areas[port.building.areaIndex];
@@ -1976,43 +2037,51 @@ onMounted(() => {
                     beltStartZ = port.point.z;
                     setBeltZ(port.point.z);
                 } else {
-                    const target = placementTargetAt(e, true);
-                    if (target === null) return;
-                    const areaIndex = materializeTarget(target);
-                    if (areaIndex < 0) return;
-                    beltArea = { areaIndex, origin: target.origin };
-                    beltStart = { x: target.x, y: target.y };
-                    // 起点高度默认 = 当前建造高度（之后 ↑/↓ 改的是终点高度）
-                    beltStartZ = placement.beltZ;
-                    // A 点接已有传送带：继承那条带的高度（起点与终点高度不同时自动生成坡度）。
-                    // 高层带的射线落点在带面上，必须用径向投影后的格，否则会因视差偏到相邻格。
+                    // 命中已有传送带：只允许从**末格**继续建造（中间格会形成普通带分叉）。
+                    // 先判定再 materialize 区域，避免中间格点击把画布无谓扩张。
                     const hit = pickBuildingHit(e);
                     const hitBuilding =
-                        hit !== null ? queue.data.buildings[hit.index] : undefined;
-                    if (hitBuilding && isBelt(hitBuilding.itemId)) {
-                        beltStartZ = hitBuilding.localOffset[0].z;
-                        setBeltZ(hitBuilding.localOffset[0].z);
-                        const origin = b.value!.pos.areas[hitBuilding.areaIndex];
-                        const local =
-                            origin !== undefined
-                                ? anchorOffset(e, hitBuilding.areaIndex)
-                                : null;
-                        if (origin !== undefined && local !== null) {
-                            const turn = areaGridSize(origin.segment);
-                            beltArea = {
-                                areaIndex: hitBuilding.areaIndex,
-                                origin,
-                            };
-                            beltStart = {
-                                x:
-                                    ((Math.round(local.x) % turn) + turn) %
-                                    turn,
-                                y: Math.round(local.y),
-                            };
-                        }
+                        hit !== null
+                            ? queue.data.buildings[hit.index]
+                            : undefined;
+                    const hitBelt =
+                        hitBuilding !== undefined &&
+                        isBelt(hitBuilding.itemId)
+                            ? hitBuilding
+                            : undefined;
+                    if (hitBelt !== undefined && hitBelt.outputObjIdx >= 0) {
+                        showHint("只能从传送带末端继续建造");
+                        return;
+                    }
+                    if (hitBelt !== undefined) {
+                        // A 点接已有传送带末格：区域/格/高度全部继承该带，
+                        // 提交时 CreateBeltLineCommand 按"格 + 高度层"复用这一格并接上新线路。
+                        const origin = b.value!.pos.areas[hitBelt.areaIndex];
+                        if (origin === undefined) return;
+                        const turn = areaGridSize(origin.segment);
+                        const p = hitBelt.localOffset[0];
+                        // 记录精确坐标（自由角度带的末格是分数坐标，取整会错位）
+                        beltArea = { areaIndex: hitBelt.areaIndex, origin };
+                        beltStart = {
+                            x: ((p.x % turn) + turn) % turn,
+                            y: p.y,
+                        };
+                        beltStartZ = p.z;
+                        beltStartBuildingIndex.value = hit!.index;
+                        setBeltZ(p.z);
+                    } else {
+                        const target = placementTargetAt(e, true);
+                        if (target === null) return;
+                        const areaIndex = materializeTarget(target);
+                        if (areaIndex < 0) return;
+                        beltArea = { areaIndex, origin: target.origin };
+                        beltStart = { x: target.x, y: target.y };
+                        // 起点高度默认 = 当前建造高度（之后 ↑/↓ 改的是终点高度）
+                        beltStartZ = placement.beltZ;
                     }
                 }
                 beltStartPort = port;
+                beltHover.value = null;
             } else commitBeltLine(e); // 第二次点击：A→B 放置
         }
     };
@@ -2062,10 +2131,26 @@ onMounted(() => {
             beltStart = null;
             beltStartPort = null;
             beltStartZ = 0;
+            beltStartBuildingIndex.value = null;
             beltArea = null;
             hideBeltPreview();
             // 回退到"未选 A 点"的光标状态：光标处重新显示单个传送带节点
-            if (lastPointer.value) showSingleBeltPreview(lastPointer.value);
+            if (lastPointer.value) {
+                showSingleBeltPreview(lastPointer.value);
+                // 恢复悬停高亮：取消 A 点后光标仍指向传送带时继续显示
+                const queue = commandQueue.value;
+                const hit = pickBuildingHit(lastPointer.value);
+                const hoverBuilding =
+                    hit === null || queue === null
+                        ? undefined
+                        : queue.data.buildings[hit.index];
+                beltHover.value =
+                    hit !== null &&
+                    hoverBuilding !== undefined &&
+                    isBelt(hoverBuilding.itemId)
+                        ? { index: hit.index }
+                        : null;
+            }
             return;
         }
         // 分拣器已设 A 点（源建筑）：右键取消 A 点选择，不退出放置模式
@@ -2116,6 +2201,16 @@ onMounted(() => {
                 hoverBuilding === undefined
                     ? null
                     : anchorOffset(e, hoverBuilding.areaIndex) ?? null;
+            // 铺传送带且还没定 A 点：悬停已有传送带节点时高亮（从末格续建）
+            if (isPlacingBelt()) {
+                beltHover.value =
+                    beltStart === null &&
+                    hit !== null &&
+                    hoverBuilding !== undefined &&
+                    isBelt(hoverBuilding.itemId)
+                        ? { index: hit.index }
+                        : null;
+            }
         }
     };
     const onMouseLeave = () => {
@@ -2126,6 +2221,7 @@ onMounted(() => {
         sorterHover.value = null;
         sorterHoverAnchor.value = null;
         sorterHoverZ.value = 0;
+        beltHover.value = null;
         hideBeltPreview(); // 隐藏路径预览，但保留 A 点
     };
     // 鼠标静止时，键盘切换建筑 / R 旋转 / Shift 吸附变化也要刷新预览
