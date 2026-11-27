@@ -216,6 +216,7 @@ import {
     createSorterBetween,
     collectOccupiedSlots,
 } from "@/blueprint/sorter";
+import { SorterGhost } from "@/editor/sorterGhost";
 import { PaintReformCellCommand, reformColorHex } from "@/blueprint/reformEdit";
 import { getBuildingSlots, slotDisplayPos } from "@/data/buildingSlots";
 import {
@@ -765,6 +766,14 @@ sorterPreviewMesh.matrixAutoUpdate = false;
 sorterPreviewMesh.renderOrder = 10;
 const sorterPreviewVisible = ref(false);
 
+/**
+ * 分拣器实体幽灵：预演阶段按将建成的造型显示半透明模型（蓝=可建造、红=不可），
+ * 与截图里的游戏内预览一致。造型与正式模型共用 `@/Animation/inserter` 的布局
+ * 常量，避免"预览一个样、落位另一个样"。
+ */
+const sorterGhost = new SorterGhost();
+const sorterGhostVisible = ref(false);
+
 watchEffect(() => {
     if (slotMarkersVisible.value) scene.add(slotMarkers);
     else scene.remove(slotMarkers);
@@ -774,6 +783,9 @@ watchEffect(() => {
     else scene.remove(beltRangeMesh);
     if (sorterPreviewVisible.value) scene.add(sorterPreviewMesh);
     else scene.remove(sorterPreviewMesh);
+    if (isPlacingSorter() && sorterGhostVisible.value)
+        scene.add(sorterGhost.group);
+    else scene.remove(sorterGhost.group);
 });
 
 // 覆盖层刷新用的临时对象（复用避免每帧分配）
@@ -845,6 +857,7 @@ function refreshSorterOverlay() {
     portMarkersVisible.value = false;
     beltRangeVisible.value = false;
     sorterPreviewVisible.value = false;
+    sorterGhostVisible.value = false;
     const bp = b.value;
     const queue = commandQueue.value;
     const placingSorter = isPlacingSorter();
@@ -877,7 +890,14 @@ function refreshSorterOverlay() {
     // 撤销/剔除后源下标可能越界：越界就当作"没有源"，别让覆盖层抛错
     const srcBuilding = src === null ? undefined : data.buildings[src];
     let preview: BlueprintBuilding | null = null;
-    if (src !== null && srcBuilding !== undefined && src !== hover) {
+    if (
+        src !== null &&
+        srcBuilding !== undefined &&
+        src !== hover &&
+        // 跨纬度带在提交时会被拒绝（单条分拣器只有一个 areaIndex），
+        // 预演阶段也按不可建造显示，避免蓝色幽灵与实际结果不一致
+        srcBuilding.areaIndex === hoverBuilding.areaIndex
+    ) {
         preview = createSorterBetween(
             srcBuilding,
             hoverBuilding,
@@ -892,6 +912,20 @@ function refreshSorterOverlay() {
         // 分拣器属于源建筑那片区域：算出世界矩阵前先对齐 areaIndex（一条带一个区域）
         if (preview !== null) preview.areaIndex = hoverBuilding.areaIndex;
     }
+
+    // 实体幽灵模型：有效=蓝、无效=红。无效时以两端建筑中心拉出红色模型
+    // （方向与旧红线一致），姿态退化（两端重合）时返回 false，回退到下面的连线提示。
+    let ghostPosed = false;
+    if (src !== null && srcBuilding !== undefined && src !== hover) {
+        if (preview !== null) {
+            const et = calcBuildingTrans(PLANET_RADIUS, bp.pos, preview);
+            ghostPosed = sorterGhost.setPose(et[0], et[1], true);
+        } else {
+            const st = calcBuildingTrans(PLANET_RADIUS, bp.pos, srcBuilding);
+            ghostPosed = sorterGhost.setPose(st[0], trans[0], false);
+        }
+    }
+    sorterGhostVisible.value = ghostPosed;
 
     const slots = getBuildingSlots(hoverBuilding.itemId);
     if (slots.some((s) => s !== null)) {
@@ -971,8 +1005,9 @@ function refreshSorterOverlay() {
         portMarkersVisible.value = true;
     }
 
-    // 预览连线（建筑有无 slot 数据均显示；绿=可放置，红=不可）
-    if (src !== null && srcBuilding !== undefined && src !== hover) {
+    // 预览连线：仅在幽灵无法绘制时兜底（两端重合等退化姿态）；
+    // 正常情况由上面的蓝/红实体幽灵承担可建造性提示
+    if (!ghostPosed && src !== null && srcBuilding !== undefined && src !== hover) {
         if (preview) {
             const et = calcBuildingTrans(PLANET_RADIUS, bp.pos, preview);
             overlayP0.setFromMatrixPosition(et[0]);
@@ -1023,6 +1058,8 @@ watchEffect(() => {
         sorterSourceAnchor = null;
         sorterHover.value = null;
         sorterHoverAnchor.value = null;
+        sorterGhostVisible.value = false;
+        sorterGhost.hide();
     }
 });
 
@@ -2234,6 +2271,7 @@ onUnmounted(() => {
     beltRangeMesh.material.dispose();
     sorterPreviewMesh.geometry.dispose();
     sorterPreviewMesh.material.dispose();
+    sorterGhost.dispose();
 });
 
 const selectBoxes = computed(() => b.value?.bvh.boxes);

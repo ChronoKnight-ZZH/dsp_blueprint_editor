@@ -165,6 +165,17 @@ export class InserterSupports extends InstancedMesh {
         this.instanceCount++;
     }
 
+    /**
+     * 清空已写入的支架实例，供调用方复用同一份几何重新摆放。
+     *
+     * 使用：编辑器的分拣器幽灵预览每次鼠标移动都要重算两个端点的支架，
+     * 不能每帧 new 一个 `InstancedMesh`（会持续分配 GPU 缓冲）。
+     */
+    reset(): void {
+        this.instanceCount = 0;
+        this.count = 0;
+    }
+
     update(): void {
         this.count = this.instanceCount;
         this.instanceMatrix.needsUpdate = true;
