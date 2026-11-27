@@ -202,7 +202,12 @@ import {
 } from "@/blueprint/globe";
 import type { AreaGridOrigin, CanvasTarget } from "@/blueprint/globe";
 import { createBuilding, CreateBuildingCommand } from "@/blueprint/create";
-import { buildBeltLine, CreateBeltLineCommand } from "@/blueprint/beltLine";
+import {
+    buildBeltLine,
+    collectBeltChain,
+    CreateBeltLineCommand,
+    InsertBeltLineCommand,
+} from "@/blueprint/beltLine";
 import type { BeltPathMode, BeltPortEnd } from "@/blueprint/beltLine";
 import {
     getBeltPorts,
@@ -667,9 +672,9 @@ function hideBeltPreview() {
     beltPreviewVisible.value = false;
 }
 
-// ---- 已有传送带节点悬停/选中高亮（建造模式下从末格续建）----
-// 悬停：鼠标指向的传送带单格；选中：已确定为 A 点的末格（拖拽期间保持高亮）。
-// 只画在预览层（黄色外圈），不改真实传送带材质，也不进 library 渲染路径。
+// ---- 已有传送带悬停/选中高亮（建造模式下续建/插入）----
+// 悬停：鼠标指向节点所在的**整条链路**；选中：A 点所在链路（拖拽期间保持高亮）。
+// 只画在预览层（每格一个黄色外圈），不改真实传送带材质，也不进 library 渲染路径。
 const beltHover = ref<{ index: number } | null>(null);
 const beltHoverMaterial = new MeshBasicMaterial({
     color: 0xffc22e,
@@ -680,8 +685,13 @@ const beltHoverMaterial = new MeshBasicMaterial({
     // 高亮要能透过传送带本体/地面网格看到，与游戏内选中效果一致
     depthTest: false,
 });
-const beltHoverMarker = new Mesh(makeBeltEndGeometry(), beltHoverMaterial);
+const beltHoverMarker = new InstancedMesh(
+    makeBeltEndGeometry(),
+    beltHoverMaterial,
+    BELT_PREVIEW_CAP
+);
 beltHoverMarker.matrixAutoUpdate = false;
+beltHoverMarker.count = 0;
 beltHoverMarker.renderOrder = 12;
 beltHoverMarker.frustumCulled = false;
 const beltHoverLift = new Matrix4().makeTranslation(
@@ -694,23 +704,22 @@ const beltHoverVisible = ref(false);
 watchEffect(() => {
     const bp = b.value;
     const data = commandQueue.value?.data;
-    // 优先级：已确定的 A 点末格 > 鼠标悬停节点
+    // 优先级：已确定的 A 点所在链路 > 鼠标悬停节点所在链路
     const index = beltStartBuildingIndex.value ?? beltHover.value?.index ?? null;
-    const building = index === null ? undefined : data?.buildings[index];
-    if (
-        !isPlacingBelt() ||
-        bp === null ||
-        building === undefined ||
-        !isBelt(building.itemId)
-    ) {
-        beltHoverVisible.value = false;
-        return;
+    const chain =
+        !isPlacingBelt() || bp === null || !data || index === null
+            ? []
+            : collectBeltChain(data.buildings, index);
+    const n = Math.min(chain.length, BELT_PREVIEW_CAP);
+    for (let i = 0; i < n; i++) {
+        const building = data!.buildings[chain[i]];
+        const trans = calcBuildingTrans(PLANET_RADIUS, bp!.pos, building)[0];
+        beltHoverM.multiplyMatrices(trans, beltHoverLift);
+        beltHoverMarker.setMatrixAt(i, beltHoverM);
     }
-    const trans = calcBuildingTrans(PLANET_RADIUS, bp.pos, building)[0];
-    beltHoverM.multiplyMatrices(trans, beltHoverLift);
-    beltHoverMarker.matrix.copy(beltHoverM);
-    beltHoverMarker.updateMatrixWorld();
-    beltHoverVisible.value = true;
+    beltHoverMarker.count = n;
+    beltHoverMarker.instanceMatrix.needsUpdate = true;
+    beltHoverVisible.value = n > 0;
 });
 watchEffect(() => {
     if (beltHoverVisible.value) scene.add(beltHoverMarker);
@@ -1732,27 +1741,54 @@ onMounted(() => {
         );
         const area = commandQueue.value?.data.areas[beltArea.areaIndex];
         const gridSize = areaGridSize(beltArea.origin.segment);
+        // 插入模式（A 点是中间格，见 InsertBeltLineCommand）：新线路从**光标端**
+        // 流回目标格，终点高度 = 目标带高度、起点高度 = 建造高度（或光标口高度）
+        const insertTarget =
+            beltStartBuildingIndex.value !== null
+                ? commandQueue.value?.data.buildings[
+                      beltStartBuildingIndex.value
+                  ]
+                : undefined;
+        const inserting =
+            insertTarget !== undefined &&
+            isBelt(insertTarget.itemId) &&
+            insertTarget.outputObjIdx >= 0;
         // 口不再按高度过滤：口高度与终点高度不同时由 buildBeltLine 自动生成坡度
-        const endPort = portEndAt(e);
-        const startPort = beltStartPort;
+        const endPort = inserting ? null : portEndAt(e);
+        const startPort = inserting ? portEndAt(e) : beltStartPort;
 
         // latFirst / lonFirst / straight：统一用六边形节点 + 白色连线预览，
         // 与落位共用同一套路径构造（straight 现在是自由角度直线，节点可为分数）。
         // 起点/终点接建筑口时预览也会贴到口上。
+        // 插入模式丢弃目标格本身（目标格已被占用，插入命令会把末格接回它）。
         const previewBelts = clipBeltPath(
-            buildBeltLine(
-                itemId,
-                modelIndex,
-                p0,
-                cur,
-                placement.yaw,
-                beltPathMode,
-                startPort,
-                endPort,
-                gridSize,
-                placement.beltZ,
-                beltStartZ
-            ),
+            inserting
+                ? buildBeltLine(
+                      itemId,
+                      modelIndex,
+                      cur,
+                      p0,
+                      placement.yaw,
+                      beltPathMode,
+                      startPort,
+                      endPort,
+                      gridSize,
+                      beltStartZ,
+                      placement.beltZ
+                  ).slice(0, -1)
+                : buildBeltLine(
+                      itemId,
+                      modelIndex,
+                      p0,
+                      cur,
+                      placement.yaw,
+                      beltPathMode,
+                      startPort,
+                      endPort,
+                      gridSize,
+                      placement.beltZ,
+                      beltStartZ
+                  ),
             area
         );
         const n = Math.min(previewBelts.length, BELT_PREVIEW_CAP);
@@ -1889,6 +1925,79 @@ onMounted(() => {
                 ? beltStartPort
                 : null;
         const gridSize = areaGridSize(belt.origin.segment);
+        // 插入模式（A 点是中间格，阶段 5）：新线路正常从 A 点铺到光标端，
+        // 首格 = 被点选的中间格本身；InsertBeltLineCommand 改写它的输出、
+        // 并在新线路末端与原下游相邻时接回原下游（否则原下游断开并提示）。
+        const insertTarget =
+            beltStartBuildingIndex.value !== null
+                ? queue.data.buildings[beltStartBuildingIndex.value]
+                : undefined;
+        if (
+            insertTarget !== undefined &&
+            isBelt(insertTarget.itemId) &&
+            insertTarget.outputObjIdx >= 0
+        ) {
+            const insertBelts = clipBeltPath(
+                buildBeltLine(
+                    itemId,
+                    modelIndex,
+                    start,
+                    end,
+                    placement.yaw,
+                    beltPathMode,
+                    startPort,
+                    endPort,
+                    gridSize,
+                    placement.beltZ,
+                    beltStartZ
+                ),
+                area
+            );
+            if (insertBelts.length < 2) {
+                showHint("铺带失败：没有可放置的传送带格");
+                return;
+            }
+            // 原下游（必须是传送带；指向建筑口的带不允许插入）
+            const oldDown = queue.data.buildings[insertTarget.outputObjIdx];
+            if (oldDown === undefined || !isBelt(oldDown.itemId)) {
+                showHint("该传送带已接入建筑口，无法在此插入");
+                return;
+            }
+            const lastNew = insertBelts[insertBelts.length - 1];
+            // 末端接建筑口（endPort 非空）时不存在"断开原下游"的问题
+            const reconnect =
+                endPort === null &&
+                Math.hypot(
+                    lastNew.localOffset[0].x - oldDown.localOffset[0].x,
+                    lastNew.localOffset[0].y - oldDown.localOffset[0].y
+                ) < 1.5;
+            beltStart = null;
+            beltStartPort = null;
+            beltStartZ = 0;
+            beltStartBuildingIndex.value = null;
+            beltArea = null;
+            hideBeltPreview();
+            try {
+                queue.push(
+                    new InsertBeltLineCommand(
+                        insertBelts,
+                        insertTarget,
+                        belt.areaIndex,
+                        gridSize
+                    )
+                );
+                if (!reconnect)
+                    showHint("已从中间接入：原下游传送带被断开");
+            } catch (error) {
+                // 占用 / 纬度带外 —— 提示具体原因
+                showHint(
+                    error instanceof Error
+                        ? `插入失败：${error.message}`
+                        : "插入失败"
+                );
+            }
+            return;
+        }
         const belts = clipBeltPath(
             buildBeltLine(
                 itemId,
@@ -2050,12 +2159,20 @@ onMounted(() => {
                             ? hitBuilding
                             : undefined;
                     if (hitBelt !== undefined && hitBelt.outputObjIdx >= 0) {
-                        showHint("只能从传送带末端继续建造");
-                        return;
+                        // 中间格：进入"插入"模式（新线路从该格接出，见 InsertBeltLineCommand）。
+                        // 唯一不能插的：该格已把货送入建筑口（outputObjIdx 指向建筑）——
+                        // 插入会切断口的供料。
+                        const down =
+                            queue.data.buildings[hitBelt.outputObjIdx];
+                        if (down !== undefined && !isBelt(down.itemId)) {
+                            showHint("该传送带已接入建筑口，无法在此插入");
+                            return;
+                        }
                     }
                     if (hitBelt !== undefined) {
-                        // A 点接已有传送带末格：区域/格/高度全部继承该带，
-                        // 提交时 CreateBeltLineCommand 按"格 + 高度层"复用这一格并接上新线路。
+                        // A 点接已有传送带：区域/格/高度全部继承该带。
+                        // 末格（outputObjIdx<0）→ 提交时 CreateBeltLineCommand 按格+高度层复用；
+                        // 中间格 → 提交时 InsertBeltLineCommand 从该格接出新线路（见 commitBeltLine）。
                         const origin = b.value!.pos.areas[hitBelt.areaIndex];
                         if (origin === undefined) return;
                         const turn = areaGridSize(origin.segment);

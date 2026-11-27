@@ -418,6 +418,48 @@ function isBelt(b: BlueprintBuilding): boolean {
 }
 
 /**
+ * 收集某条传送带所在的**完整链路**（双向）：沿 `outputObjIdx` 向下游、
+ * 沿"谁指向我"向上游。返回按行进顺序排列的建筑下标数组
+ * （依赖既有不变量 `b.index === 数组下标`，见 `CreateBeltLineCommand`）。
+ *
+ * 用于编辑器"整条链路高亮"：悬停/选中任意一节，整条线路一起亮。
+ * 防环：访问集去重，两个方向都不会重访；多个上游（非法数据）只认第一个。
+ */
+export function collectBeltChain(
+    buildings: readonly BlueprintBuilding[],
+    startIndex: number
+): number[] {
+    const start = buildings[startIndex];
+    if (start === undefined || !isBelt(start)) return [];
+    const next = new Map<number, number>();
+    const prev = new Map<number, number>();
+    for (const b of buildings) {
+        if (!isBelt(b) || b.outputObjIdx < 0) continue;
+        next.set(b.index, b.outputObjIdx);
+        if (!prev.has(b.outputObjIdx)) prev.set(b.outputObjIdx, b.index);
+    }
+    const seen = new Set<number>();
+    // 下游：start → 末格
+    const downstream: number[] = [];
+    let cur: number | undefined = start.index;
+    while (cur !== undefined && !seen.has(cur)) {
+        seen.add(cur);
+        downstream.push(cur);
+        cur = next.get(cur);
+    }
+    // 上游：链头 → start 的前一格（逆序收集后反转）
+    const upstream: number[] = [];
+    let up = prev.get(start.index);
+    while (up !== undefined && !seen.has(up)) {
+        seen.add(up);
+        upstream.push(up);
+        up = prev.get(up);
+    }
+    upstream.reverse();
+    return [...upstream, ...downstream];
+}
+
+/**
  * 由拖拽起止网格点构造一条传送带（尚未入库）。
  * 每格 yaw = 进入/离开方向的平分角（拐角处为 45° 斜角，与游戏一致）；
  * 末格延续最后一段方向，单点时退回 @param fallbackYaw。
@@ -747,6 +789,220 @@ export class CreateBeltLineCommand implements Command {
             r.belt.outputFromSlot = r.outputFromSlot;
             r.belt.outputOffset = r.outputOffset;
         }
+        const area = data.areas[this.areaIndex];
+        if (area !== undefined) area.size.x = this.prevSizeX;
+    }
+
+    merge() {
+        return false;
+    }
+}
+
+/**
+ * 从中间节点"插入"一条传送带线路（阶段 5）。
+ *
+ * 原线路：`P → B → C`（B 是被点选的中间格，P 上游 / C 下游都不只有一个）
+ * 插入后：`P → B → N2 → … → Nk → C`（绕行）或 `P → B → N2 → … → Nk`（C 被断开）
+ *
+ * - `belts[0]` 必须就是 B 那一格（调用方从 B 格铺到光标端，首格即目标格）；
+ *   命令**复用 B**（不重复入库），只新增 N2..Nk；
+ * - `do` 改写 B 的输出（B → N2），原下游 C 在 Nk 与它相邻时接回
+ *   （Nk → C，可形成绕行线路），否则断开（C 成为一条新线路的链头，编辑器提示）；
+ * - B 的上游 P 完全不动 —— 全线始终唯一上游、唯一下游，不产生分叉/合流；
+ * - B 与 C 的 yaw 按**实际**上下游平分角重算（B 的离开方向、C 的进入方向变了）；
+ * - 撤销：弹出新增格、恢复 B 的输出字段与双方 yaw；重做重新接线。
+ *
+ * 约束（`do` 内校验，抛错由编辑器转成提示，不产生部分插入）：
+ * - B 必须仍带下游，且下游是传送带（B 已把货送入建筑口时插入会切断供料）；
+ * - 新增格必须无占用。
+ */
+export class InsertBeltLineCommand implements Command {
+    private added = 0;
+    private prevSizeX = 0;
+    /** 原下游（可能被接回或断开）；null = 目标格输出指向建筑（已拒绝，不会走到） */
+    private oldDown: BlueprintBuilding | null = null;
+    private reconnected = false;
+    /** 新线路末端接物流站口时的方向改动（撤销时逐口还原） */
+    private portDirChanges: {
+        building: BlueprintBuilding;
+        slot: number;
+        prev: number;
+    }[] = [];
+    private targetPrev = {
+        yaw: [0, 0] as [number, number],
+        outputObjIdx: -1,
+        outputToSlot: 0,
+        outputFromSlot: 0,
+        outputOffset: 0,
+    };
+    private downPrevYaw: [number, number] = [0, 0];
+
+    constructor(
+        /** 新线路（含首格 = 目标格本身；只有它被复用，其余全部新增） */
+        private readonly belts: BlueprintBuilding[],
+        /** 被点选的中间格 */
+        private readonly target: BlueprintBuilding,
+        /** 整条带所属区域（与目标格一致） */
+        private readonly areaIndex: number,
+        private readonly gridSize = ROOT_GRID_SIZE
+    ) {}
+
+    do(data: BlueprintData): void {
+        this.added = 0;
+        this.oldDown = null;
+        this.reconnected = false;
+        this.portDirChanges = [];
+        if (this.belts.length < 2) return; // 只有目标格自己 → 没有新线路
+        const area = data.areas[this.areaIndex];
+        if (area === undefined)
+            throw new Error("Placement area not found on canvas");
+        this.prevSizeX = area.size.x;
+
+        const byIndex = new Map<number, BlueprintBuilding>();
+        for (const b of data.buildings) byIndex.set(b.index, b);
+        // 首格必须就是目标格（同一格 + 同一高度层）
+        const head = this.belts[0];
+        if (
+            wrapX(Math.round(head.localOffset[0].x), this.gridSize) !==
+                wrapX(Math.round(this.target.localOffset[0].x), this.gridSize) ||
+            Math.round(head.localOffset[0].y) !==
+                Math.round(this.target.localOffset[0].y) ||
+            zLayer(head.localOffset[0].z) !==
+                zLayer(this.target.localOffset[0].z)
+        )
+            throw new Error("插入起点与目标格不一致");
+        // 目标必须仍带下游，且下游是传送带（送入建筑口的带不允许插入）
+        const down =
+            this.target.outputObjIdx >= 0
+                ? byIndex.get(this.target.outputObjIdx)
+                : undefined;
+        if (down === undefined || !isBelt(down))
+            throw new Error("目标传送带已接入建筑口，无法在此插入");
+        this.oldDown = down;
+
+        // 占用检查：新增格必须空闲（先查后写，保证不产生部分插入）
+        const existing = new Map<string, BlueprintBuilding>();
+        for (const b of data.buildings) {
+            if (isBelt(b))
+                existing.set(occupancyKey(b, byIndex, this.gridSize), b);
+        }
+        for (let i = 1; i < this.belts.length; i++) {
+            const b = this.belts[i];
+            if (existing.has(occupancyKey(b, byIndex, this.gridSize)))
+                throw new Error("插入位置已有传送带");
+            if (b.localOffset[0].y < 0 || b.localOffset[0].y >= area.size.y)
+                throw new Error("Placement outside the latitude band");
+        }
+
+        // 记录撤销要恢复的字段
+        this.targetPrev = {
+            yaw: [this.target.yaw[0], this.target.yaw[1]],
+            outputObjIdx: this.target.outputObjIdx,
+            outputToSlot: this.target.outputToSlot,
+            outputFromSlot: this.target.outputFromSlot,
+            outputOffset: this.target.outputOffset,
+        };
+        this.downPrevYaw = [down.yaw[0], down.yaw[1]];
+
+        // 入库（首格 = 目标格本身，复用不新增）
+        for (let i = 1; i < this.belts.length; i++) {
+            const b = this.belts[i];
+            b.areaIndex = this.areaIndex;
+            b.index = data.buildings.length;
+            data.buildings.push(b);
+            byIndex.set(b.index, b);
+            existing.set(occupancyKey(b, byIndex, this.gridSize), b);
+            this.added++;
+            if (b.localOffset[0].x < 0 || b.localOffset[0].x >= area.size.x)
+                area.size.x = Math.floor(b.localOffset[0].x) + 1;
+        }
+        // 线路串联：首格就是目标格本身（复用，不新增）→ 直接改写它的输出；
+        // 其余新格依次串到下一格
+        this.target.outputObjIdx = this.belts[1].index;
+        this.target.outputToSlot = 1;
+        for (let i = 1; i < this.belts.length - 1; i++) {
+            this.belts[i].outputObjIdx = this.belts[i + 1].index;
+            this.belts[i].outputToSlot = 1;
+        }
+        // 末端：已绑定建筑口（光标停在口上）→ 保留绑定并同步站口方向；
+        // 否则与原下游相邻 → 接回（绕行）；再否则断开（新线路末格终结）
+        const last = this.belts[this.belts.length - 1];
+        const lastTarget =
+            last.outputObjIdx >= 0 ? byIndex.get(last.outputObjIdx) : undefined;
+        const lastIsPortEnd = lastTarget !== undefined && !isBelt(lastTarget);
+        this.reconnected =
+            !lastIsPortEnd &&
+            Math.hypot(
+                last.localOffset[0].x - down.localOffset[0].x,
+                last.localOffset[0].y - down.localOffset[0].y
+            ) < 1.5;
+        if (this.reconnected) {
+            last.outputObjIdx = down.index;
+            last.outputToSlot = 1;
+        } else if (!lastIsPortEnd) {
+            last.outputObjIdx = -1;
+            last.outputToSlot = 0;
+        } else {
+            // 末端接物流站口：站自己的口配置要同步方向（入塔 = dir 2）
+            const params = lastTarget!.parameters as {
+                slots?: { dir: number }[];
+            } | null;
+            const slot = params?.slots?.[last.outputToSlot];
+            if (slot) {
+                this.portDirChanges.push({
+                    building: lastTarget!,
+                    slot: last.outputToSlot,
+                    prev: slot.dir,
+                });
+                slot.dir = IODir.Input;
+            }
+        }
+
+        // yaw 按实际上下游重算（B 的离开方向、C 的进入方向都变了）
+        const predOf = (x: BlueprintBuilding) =>
+            data.buildings.find(
+                (b) => b !== x && isBelt(b) && b.outputObjIdx === x.index
+            ) ?? null;
+        const succOf = (x: BlueprintBuilding) =>
+            x.outputObjIdx >= 0 ? byIndex.get(x.outputObjIdx) ?? null : null;
+        const targetYaw = cellYaw(
+            predOf(this.target)?.localOffset[0] ?? null,
+            succOf(this.target)?.localOffset[0] ?? null,
+            this.target.localOffset[0],
+            this.target.yaw[0],
+            this.gridSize
+        );
+        this.target.yaw = [targetYaw, targetYaw];
+        if (this.reconnected) {
+            const downYaw = cellYaw(
+                last.localOffset[0],
+                succOf(down)?.localOffset[0] ?? null,
+                down.localOffset[0],
+                down.yaw[0],
+                this.gridSize
+            );
+            down.yaw = [downYaw, downYaw];
+        }
+    }
+
+    undo(data: BlueprintData): void {
+        for (let i = 0; i < this.added; i++) data.buildings.pop();
+        this.added = 0;
+        for (const c of this.portDirChanges) {
+            const params = c.building.parameters as {
+                slots?: { dir: number }[];
+            } | null;
+            const slot = params?.slots?.[c.slot];
+            if (slot) slot.dir = c.prev;
+        }
+        this.portDirChanges = [];
+        this.target.yaw = [this.targetPrev.yaw[0], this.targetPrev.yaw[1]];
+        this.target.outputObjIdx = this.targetPrev.outputObjIdx;
+        this.target.outputToSlot = this.targetPrev.outputToSlot;
+        this.target.outputFromSlot = this.targetPrev.outputFromSlot;
+        this.target.outputOffset = this.targetPrev.outputOffset;
+        if (this.reconnected && this.oldDown !== null)
+            this.oldDown.yaw = [this.downPrevYaw[0], this.downPrevYaw[1]];
         const area = data.areas[this.areaIndex];
         if (area !== undefined) area.size.x = this.prevSizeX;
     }
