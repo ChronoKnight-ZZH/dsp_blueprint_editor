@@ -79,8 +79,13 @@ const rows = computed<[string, string][]>(() => {
     if (
         placement.selectedItemId !== null &&
         isBelt(placement.selectedItemId)
-    )
+    ) {
         rows.push(["↑ / ↓", `传送带高度（${placement.beltZ} 层）`]);
+        rows.push([
+            "← / →",
+            t("传送带倾斜度", { tilt: placement.beltTilt }),
+        ]);
+    }
     rows.push(
         ["X", "删除模式"],
         ["Esc", "取消/收起"],
@@ -201,6 +206,7 @@ const rows = computed<[string, string][]>(() => {
         "WASD": "WASD",
         "N": "N",
         "右键 / Esc": "右键 / Esc",
+        "传送带倾斜度": "传送带倾斜度（{tilt}°）",
         "使用教程": "使用教程"
     },
     "en": {
@@ -236,6 +242,7 @@ const rows = computed<[string, string][]>(() => {
         "WASD": "WASD",
         "N": "N",
         "右键 / Esc": "Right click / Esc",
+        "传送带倾斜度": "Belt tilt ({tilt}°)",
         "使用教程": "Tutorial"
     }
 }

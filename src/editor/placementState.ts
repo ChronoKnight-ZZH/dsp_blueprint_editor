@@ -22,6 +22,8 @@ export interface PlacementState {
      * 之后 ↑/↓ 改的是**终点**高度，起点与终点不同时自动生成坡度（见 beltLine 的 slopeProfile）。
      */
     beltZ: number;
+    /** 传送带终点拧转角度（度），→ 方向为正；建造时由 A 点角度插值到该角度。 */
+    beltTilt: number;
 }
 
 /** 传送带高度范围：游戏样本 `data/传送带最高49层.json` 最高 z=48（共 49 层） */
@@ -38,6 +40,7 @@ const state = reactive<PlacementState>({
     freePlacement: false,
     reformColorSlot: 0,
     beltZ: 0,
+    beltTilt: 0,
 });
 
 export function enterEditMode() {
@@ -55,6 +58,7 @@ export function exitEditMode() {
     state.yaw = 0;
     state.freePlacement = false;
     state.beltZ = 0;
+    state.beltTilt = 0;
 }
 export function usePlacement() {
     return state;
@@ -72,6 +76,7 @@ export function selectBuilding(itemId: number, modelIndex: number) {
     state.selectedModelIndex = modelIndex;
     state.yaw = 0;
     state.beltZ = 0;
+    state.beltTilt = 0;
 }
 
 /** 设置传送带放置高度（层）：夹在 [BELT_Z_MIN, BELT_Z_MAX]，保留 0.1 精度 */
@@ -84,6 +89,17 @@ export function setBeltZ(z: number): number {
 /** ↑/↓：按整层调整传送带放置高度，返回调整后的高度 */
 export function adjustBeltZ(delta: number): number {
     return setBeltZ(state.beltZ + delta);
+}
+
+/** 设置传送带拧转角度：夹在 [-180°, 180°]，保留正负方向。 */
+export function setBeltTilt(tilt: number): number {
+    state.beltTilt = Math.max(-180, Math.min(180, tilt));
+    return state.beltTilt;
+}
+
+/** ←/→：每次按 15° 调整传送带拧转角度。 */
+export function adjustBeltTilt(delta: number): number {
+    return setBeltTilt(state.beltTilt + delta);
 }
 
 /** 选择地基：进入地基模式（铺/涂一格），不做建筑放置 */

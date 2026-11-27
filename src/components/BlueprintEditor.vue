@@ -2,13 +2,17 @@
     <div class="editor-root" ref="root" tabindex="-1">
         <!-- 放置/铺带失败提示：编辑交互层唯一的文字反馈，不改变 App.vue 的状态 -->
         <div v-if="hint !== ''" class="editor-hint">{{ hint }}</div>
-        <!-- 建造高度提示：铺传送带时跟随鼠标，挂在光标左下角（与游戏内"建造高度:N层"一致） -->
+        <!-- 建造高度/倾斜度提示：铺传送带时跟随鼠标，挂在光标左下角
+             （与游戏内"建造高度:N层"+"倾斜度:A → B"一致，无值时对应行隐藏） -->
         <div
             v-if="beltTipVisible"
             class="belt-z-tip"
             :style="{ left: beltTipPos.x + 'px', top: beltTipPos.y + 'px' }"
         >
-            建造高度:{{ beltTipLayer }}
+            <div v-if="beltTipHeightVisible">建造高度:{{ beltTipLayer }}</div>
+            <div v-if="beltTipTiltVisible">
+                倾斜度:{{ beltTipStartTilt }} → {{ beltTipEndTilt }}
+            </div>
         </div>
     </div>
 </template>
@@ -192,7 +196,12 @@ import type { BuildingModelRef } from "@/lib/core/types";
 import type { BlueprintBuilding } from "@/blueprint/parser";
 
 // ---- 编辑交互层（从 editing_mode 移植，坐标/构造全部走新架构的库）----
-import { usePlacement, resetToIdle, setBeltZ } from "@/editor/placementState";
+import {
+    usePlacement,
+    resetToIdle,
+    setBeltZ,
+    setBeltTilt,
+} from "@/editor/placementState";
 import {
     ROOT_GRID_SIZE,
     areaGridSize,
@@ -456,8 +465,6 @@ const isPlacingSorter = () =>
 // 不用等下一次 pointermove 才刷新。
 const beltTipPos = ref({ x: 0, y: 0 });
 const pointerInside = ref(false);
-const beltTipVisible = computed(() => pointerInside.value && isPlacingBelt());
-const beltTipLayer = computed(() => `${placement.beltZ + 1}层`);
 
 // 地基模式光标：跟随鼠标高亮目标格（薄板，颜色 = 当前选择的槽位色）
 const reformCursorVisible = ref(false);
@@ -489,6 +496,13 @@ let beltStartPort: BeltPortEnd | null = null;
  * ↑/↓ 只改终点高度（`placement.beltZ`），起点与终点不同时由 `buildBeltLine` 自动生成坡度。
  */
 let beltStartZ = 0;
+/** A 点拧转角（按下时锁定）；未设 A 点时整条带使用 placement.beltTilt。 */
+const beltStartTilt = ref(0);
+/**
+ * 是否已确定 A 点（仅用于提示文案的反应式刷新）。
+ * 游戏里确定起点后才显示"建造高度"（地面层也显示 1 层），未确定 A 点时地面层不显示。
+ */
+const beltStartActive = ref(false);
 /**
  * A 点来自已有传送带末格时记录其建筑下标（null = 空白网格/建筑口起点）。
  * 用 ref：高亮覆盖层的 watchEffect 要在"确认/取消 A 点"时立即重算，
@@ -502,6 +516,34 @@ const beltStartBuildingIndex = ref<number | null>(null);
  */
 let beltArea: { areaIndex: number; origin: AreaGridOrigin } | null = null;
 const sorterSource = ref<number | null>(null);
+
+// ---- 建造高度 / 倾斜度提示文案 ----
+// 高度：非地面层，或已确定 A 点（图二）；倾斜：起始/目标任一非 0。
+// 两项都无值时整个提示不出现（与游戏一致）。
+const beltTipLayer = computed(() => `${placement.beltZ + 1}层`);
+const beltTipHeightVisible = computed(
+    () => placement.beltZ !== 0 || beltStartActive.value
+);
+const beltTipStartTiltValue = () =>
+    beltStart === null ? 0 : beltStartTilt.value;
+const beltTipTiltVisible = computed(
+    () => beltTipStartTiltValue() !== 0 || placement.beltTilt !== 0
+);
+const formatBeltTilt = (tilt: number) => {
+    // 继承自蓝图的 tilt 是 float32，显示前收敛到 0.1°，避免 12.30000019 这类尾巴
+    const v = Math.round(tilt * 10) / 10;
+    return `${v > 0 ? "+" : ""}${v}°`;
+};
+const beltTipStartTilt = computed(() =>
+    formatBeltTilt(beltTipStartTiltValue())
+);
+const beltTipEndTilt = computed(() => formatBeltTilt(placement.beltTilt));
+const beltTipVisible = computed(
+    () =>
+        pointerInside.value &&
+        isPlacingBelt() &&
+        (beltTipHeightVisible.value || beltTipTiltVisible.value)
+);
 
 // 传送带路径走法（R 键循环切换）：latFirst → lonFirst → straight → latFirst
 // straight = 自由角度直线（端点吸整格，中间节点按直线等分，见 `@/blueprint/beltLine`）
@@ -1116,6 +1158,8 @@ watchEffect(() => {
         beltStart = null;
         beltStartPort = null;
         beltStartZ = 0;
+        beltStartTilt.value = 0;
+        beltStartActive.value = false;
         beltStartBuildingIndex.value = null;
         beltHover.value = null;
         beltArea = null;
@@ -1742,6 +1786,7 @@ onMounted(() => {
             placement.yaw,
             port ? port.point.z : placement.beltZ
         );
+        fake.tilt = placement.beltTilt;
         const t = calcBuildingTrans(PLANET_RADIUS, syntheticPos(origin), fake)[0];
         beltPreviewM.multiplyMatrices(t, beltLift);
         beltPreviewMesh.setMatrixAt(0, beltPreviewM);
@@ -1811,7 +1856,9 @@ onMounted(() => {
                       endPort,
                       gridSize,
                       beltStartZ,
-                      placement.beltZ
+                      placement.beltZ,
+                      beltStartTilt.value,
+                      placement.beltTilt
                   ).slice(0, -1)
                 : buildBeltLine(
                       itemId,
@@ -1824,7 +1871,9 @@ onMounted(() => {
                       endPort,
                       gridSize,
                       placement.beltZ,
-                      beltStartZ
+                      beltStartZ,
+                      placement.beltTilt,
+                      beltStartTilt.value
                   ),
             area
         );
@@ -1986,7 +2035,9 @@ onMounted(() => {
                     endPort,
                     gridSize,
                     placement.beltZ,
-                    beltStartZ
+                    beltStartZ,
+                    placement.beltTilt,
+                    beltStartTilt.value
                 ),
                 area
             );
@@ -2011,6 +2062,8 @@ onMounted(() => {
             beltStart = null;
             beltStartPort = null;
             beltStartZ = 0;
+            beltStartTilt.value = 0;
+            beltStartActive.value = false;
             beltStartBuildingIndex.value = null;
             beltArea = null;
             hideBeltPreview();
@@ -2047,7 +2100,9 @@ onMounted(() => {
                 endPort,
                 gridSize,
                 placement.beltZ,
-                beltStartZ
+                beltStartZ,
+                placement.beltTilt,
+                beltStartTilt.value
             ),
             area
         );
@@ -2058,6 +2113,8 @@ onMounted(() => {
         beltStart = null;
         beltStartPort = null;
         beltStartZ = 0;
+        beltStartTilt.value = 0;
+        beltStartActive.value = false;
         beltStartBuildingIndex.value = null;
         beltArea = null;
         hideBeltPreview();
@@ -2182,6 +2239,9 @@ onMounted(() => {
                     // 建造高度也同步到口高度（默认平铺，↑/↓ 再改终点高度就会自动爬升）
                     beltStartZ = port.point.z;
                     setBeltZ(port.point.z);
+                    // 口所在建筑的拧转角作为 A 点固定角度
+                    beltStartTilt.value = port.building.tilt ?? 0;
+                    setBeltTilt(beltStartTilt.value);
                 } else {
                     // 命中已有传送带：只允许从**末格**继续建造（中间格会形成普通带分叉）。
                     // 先判定再 materialize 区域，避免中间格点击把画布无谓扩张。
@@ -2221,8 +2281,10 @@ onMounted(() => {
                             y: p.y,
                         };
                         beltStartZ = p.z;
+                        beltStartTilt.value = hitBelt.tilt ?? 0;
                         beltStartBuildingIndex.value = hit!.index;
                         setBeltZ(p.z);
+                        setBeltTilt(beltStartTilt.value);
                     } else {
                         const target = placementTargetAt(e, true);
                         if (target === null) return;
@@ -2232,9 +2294,12 @@ onMounted(() => {
                         beltStart = { x: target.x, y: target.y };
                         // 起点高度默认 = 当前建造高度（之后 ↑/↓ 改的是终点高度）
                         beltStartZ = placement.beltZ;
+                        // 起点倾斜默认 = 当前建造倾斜（之后 ←/→ 改的是终点倾斜）
+                        beltStartTilt.value = placement.beltTilt;
                     }
                 }
                 beltStartPort = port;
+                beltStartActive.value = true;
                 beltHover.value = null;
             } else commitBeltLine(e); // 第二次点击：A→B 放置
         }
@@ -2285,6 +2350,8 @@ onMounted(() => {
             beltStart = null;
             beltStartPort = null;
             beltStartZ = 0;
+            beltStartTilt.value = 0;
+            beltStartActive.value = false;
             beltStartBuildingIndex.value = null;
             beltArea = null;
             hideBeltPreview();

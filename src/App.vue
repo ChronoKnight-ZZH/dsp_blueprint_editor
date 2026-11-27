@@ -558,6 +558,7 @@ import {
     enterEditMode,
     exitEditMode,
     adjustBeltZ,
+    adjustBeltTilt,
 } from "./editor/placementState";
 import { buildingCategories } from "./data/buildingCategories";
 import { isBelt } from "./data/items";
@@ -1420,6 +1421,20 @@ const hotkey = (event: KeyboardEvent) => {
     ) {
         event.preventDefault();
         adjustBeltZ(event.code === "ArrowUp" ? 1 : -1);
+        return;
+    }
+
+    // ←/→：放置传送带时调整拧转角度（左减右加，每次 15°）。
+    // 未设 A 点时作用于整条带；设了 A 点后 A 点角度锁定，只改目标角度。
+    if (
+        (event.code === "ArrowLeft" || event.code === "ArrowRight") &&
+        isEdit &&
+        placement.mode === "placing" &&
+        placement.selectedItemId !== null &&
+        isBelt(placement.selectedItemId)
+    ) {
+        event.preventDefault();
+        adjustBeltTilt(event.code === "ArrowRight" ? 15 : -15);
         return;
     }
 

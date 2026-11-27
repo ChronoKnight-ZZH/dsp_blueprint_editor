@@ -498,7 +498,11 @@ export function buildBeltLine(
      * 起点高度（A 点继承口/已有带的高度）：**省略 = baseZ**（整条同高，无坡度）。
      * 起点绑定 startPort 时以口高度为准。
      */
-    startZ?: number
+    startZ?: number,
+    /** 终点拧转角（度），省略时整条带使用 startTilt。 */
+    baseTilt?: number,
+    /** A 点拧转角（度），省略时与 baseTilt 相同。 */
+    startTilt?: number
 ): BlueprintBuilding[] {
     const z0 = startPort?.point.z ?? startZ ?? baseZ ?? 0;
     const z1 = endPort?.point.z ?? baseZ ?? z0;
@@ -527,6 +531,17 @@ export function buildBeltLine(
     const belts = nodes.map((n) =>
         createBuilding(itemId, modelIndex, pts[n.idx], yaws[n.idx], n.z)
     );
+    const tilt0 = startTilt ?? baseTilt ?? 0;
+    const tilt1 = baseTilt ?? tilt0;
+    // 拧转角按**平面节点**插值：同格的垂直/堆叠节点共用同一角度（与 yaw 一致）。
+    const tilts = pts.map((_p, i) =>
+        tilt0 +
+        (tilt1 - tilt0) * (pts.length <= 1 ? 1 : i / (pts.length - 1))
+    );
+    for (let i = 0; i < belts.length; i++) {
+        // A 点锁定起始角，终点使用当前建造角；中间节点逐格平滑拧转。
+        belts[i].tilt = tilts[nodes[i].idx];
+    }
     for (let i = 0; i < belts.length; i++) {
         // 传送带 slot 与游戏一致：inputToSlot 恒为 1；outputToSlot 为 1（有下游）或 0（末格）
         belts[i].inputToSlot = 1;
