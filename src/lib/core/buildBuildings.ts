@@ -50,6 +50,9 @@ import {
 import { INSERTER_HEIGHT, inserterTrans } from "./geometryHelpers";
 import {
     Inserters,
+    INSERTER_ARM_END_EXTEND,
+    INSERTER_ARM_END_INSET,
+    INSERTER_BEAM_EXTRA_LIFT,
     INSERTER_BEAM_THICKNESS,
     INSERTER_BEAM_WIDTH,
     INSERTER_FRAME_COLOR,
@@ -1510,13 +1513,9 @@ export function buildBuildings(
     const buildInserters = (
         inserters: BlueprintBuilding[]
     ): [Inserters, InserterSupports, InstancedMesh] => {
-        /**
-         * 横梁在 `inserterTrans` 的姿态原点（`INSERTER_HEIGHT`）之上再抬高。
-         *
-         * 梁厚 0.08 时抬到 0.11，梁底仍在径向 0.37，与货物顶面（0.35）
-         * 保持约 0.02 的间隙；改梁厚时必须同步复核这个预算。
-         */
-        const BEAM_EXTRA_LIFT = 0.11;
+        // 横梁抬升 / 臂端外延与内缩取自 `@/Animation/inserter`，
+        // 编辑器幽灵预览复用同一组常量（改一处两边同步）
+        const BEAM_EXTRA_LIFT = INSERTER_BEAM_EXTRA_LIFT;
 
         /** 货物相对基础姿态下移 */
         const CARGO_DROP = 0.1;
@@ -1585,14 +1584,8 @@ export function buildBuildings(
         const supportTopY = BEAM_EXTRA_LIFT + INSERTER_BEAM_THICKNESS * 0.5;
         const groundY = -INSERTER_HEIGHT;
 
-        /**
-         * 横梁 / 两侧框架 / 门形支架相对分拣器两端再向外延伸的距离。
-         *
-         * `len` 是两端建筑中心之间的距离；带面宽度约 0.7，中心到外缘是 0.35。
-         * 向外补这一截后，最外侧的梁端与支架正好压在带面外缘（截图里的红线）上，
-         * 而不是停在带子中心。所有分拣器统一延伸，端点的相对关系保持不变。
-         */
-        const ARM_END_EXTEND = 0.35;
+        // 横梁 / 两侧框架 / 门形支架相对分拣器两端再向外延伸的距离（说明见常量定义）
+        const ARM_END_EXTEND = INSERTER_ARM_END_EXTEND;
 
         for (let i = 0; i < inserters.length; i++) {
             const b = inserters[i];
@@ -1628,8 +1621,8 @@ export function buildBuildings(
             // ③ 两端门形支架：随横梁一起向外延伸，端部仍内缩 0.04
             // 不依据 inputObjIdx / outputObjIdx 判断是否生成。
             const supportZ = [
-                ARM_END_EXTEND - 0.04,
-                -(len + ARM_END_EXTEND - 0.04),
+                ARM_END_EXTEND - INSERTER_ARM_END_INSET,
+                -(len + ARM_END_EXTEND - INSERTER_ARM_END_INSET),
             ];
 
             for (let j = 0; j < 2; j++) {

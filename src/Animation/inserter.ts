@@ -51,6 +51,28 @@ export const INSERTER_FRAME_HEIGHT = 0.04;
 export const INSERTER_SUPPORT_WIDTH = 0.06;
 
 /**
+ * 臂端外延（世界单位）：横梁 / 侧框 / 门形支架相对两端中心再向外补出的距离。
+ *
+ * `len` 是两端中心距，带面宽约 0.7（中心到外缘 0.35）；补出这一截后最外侧结构
+ * 正好压在带面外缘，而不是停在带子中心。
+ *
+ * 正式模型（`buildInserters`）与编辑器的实体幽灵预览（`@/editor/sorterGhost`）
+ * 共用这个常量——两边都改才算改，只改一边会让预览和落位造型对不上。
+ */
+export const INSERTER_ARM_END_EXTEND = 0.35;
+
+/** 门形支架顶梁沿臂轴相对臂端的内缩（世界单位） */
+export const INSERTER_ARM_END_INSET = 0.04;
+
+/**
+ * 横梁相对 `inserterTrans` 姿态原点的额外抬高（世界单位）。
+ *
+ * 梁厚 0.08 时抬到 0.11，梁底仍在径向 0.37，与货物顶面（0.35）保持约 0.02 的
+ * 间隙；改梁厚时必须同步复核这个垂直预算。幽灵预览同样复用。
+ */
+export const INSERTER_BEAM_EXTRA_LIFT = 0.11;
+
+/**
  * 支柱高度设计参考（世界单位）：门形支架的实际立柱高度由 `InserterSupports`
  * 按端点顶面到地面的净空计算，不再直接使用该值。
  */
