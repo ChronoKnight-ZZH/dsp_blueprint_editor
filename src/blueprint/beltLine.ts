@@ -183,6 +183,103 @@ function cellYaw(
 }
 
 /**
+ * 传送带坡度剖面：**起点/终点的单元格与首末两段都保持水平**，爬坡夹在中间。
+ *
+ * 结构：`z[0] = z[1] = z0`（第一个点水平建造，首段不爬坡）→ 爬坡段 →
+ * 剩余节点全部平铺在 `z1`（**最后一段永远水平**，终点格只放一条 z1 的带）。
+ *
+ * 爬坡写法按"可用水平爬升段数"选择（样本 `data/三种坡度上升的高度1.json`）：
+ * - 可用段 ≥ 2×剩余层数 → 缓坡：两段各升 0.5 层（样本链 1：z = 0,0,0.5,1,1）；
+ * - 否则 → 陡坡：一段升 1 层（样本链 2：z = 0,0,1,1）；
+ * - 层数超出可用段 → 先在**起点后第一格**原地垂直堆叠补层（样本链 3 的写法）。
+ * 可用段 = 总段数 − 2（首段与末段固定水平）。
+ *
+ * 特殊长度：
+ * - 单格路径（A=B）：只能原地堆叠；
+ * - 两节点路径（L=1）：首段水平到终点格，再在该格原地垂直升层
+ *   （用户规则"一格的爬升只能通过垂直爬升实现"）。
+ *
+ * 同一格的重复节点（垂直/堆叠）共用一个平面下标：yaw 由调用方按平面路径取，
+ * 因此原地升层的带仍朝行进方向（与样本链 3 一致，不会退回 fallbackYaw）。
+ */
+function slopeProfile(
+    pointCount: number,
+    z0: number,
+    z1: number
+): { idx: number; z: number }[] {
+    const nodes: { idx: number; z: number }[] = [{ idx: 0, z: z0 }];
+    const dir = Math.sign(z1 - z0);
+    const EPS = 1e-6;
+    if (dir === 0) {
+        for (let i = 1; i < pointCount; i++) nodes.push({ idx: i, z: z0 });
+        return nodes;
+    }
+    if (pointCount === 1) {
+        // 单格路径：只能原地堆叠
+        let z = z0;
+        while (Math.abs(z1 - z) > EPS) {
+            z += dir * Math.min(1, Math.abs(z1 - z));
+            nodes.push({ idx: 0, z });
+        }
+        return nodes;
+    }
+    // 第一个点水平建造：首段固定平铺
+    nodes.push({ idx: 1, z: z0 });
+    if (pointCount === 2) {
+        // L=1 没有水平爬升空间：到终点格后原地垂直升层
+        let z = z0;
+        while (Math.abs(z1 - z) > EPS) {
+            z += dir * Math.min(1, Math.abs(z1 - z));
+            nodes.push({ idx: 1, z });
+        }
+        return nodes;
+    }
+    let i = 1;
+    let z = z0;
+    // 可用水平爬升段 = 总段数 − 首段 − 末段
+    const climbGaps = pointCount - 3;
+    // 层数超出水平爬升能力：先在起点后第一格垂直堆叠补层
+    let excess = Math.abs(z1 - z0) - climbGaps;
+    while (excess > EPS) {
+        const step = Math.min(1, excess);
+        z += dir * step;
+        excess -= step;
+        nodes.push({ idx: 1, z });
+    }
+    while (Math.abs(z1 - z) > EPS) {
+        const remaining = pointCount - 2 - i;
+        const levelsLeft = Math.abs(z1 - z);
+        if (
+            remaining >= 2 &&
+            levelsLeft >= 1 - EPS &&
+            remaining >= 2 * Math.ceil(levelsLeft - EPS)
+        ) {
+            // 缓坡：两段各升 0.5 层
+            nodes.push({ idx: i + 1, z: z + dir * 0.5 });
+            nodes.push({ idx: i + 2, z: z + dir });
+            i += 2;
+            z += dir;
+        } else if (remaining >= 1 && levelsLeft >= 1 - EPS) {
+            // 陡坡：一段升 1 层
+            nodes.push({ idx: i + 1, z: z + dir });
+            i += 1;
+            z += dir;
+        } else if (remaining >= 1) {
+            // 只剩 0.5 层：一段收口
+            nodes.push({ idx: i + 1, z: z1 });
+            i += 1;
+            z = z1;
+        } else {
+            // 兜底：段位用尽时在当前格堆叠（正常不会走到这里，excess 已提前处理）
+            z += dir * Math.min(1, levelsLeft);
+            nodes.push({ idx: i, z });
+        }
+    }
+    for (let j = i + 1; j < pointCount; j++) nodes.push({ idx: j, z: z1 });
+    return nodes;
+}
+
+/**
  * 传送带端点绑定的建筑口（起/止各一个，见 `@/data/beltPorts` 的标定表）。
  * 起点的口 = **取出**（建筑→带：`inputObjIdx/inputFromSlot`），
  * 终点的口 = **送入**（带→建筑：`outputObjIdx/outputToSlot`），与游戏一致；
@@ -333,8 +430,9 @@ function isBelt(b: BlueprintBuilding): boolean {
  * 端点绑定建筑口时（@param startPort / @param endPort）：
  * - 口格的**身份**取 `round(口坐标)`，**记录位置**写成口的精确坐标；
  * - 口格的外侧一格固定为 `口格 + 口法线`，保证带沿口的面离开/进入（游戏要求）；
- * - 整条带的高度 = 口的高度（接到 z≠0 的口时整条带在该层，见 `@/data/beltPorts`）；
- *   未绑定口时 = `baseZ`（本期整条同高，对应 `data/阶梯高度传送带.json`）；
+ * - 带的高度 = 从起点高度到终点高度自动生成坡度（见 {@link slopeProfile}）：
+ *   起点绑口时取口高度，否则取 `startZ`；终点绑口时取口高度，否则取 `baseZ`；
+ *   两端相同即整条同高（`data/阶梯高度传送带.json` 的做法）；
  * - 连接字段（out/in + slot + offset）在构造时就写好，由命令分配 index 后生效。
  * @param pathMode 路径走法模式
  */
@@ -350,13 +448,18 @@ export function buildBeltLine(
     /** 该区域的经向格数（一整圈）：赤道带 1000、160 段带 800 ……；缺省按赤道带 */
     gridSize = ROOT_GRID_SIZE,
     /**
-     * 整条带的基准高度（高度格）：未绑定建筑口时整条带都在这一层。
-     * 本期只支持整条同高（对应 `data/阶梯高度传送带.json`）；坡度生成后续实现。
-     * 绑定建筑口时仍以口的高度为准（调用方应保证口高度与 baseZ 一致）。
+     * 终点高度（建造高度，↑/↓ 调整）：**省略 = 起点高度**（整条同高，兼容旧调用）。
+     * 绑定时以口高度为准（口高度与起点不同 → 自动生成坡度）。
      */
-    baseZ = 0
+    baseZ?: number,
+    /**
+     * 起点高度（A 点继承口/已有带的高度）：**省略 = baseZ**（整条同高，无坡度）。
+     * 起点绑定 startPort 时以口高度为准。
+     */
+    startZ?: number
 ): BlueprintBuilding[] {
-    const z = startPort ? startPort.point.z : endPort ? endPort.point.z : baseZ;
+    const z0 = startPort?.point.z ?? startZ ?? baseZ ?? 0;
+    const z1 = endPort?.point.z ?? baseZ ?? z0;
     const g0 = startPort ? portCell(startPort.point, gridSize) : { ...p0 };
     const g1 = endPort ? portCell(endPort.point, gridSize) : { ...p1 };
     const b0 = startPort
@@ -368,16 +471,21 @@ export function buildBeltLine(
     const pts = rasterizeLine(b0.x, b0.y, b1.x, b1.y, pathMode, gridSize);
     if (startPort) pts.unshift(g0);
     if (endPort) pts.push(g1);
-    const belts = pts.map((p) => createBuilding(itemId, modelIndex, p, 0, z));
-    for (let i = 0; i < belts.length; i++) {
-        const yaw = cellYaw(
+    // 每个平面节点的 yaw 只由平面路径决定：同格的重复节点（垂直/堆叠）沿用同一朝向
+    const yaws = pts.map((p, i) =>
+        cellYaw(
             pts[i - 1] ?? null,
             pts[i + 1] ?? null,
-            pts[i],
+            p,
             fallbackYaw,
             gridSize
-        );
-        belts[i].yaw = [yaw, yaw];
+        )
+    );
+    const nodes = slopeProfile(pts.length, z0, z1);
+    const belts = nodes.map((n) =>
+        createBuilding(itemId, modelIndex, pts[n.idx], yaws[n.idx], n.z)
+    );
+    for (let i = 0; i < belts.length; i++) {
         // 传送带 slot 与游戏一致：inputToSlot 恒为 1；outputToSlot 为 1（有下游）或 0（末格）
         belts[i].inputToSlot = 1;
         belts[i].outputToSlot = i < belts.length - 1 ? 1 : 0;

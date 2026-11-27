@@ -2,6 +2,14 @@
     <div class="editor-root" ref="root" tabindex="-1">
         <!-- 放置/铺带失败提示：编辑交互层唯一的文字反馈，不改变 App.vue 的状态 -->
         <div v-if="hint !== ''" class="editor-hint">{{ hint }}</div>
+        <!-- 建造高度提示：铺传送带时跟随鼠标，挂在光标左下角（与游戏内"建造高度:N层"一致） -->
+        <div
+            v-if="beltTipVisible"
+            class="belt-z-tip"
+            :style="{ left: beltTipPos.x + 'px', top: beltTipPos.y + 'px' }"
+        >
+            建造高度:{{ beltTipLayer }}
+        </div>
     </div>
 </template>
 
@@ -436,6 +444,15 @@ const isPlacingSorter = () =>
     placement.selectedItemId !== null &&
     isInserter(placement.selectedItemId);
 
+// ---- 建造高度提示（HTML 覆盖层）：铺传送带时挂在光标左下角 ----
+// 游戏里地面层叫"1层"，beltZ=0 是地面层 → 显示 beltZ + 1。
+// 可见性做成 computed（依赖 placement）：鼠标静止时用右键退出铺带模式也能立即消失，
+// 不用等下一次 pointermove 才刷新。
+const beltTipPos = ref({ x: 0, y: 0 });
+const pointerInside = ref(false);
+const beltTipVisible = computed(() => pointerInside.value && isPlacingBelt());
+const beltTipLayer = computed(() => `${placement.beltZ + 1}层`);
+
 // 地基模式光标：跟随鼠标高亮目标格（薄板，颜色 = 当前选择的槽位色）
 const reformCursorVisible = ref(false);
 const reformCursor = new Mesh(
@@ -461,6 +478,11 @@ watchEffect(() => {
 let beltStart: { x: number; y: number } | null = null;
 /** A 点落在建筑口上时的口绑定（取出：建筑→带）；null = 普通空格/带格起点 */
 let beltStartPort: BeltPortEnd | null = null;
+/**
+ * 起点高度（A 点按下时锁定）：起点绑口/压在已有带上时继承其高度，否则 = 当时的建造高度。
+ * ↑/↓ 只改终点高度（`placement.beltZ`），起点与终点不同时由 `buildBeltLine` 自动生成坡度。
+ */
+let beltStartZ = 0;
 /**
  * 本条拖拽传送带所属的区域（一条带一个区域）：A 点按下时确定，
  * 之后 B 点/预览都换算到这个区域的局部坐标，越出该带的部分按边界截断。
@@ -992,6 +1014,7 @@ watchEffect(() => {
     if (!isPlacingBelt()) {
         beltStart = null;
         beltStartPort = null;
+        beltStartZ = 0;
         beltArea = null;
         hideBeltPreview();
     }
@@ -1307,16 +1330,6 @@ onMounted(() => {
             ny: n.y,
         };
     };
-    /**
-     * 传送带高度过滤：本期整条带只保持一个高度（`data/阶梯高度传送带.json` 的做法），
-     * 建筑口高度与所选高度不一致时先不绑定——坡度爬升将在下一步实现
-     * （`data/三种坡度上升的高度1.json` 的三种写法）。
-     */
-    const portAtBeltZ = (
-        port: BeltPortEnd | null,
-        z: number
-    ): BeltPortEnd | null =>
-        port !== null && Math.abs(port.point.z - z) < 1e-3 ? port : null;
     /**
      * 放置建筑。
      * 可堆叠建筑在光标落在底座上时**叠到该列最上层**（z = 底座 z + 一层高度，x/y 对齐底座中心）；
@@ -1660,8 +1673,9 @@ onMounted(() => {
         );
         const area = commandQueue.value?.data.areas[beltArea.areaIndex];
         const gridSize = areaGridSize(beltArea.origin.segment);
-        const endPort = portAtBeltZ(portEndAt(e), placement.beltZ);
-        const startPort = portAtBeltZ(beltStartPort, placement.beltZ);
+        // 口不再按高度过滤：口高度与终点高度不同时由 buildBeltLine 自动生成坡度
+        const endPort = portEndAt(e);
+        const startPort = beltStartPort;
 
         // latFirst / lonFirst / straight：统一用六边形节点 + 白色连线预览，
         // 与落位共用同一套路径构造（straight 现在是自由角度直线，节点可为分数）。
@@ -1677,7 +1691,8 @@ onMounted(() => {
                 startPort,
                 endPort,
                 gridSize,
-                placement.beltZ
+                placement.beltZ,
+                beltStartZ
             ),
             area
         );
@@ -1790,21 +1805,14 @@ onMounted(() => {
             return;
         const area = queue.data.areas[belt.areaIndex];
         if (area === undefined) return;
-        // 建筑口必须属于本条带所在区域（一条带 = 一个区域，跨区域的口无法用单条带表示）；
-        // 且本期整条带只保持一个高度，口高度与所选高度不一致时不绑定（坡度下一步实现）。
+        // 建筑口必须属于本条带所在区域（一条带 = 一个区域，跨区域的口无法用单条带表示）。
+        // 口高度与终点高度不一致时不再放弃绑定：buildBeltLine 会自动生成坡度爬升。
         const hoveredEndPort = portEndAt(e);
-        const filteredEndPort = portAtBeltZ(hoveredEndPort, placement.beltZ);
         const endPort =
-            filteredEndPort !== null &&
-            filteredEndPort.building.areaIndex === belt.areaIndex
-                ? filteredEndPort
-                : null;
-        if (
-            endPort === null &&
             hoveredEndPort !== null &&
             hoveredEndPort.building.areaIndex === belt.areaIndex
-        )
-            showHint("传送带高度与该口不一致，本次不连接（坡度爬升将在下一步支持）");
+                ? hoveredEndPort
+                : null;
         const target = placementTargetAt(e, true);
         const end = endPort
             ? { x: Math.round(endPort.point.x), y: Math.round(endPort.point.y) }
@@ -1818,8 +1826,7 @@ onMounted(() => {
         if (end === null) return;
         const startPort =
             beltStartPort !== null &&
-            beltStartPort.building.areaIndex === belt.areaIndex &&
-            portAtBeltZ(beltStartPort, placement.beltZ) !== null
+            beltStartPort.building.areaIndex === belt.areaIndex
                 ? beltStartPort
                 : null;
         const gridSize = areaGridSize(belt.origin.segment);
@@ -1834,7 +1841,8 @@ onMounted(() => {
                 startPort,
                 endPort,
                 gridSize,
-                placement.beltZ
+                placement.beltZ,
+                beltStartZ
             ),
             area
         );
@@ -1844,6 +1852,7 @@ onMounted(() => {
         }
         beltStart = null;
         beltStartPort = null;
+        beltStartZ = 0;
         beltArea = null;
         hideBeltPreview();
         try {
@@ -1962,7 +1971,9 @@ onMounted(() => {
                             turn,
                         y: Math.round(port.point.y),
                     };
-                    // A 点接建筑口：整条带继承口的高度（分流器上层口 z=1 / 高层带）
+                    // A 点接建筑口：起点高度 = 口高度（分流器上层口 z=1 / 高层带）；
+                    // 建造高度也同步到口高度（默认平铺，↑/↓ 再改终点高度就会自动爬升）
+                    beltStartZ = port.point.z;
                     setBeltZ(port.point.z);
                 } else {
                     const target = placementTargetAt(e, true);
@@ -1971,12 +1982,15 @@ onMounted(() => {
                     if (areaIndex < 0) return;
                     beltArea = { areaIndex, origin: target.origin };
                     beltStart = { x: target.x, y: target.y };
-                    // A 点接已有传送带：继承那条带的高度（本期整条同高）。
+                    // 起点高度默认 = 当前建造高度（之后 ↑/↓ 改的是终点高度）
+                    beltStartZ = placement.beltZ;
+                    // A 点接已有传送带：继承那条带的高度（起点与终点高度不同时自动生成坡度）。
                     // 高层带的射线落点在带面上，必须用径向投影后的格，否则会因视差偏到相邻格。
                     const hit = pickBuildingHit(e);
                     const hitBuilding =
                         hit !== null ? queue.data.buildings[hit.index] : undefined;
                     if (hitBuilding && isBelt(hitBuilding.itemId)) {
+                        beltStartZ = hitBuilding.localOffset[0].z;
                         setBeltZ(hitBuilding.localOffset[0].z);
                         const origin = b.value!.pos.areas[hitBuilding.areaIndex];
                         const local =
@@ -2047,6 +2061,7 @@ onMounted(() => {
         if (isPlacingBelt() && beltStart !== null) {
             beltStart = null;
             beltStartPort = null;
+            beltStartZ = 0;
             beltArea = null;
             hideBeltPreview();
             // 回退到"未选 A 点"的光标状态：光标处重新显示单个传送带节点
@@ -2069,6 +2084,14 @@ onMounted(() => {
     };
     const onPointerMove = (e: PointerCoords) => {
         lastPointer.value = { clientX: e.clientX, clientY: e.clientY };
+        // 建造高度提示跟随光标：坐标换成 rootEl 局部坐标，锚在光标左下角
+        //（右缘对齐光标左侧 6px、顶缘在光标下方 14px，见 .belt-z-tip 的 transform）
+        pointerInside.value = true;
+        const tipRect = rootEl.getBoundingClientRect();
+        beltTipPos.value = {
+            x: e.clientX - tipRect.left - 6,
+            y: e.clientY - tipRect.top + 14,
+        };
         if (placement.mode === "reforming") {
             updateReformCursor(e);
         } else if (isPlacingBelt()) {
@@ -2097,6 +2120,7 @@ onMounted(() => {
     };
     const onMouseLeave = () => {
         lastPointer.value = null;
+        pointerInside.value = false; // 建造高度提示随光标离开画布一起隐藏
         previewVisible.value = false;
         reformCursorVisible.value = false;
         sorterHover.value = null;
@@ -2260,6 +2284,23 @@ defineExpose({
     background: rgba(0, 0, 0, 0.72);
     color: #ffb4b4;
     font-size: 13px;
+    pointer-events: none;
+    z-index: 10;
+}
+
+/* 建造高度提示：挂在光标左下角（left/top 由 pointermove 写入，向左平移自身宽度、
+   下沉到光标下方），跟随鼠标移动，不拦截鼠标 */
+.belt-z-tip {
+    position: absolute;
+    transform: translate(-100%, 0);
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 13px;
+    line-height: 18px;
+    white-space: nowrap;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
     pointer-events: none;
     z-index: 10;
 }

@@ -16,9 +16,10 @@ export interface PlacementState {
     /** 地基模式当前使用的颜色槽位（0..31，16..31 为自定义色） */
     reformColorSlot: number;
     /**
-     * 传送带放置高度（高度格，0 = 地面层）。
+     * 传送带建造高度（终点高度，高度格，0 = 地面层）。
      * ↑/↓ 每次 ±1（步进量取自 `data/阶梯高度传送带.json` 的 z 轴步进）；
-     * A 点落在建筑口/已有传送带上时继承其高度（见 BlueprintEditor 的 A 点逻辑）。
+     * A 点落在建筑口/已有传送带上时继承其高度并写入本字段，
+     * 之后 ↑/↓ 改的是**终点**高度，起点与终点不同时自动生成坡度（见 beltLine 的 slopeProfile）。
      */
     beltZ: number;
 }
