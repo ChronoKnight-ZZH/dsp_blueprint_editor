@@ -614,6 +614,12 @@ export class CreateBeltLineCommand implements Command {
     /** 起点/终点是否真的接上了建筑口（被截断时不算） */
     private connectedStart = false;
     private connectedEnd = false;
+    /**
+     * 本次是否真的把末格汇入到了 {@link mergeTarget}。
+     * 路径被截断（末格没走到目标旁边）、跨区域、目标与末格重合时都是 false，
+     * 编辑器据此提示"末端未能接到目标节点"。
+     */
+    private mergedFlag = false;
 
     constructor(
         private readonly belts: BlueprintBuilding[],
@@ -624,8 +630,19 @@ export class CreateBeltLineCommand implements Command {
         /** 整条带所属区域（缺省 0 = 根区域） */
         private readonly areaIndex = 0,
         /** 该区域一整圈的经向格数（缺省按赤道带 1000） */
-        private readonly gridSize = ROOT_GRID_SIZE
+        private readonly gridSize = ROOT_GRID_SIZE,
+        /**
+         * 汇入目标（阶段 7）：末格输出指向这条**已建**传送带，目标原线路完全不动。
+         * 与"末格终结"（末格 outputObjIdx = -1）互斥；与 endPort 也互斥（endPort 优先）。
+         * 允许多个上游指向同一节点（游戏/渲染都按多入边处理）。
+         */
+        private readonly mergeTarget: BlueprintBuilding | null = null
     ) {}
+
+    /** 本次是否成功汇入（`queue.push()` 同步执行 do 后可读） */
+    get merged(): boolean {
+        return this.mergedFlag;
+    }
 
     do(data: BlueprintData): void {
         this.reused = [];
@@ -634,6 +651,7 @@ export class CreateBeltLineCommand implements Command {
         this.portDirChanges = [];
         this.connectedStart = false;
         this.connectedEnd = false;
+        this.mergedFlag = false;
         if (this.belts.length === 0) return;
         const area = data.areas[this.areaIndex];
         if (area === undefined) throw new Error("Placement area not found on canvas");
@@ -707,6 +725,14 @@ export class CreateBeltLineCommand implements Command {
             last.outputFromSlot = 0;
             last.outputOffset = 0;
             this.connectedEnd = true;
+        } else if (this.canMerge(last, byIndex)) {
+            // 汇入既有传送带节点（起点/中间格）：只写末格的输出，
+            // 目标自己的上下游连接完全不动 —— 目标因此可以有多个上游。
+            last.outputObjIdx = this.mergeTarget!.index;
+            last.outputToSlot = 1;
+            last.outputFromSlot = 0;
+            last.outputOffset = 0;
+            this.mergedFlag = true;
         } else {
             last.outputObjIdx = -1;
             last.outputToSlot = 0;
@@ -745,6 +771,34 @@ export class CreateBeltLineCommand implements Command {
             );
             cell.yaw = [yaw, yaw];
         }
+    }
+
+    /**
+     * 末格能否汇入目标（见构造参数 {@link mergeTarget}）：
+     * - 目标仍在蓝图里、是传送带、属同一区域；
+     * - 目标不是末格自己，也不在本条路径里（否则会成环）；
+     * - 与末格**相邻**（平面距离 < 1.5 格，兼容自由角度带的分数坐标与跨经度回绕）。
+     * 高度不限：高差由相邻格的 z 差表达（坡度），与普通带-带连接一致。
+     */
+    private canMerge(
+        last: BlueprintBuilding,
+        byIndex: ReadonlyMap<number, BlueprintBuilding>
+    ): boolean {
+        const t = this.mergeTarget;
+        if (t === null || t === last) return false;
+        if (!isBelt(t) || t.areaIndex !== this.areaIndex) return false;
+        if (byIndex.get(t.index) !== t) return false; // 目标已被删除/替换
+        if (this.path.some((b) => b === t)) return false; // 目标在本条路径上 → 环路
+        return (
+            Math.hypot(
+                shortArcDelta(
+                    last.localOffset[0].x,
+                    t.localOffset[0].x,
+                    this.gridSize
+                ),
+                last.localOffset[0].y - t.localOffset[0].y
+            ) < 1.5
+        );
     }
 
     /**
@@ -796,6 +850,7 @@ export class CreateBeltLineCommand implements Command {
             if (slot) slot.dir = c.prev;
         }
         this.portDirChanges = [];
+        this.mergedFlag = false;
         for (let i = 0; i < this.added; i++) data.buildings.pop();
         for (const r of this.reused) {
             r.belt.yaw = [r.yaw[0], r.yaw[1]];

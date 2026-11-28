@@ -747,8 +747,8 @@ const beltHoverVisible = ref(false);
 watchEffect(() => {
     const bp = b.value;
     const data = commandQueue.value?.data;
-    // 优先级：已确定的 A 点所在链路 > 鼠标悬停节点所在链路
-    const index = beltStartBuildingIndex.value ?? beltHover.value?.index ?? null;
+    // 优先级：鼠标悬停节点所在链路（拖拽时即"汇入目标"）> 已确定 A 点所在链路
+    const index = beltHover.value?.index ?? beltStartBuildingIndex.value ?? null;
     const chain =
         !isPlacingBelt() || bp === null || !data || index === null
             ? []
@@ -1480,6 +1480,60 @@ onMounted(() => {
         };
     };
     /**
+     * 光标 → 汇入目标（阶段 7）：光标停在**已建传送带**节点上时返回该带。
+     *
+     * 用户确认的规则：保留目标原线路不动（A→B→C→D 不变），新线路末格接到该节点，
+     * 因此目标节点可以有多个上游。拒绝的情况：
+     * - 跨区域（一条带只能落在一个区域里）；
+     * - 就是 A 点那条带（自己汇入自己）；
+     * - A 点是**中间格**（那种情况走 {@link InsertBeltLineCommand} 的"从该格接出"模式）；
+     * - 目标的下游链回到 A 点（会成环）。
+     */
+    const mergeTargetAt = (e: PointerCoords): BlueprintBuilding | null => {
+        const queue = commandQueue.value;
+        if (!queue || beltArea === null) return null;
+        const hit = pickBuildingHit(e);
+        if (hit === null) return null;
+        const b = queue.data.buildings[hit.index];
+        if (b === undefined || !isBelt(b.itemId)) return null;
+        if (b.areaIndex !== beltArea.areaIndex) return null;
+        const startIdx = beltStartBuildingIndex.value;
+        if (startIdx !== null) {
+            const startBelt = queue.data.buildings[startIdx];
+            // A 点是中间格 → 插入模式优先
+            if (startBelt !== undefined && startBelt.outputObjIdx >= 0) return null;
+            // 不能汇入 A 点自己
+            if (b.index === startIdx) return null;
+            // 环路：从目标向下游走，若回到 A 点则汇入会成环
+            const seen = new Set<number>();
+            let cur: number | undefined = b.index;
+            while (cur !== undefined && !seen.has(cur)) {
+                if (cur === startIdx) return null;
+                seen.add(cur);
+                const next = queue.data.buildings[cur];
+                cur =
+                    next !== undefined && next.outputObjIdx >= 0
+                        ? next.outputObjIdx
+                        : undefined;
+            }
+        }
+        return b;
+    };
+    /**
+     * 汇入目标的精确格坐标（与目标带同格；用于预览/提交的路径终点）。
+     * 自由角度带的节点是分数坐标，不能取整。
+     */
+    const mergeTargetCell = (
+        target: BlueprintBuilding,
+        gridSize: number
+    ): { x: number; y: number } => {
+        const p = target.localOffset[0];
+        return {
+            x: ((p.x % gridSize) + gridSize) % gridSize,
+            y: p.y,
+        };
+    };
+    /**
      * 放置建筑。
      * 可堆叠建筑在光标落在底座上时**叠到该列最上层**（z = 底座 z + 一层高度，x/y 对齐底座中心）；
      * 研究站还会沿用底座的模式与配方（一列研究站共享设置）；
@@ -1835,14 +1889,26 @@ onMounted(() => {
             insertTarget !== undefined &&
             isBelt(insertTarget.itemId) &&
             insertTarget.outputObjIdx >= 0;
+        // 汇入模式（阶段 7）：光标停在已建传送带节点上 → 新线路末格接到它，
+        // 路径终点取该节点的精确坐标与高度，并丢弃目标格本身（目标格已有带）。
+        const mergeTarget = inserting ? null : mergeTargetAt(e);
+        const endPoint =
+            mergeTarget !== null
+                ? mergeTargetCell(mergeTarget, gridSize)
+                : cur;
+        const endZ =
+            mergeTarget !== null
+                ? mergeTarget.localOffset[0].z
+                : placement.beltZ;
         // 口不再按高度过滤：口高度与终点高度不同时由 buildBeltLine 自动生成坡度
-        const endPort = inserting ? null : portEndAt(e);
+        const endPort = inserting || mergeTarget !== null ? null : portEndAt(e);
         const startPort = inserting ? portEndAt(e) : beltStartPort;
 
         // latFirst / lonFirst / straight：统一用六边形节点 + 白色连线预览，
         // 与落位共用同一套路径构造（straight 现在是自由角度直线，节点可为分数）。
         // 起点/终点接建筑口时预览也会贴到口上。
-        // 插入模式丢弃目标格本身（目标格已被占用，插入命令会把末格接回它）。
+        // 插入模式丢弃目标格本身（目标格已被占用，插入命令会把末格接回它）；
+        // 汇入模式同理：末格停在目标节点前，输出指向目标节点。
         const previewBelts = clipBeltPath(
             inserting
                 ? buildBeltLine(
@@ -1860,11 +1926,27 @@ onMounted(() => {
                       beltStartTilt.value,
                       placement.beltTilt
                   ).slice(0, -1)
+                : mergeTarget !== null
+                ? buildBeltLine(
+                      itemId,
+                      modelIndex,
+                      p0,
+                      endPoint,
+                      placement.yaw,
+                      beltPathMode,
+                      startPort,
+                      null,
+                      gridSize,
+                      endZ,
+                      beltStartZ,
+                      placement.beltTilt,
+                      beltStartTilt.value
+                  ).slice(0, -1)
                 : buildBeltLine(
                       itemId,
                       modelIndex,
                       p0,
-                      cur,
+                      endPoint,
                       placement.yaw,
                       beltPathMode,
                       startPort,
@@ -2085,6 +2167,57 @@ onMounted(() => {
                         ? `插入失败：${error.message}`
                         : "插入失败"
                 );
+            }
+            return;
+        }
+        // 汇入模式（阶段 7）：新线路末格接到已建传送带节点（起点/中间格），
+        // 目标原线路完全不动、允许多个上游 —— 与"末格续建""中间格插入"互斥。
+        const mergeTarget = mergeTargetAt(e);
+        if (mergeTarget !== null) {
+            const mergeBelts = clipBeltPath(
+                buildBeltLine(
+                    itemId,
+                    modelIndex,
+                    start,
+                    mergeTargetCell(mergeTarget, gridSize),
+                    placement.yaw,
+                    beltPathMode,
+                    startPort,
+                    null,
+                    gridSize,
+                    mergeTarget.localOffset[0].z,
+                    beltStartZ,
+                    placement.beltTilt,
+                    beltStartTilt.value
+                ).slice(0, -1),
+                area
+            );
+            if (mergeBelts.length === 0) {
+                showHint("铺带失败：没有可放置的传送带格");
+                return;
+            }
+            beltStart = null;
+            beltStartPort = null;
+            beltStartZ = 0;
+            beltStartTilt.value = 0;
+            beltStartActive.value = false;
+            beltStartBuildingIndex.value = null;
+            beltArea = null;
+            hideBeltPreview();
+            try {
+                const cmd = new CreateBeltLineCommand(
+                    mergeBelts,
+                    startPort,
+                    null,
+                    belt.areaIndex,
+                    gridSize,
+                    mergeTarget
+                );
+                queue.push(cmd);
+                if (!cmd.merged)
+                    showHint("汇入失败：末端未能接到目标节点");
+            } catch {
+                showHint("铺带失败：超出纬度带范围");
             }
             return;
         }
@@ -2422,10 +2555,9 @@ onMounted(() => {
                 hoverBuilding === undefined
                     ? null
                     : anchorOffset(e, hoverBuilding.areaIndex) ?? null;
-            // 铺传送带且还没定 A 点：悬停已有传送带节点时高亮（从末格续建）
+            // 铺传送带：悬停已有传送带节点时高亮它所在链路（末格续建 / 汇入目标）
             if (isPlacingBelt()) {
                 beltHover.value =
-                    beltStart === null &&
                     hit !== null &&
                     hoverBuilding !== undefined &&
                     isBelt(hoverBuilding.itemId)
